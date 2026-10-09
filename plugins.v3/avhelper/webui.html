@@ -319,12 +319,14 @@ html[data-mp-light]{
   --g-overlay:var(--glass-overlay-surface,rgba(11,19,34,.60));
   --plate:rgba(11,19,34,.10);
 }
-/* 嵌在 MoviePilot 里时：自己铺一层宿主主题色的底。MP 的插件页容器常常垫一块白板
-   （或一张亮壁纸），页面若全透明，浅色文字会被冲没 —— 所以留 12% 透出，其余压成主题底色。
+/* 嵌在 MoviePilot 里时：自己铺一层宿主主题色的底，**不透明**。
+   MP 的插件页容器在 iframe 后面垫的不是干净底色：实测中段接近纯白、右段是一张模糊海报
+   （暖色），只要留一点点透明，暗底上就会浮出斜向色块/横纹（用户实测截图确认过）。
+   铺成不透明后，界面内部的玻璃感由面板自己的 surface/描边/高光提供，不再受宿主背景干扰。
    独立打开（非 iframe）时自带等效底。 */
 html[data-mp-embed] body{
-  background:rgba(11,19,34,.88);
-  background:color-mix(in srgb,rgb(var(--g-bg)) 88%,transparent);
+  background:rgb(11,19,34);
+  background:rgb(var(--g-bg));
 }
 html:not([data-mp-embed]) body{
   background:
@@ -416,7 +418,7 @@ tr.bt td{background:rgba(var(--g-on),.05)}
 (function () {
   var R = document.documentElement;
   var VARS = {
-    '--v-theme-primary': 'color', '--v-theme-on-surface': 'color',
+    '--v-theme-primary': 'color', '--v-theme-on-surface': 'color', '--v-theme-background': 'color',
     '--glass-surface': 'color', '--glass-surface-soft': 'color', '--glass-surface-raised': 'color',
     '--glass-control': 'color', '--glass-border': 'color', '--glass-border-raised': 'color',
     '--glass-border-hover': 'color', '--glass-highlight': 'color', '--glass-overlay-surface': 'color',
