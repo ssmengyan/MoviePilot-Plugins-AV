@@ -223,7 +223,7 @@ class Store:
         )
 
     def task_set_state(self, tid: str, state: str) -> None:
-        """更新任务状态（await/pushed）。"""
+        """更新任务状态（await=待确认 / pushed=已提交下载 / canceled=用户取消）。"""
         self._exec("UPDATE task SET state=? WHERE id=?", (state, tid))
 
     # ---------- 通知 ----------

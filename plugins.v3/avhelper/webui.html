@@ -1573,19 +1573,19 @@ function subscribeNumber(num){
 let taskTimer = null;
 function renderTasks(m){
   const pend = S.tasks.filter(t => t.state === 'await');
-  const dling = S.queue.filter(q => q.state !== 'done').length;
   m.innerHTML = '<div class="toolbar">'
-    + (dling ? '<span class="hint">⏬ ' + dling + ' 个已提交，进度看「下载」页</span>' : '')
     + '<div style="flex:1"></div>'
     + '<button class="ghost" id="btnRefreshTasks">↻ 刷新任务</button></div>'
     + (pend.length
-        ? '<div class="secttl">待确认（' + pend.length + '）</div>' + pend.map((t,i) => candTable(t, i)).join('')
+        ? '<div class="secttl">待确认（' + pend.length + '）</div>'
+          + pend.map((t,i) => candTable(t, i, {cancel:true})).join('')
         : '<div class="empty">没有待确认的任务</div>');
   m.querySelector('#btnRefreshTasks').onclick = () => { loadTasks(true); toast('任务', '正在刷新…'); };
   bindDownloadButtons(m);
+  bindCancelButtons(m);
   queueMissingThumbs(pend);
 }
-function candTable(t, idx){
+function candTable(t, idx, opts){
   const cands = t.cands || [];
   const pt = cands.filter(c => c.src !== 'BT');
   const bt = cands.filter(c => c.src === 'BT');
@@ -1624,6 +1624,10 @@ function candTable(t, idx){
     + '</div>'
     + '<div style="flex:1"></div>'
     + (t.auto && t.source === 'sub' ? '<span class="hint">订阅为自动下载，但无候选合格</span>' : '')
+    + (opts && opts.cancel
+        ? '<button class="danger" data-cancel="' + esc(t.id || '') + '"'
+          + ' title="不再等这部片：从待确认里移除（想找回就重新搜一次）">取消任务</button>'
+        : '')
     + '</div>'
     + '<table><thead><tr><th>站点</th><th>规格</th><th>中字</th><th>破解</th><th>大小</th><th>做种</th><th>标记</th><th>匹配分</th><th></th></tr></thead><tbody>'
     + pt.map(rowOf).join('')
@@ -1757,6 +1761,25 @@ function bindDownloadButtons(root){
   (root || document).querySelectorAll('[data-dl]').forEach(b => b.onclick = () => {
     const t = S.tasks.filter(x => String(x.id) === String(b.dataset.task))[0] || S.siteTask;
     if (t) startDownload(t.id, b.dataset.dl, b, b.dataset.force === '1');
+  });
+}
+function bindCancelButtons(root){
+  (root || document).querySelectorAll('[data-cancel]').forEach(b => b.onclick = () => cancelTask(b.dataset.cancel, b));
+}
+/* 取消待确认任务：后端把 state 置成 canceled，任务页与角标都不再算它。
+   只有还没提交下载的能取消；已推进下载器的种子要给下载器去停，这里不假称已取消。 */
+function cancelTask(tid, btn){
+  if (!tid){ toast('取消失败', '这条任务缺少 id，无法取消', 'warn'); return; }
+  const num = ((S.tasks.filter(t => String(t.id) === String(tid))[0] || {}).number) || '';
+  btn.disabled = true;
+  apiPost('/tasks/cancel', {id:tid}).then(r => {
+    if (!r.ok){ btn.disabled = false; toast('取消任务失败', r.message || '请稍后重试', 'warn'); return; }
+    const d = r.data || {};
+    if (Array.isArray(d.tasks)) S.tasks = d.tasks;
+    if (Array.isArray(d.queue)) S.queue = d.queue;
+    renderPills();
+    toast('已取消任务', (num ? num + ' · ' : '') + '已从待确认里移除', 'warn');
+    if (S.view === 'tasks') render();
   });
 }
 function doSiteSearch(){

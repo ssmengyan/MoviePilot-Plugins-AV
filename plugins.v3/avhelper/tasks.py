@@ -398,6 +398,23 @@ class TaskEngine:
             pass
         return ""
 
+    # ---------- 取消 ----------
+
+    def cancel_task(self, tid: str) -> Dict[str, Any]:
+        """取消一条待确认任务：状态置 canceled，任务页与角标都不再算它。
+
+        只允许取消还没提交下载的（state=await）：种子一旦推进下载器，
+        插件这边说「已取消」就是假话，那种情况让用户去下载器里停。
+        """
+        task = self.store.task_get(tid)
+        if not task:
+            return {"ok": False, "message": "任务不存在或已被清理"}
+        if str(task.get("state") or "") != "await":
+            return {"ok": False, "message": "该任务已提交下载，取消请到下载器里操作"}
+        self.store.task_set_state(tid, "canceled")
+        logger.info(f"AVHelper 取消待确认任务：{task.get('number')}（{tid}）")
+        return {"ok": True, "message": f"已取消 {task.get('number') or ''} 的待确认任务"}
+
     def task_list(self) -> List[Dict[str, Any]]:
         """任务列表：缺封面的任务用本地索引 / 详情缓存补上（不发网络请求）。"""
         tasks = self.store.task_list()

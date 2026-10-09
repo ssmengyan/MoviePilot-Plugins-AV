@@ -58,7 +58,7 @@ class AVHelper(_PluginBase):
     plugin_name = "AV 资源助手"
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
     plugin_icon = "Moviepilot_A.png"
-    plugin_version = "0.2.6"
+    plugin_version = "0.2.7"
     plugin_label = "发现"
     plugin_author = "local"
     plugin_config_prefix = "avhelper_"
@@ -287,6 +287,8 @@ class AVHelper(_PluginBase):
              "auth": "bear", "summary": "搜种并打分"},
             {"path": "/tasks/download", "endpoint": self.api_task_download, "methods": ["POST"],
              "auth": "bear", "summary": "提交下载"},
+            {"path": "/tasks/cancel", "endpoint": self.api_task_cancel, "methods": ["POST"],
+             "auth": "bear", "summary": "取消待确认任务"},
             {"path": "/magnet-download", "endpoint": self.api_magnet_download, "methods": ["POST"],
              "auth": "bear", "summary": "详情页磁力直接下载"},
             {"path": "/check", "endpoint": self.api_check, "methods": ["POST"], "auth": "bear",
@@ -881,6 +883,20 @@ class AVHelper(_PluginBase):
         return {"success": bool(result.get("ok")), "message": result.get("message") or "",
                 "notice": result.get("notice"), "hash": result.get("hash"),
                 "downloader": result.get("downloader"), "queue": self.engine.queue()}
+
+    async def api_task_cancel(self, request: Request) -> Dict[str, Any]:
+        """取消待确认任务（任务卡右侧的「取消任务」）。
+
+        只对还没提交下载的任务（state=await）生效：置成 canceled 后任务页与角标都不再算它，
+        记录仍留在库里。已推送下载的种子要停得去下载器里操作，这里不假称已取消。
+        """
+        payload = await self._json_body(request)
+        tid = str(payload.get("id") or "").strip()
+        if not tid:
+            return {"success": False, "message": "缺少任务 id"}
+        result = await asyncio.to_thread(self.engine.cancel_task, tid)
+        return {"success": bool(result.get("ok")), "message": result.get("message") or "",
+                "tasks": self.engine.task_list(), "queue": self.engine.queue()}
 
     async def api_magnet_download(self, request: Request) -> Dict[str, Any]:
         """把详情页某条磁力直接推给下载器（界面上的「下载」按钮）。
