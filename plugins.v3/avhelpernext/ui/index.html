@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AV 资源管理</title>
+<link rel="stylesheet" href="./app.css">
+<script>
+/* 取 MoviePilot 真机主题变量：同源 iframe 里把父文档的 --v-theme-* / --glass-* 拷进本文档，
+   主题色、玻璃透明度、模糊半径、圆角都跟着宿主走；拿不到（独立打开）时用 CSS 里的兜底值。 */
+(function () {
+  var R = document.documentElement;
+  var VARS = {
+    '--v-theme-primary': 'color', '--v-theme-on-surface': 'color',
+    '--glass-surface': 'color', '--glass-surface-soft': 'color', '--glass-surface-raised': 'color',
+    '--glass-control': 'color', '--glass-border': 'color', '--glass-border-raised': 'color',
+    '--glass-border-hover': 'color', '--glass-highlight': 'color', '--glass-overlay-surface': 'color',
+    '--glass-sheen': 'background-image', '--glass-shadow': 'box-shadow',
+    '--glass-shadow-hover': 'box-shadow',
+    '--glass-surface-backdrop-filter': 'backdrop-filter',
+    '--glass-raised-backdrop-filter': 'backdrop-filter',
+    '--glass-overlay-backdrop-filter': 'backdrop-filter',
+    '--glass-nav-active-background': 'background-image', '--glass-navbar-scrim': 'background-image',
+    '--app-theme-surface-radius': 'border-radius'
+  };
+  function hostDoc() {
+    try {
+      var p = window.parent;
+      if (p && p !== window && p.document && p.document.documentElement) return p.document;
+    } catch (e) { /* 跨源：按独立页面处理 */ }
+    return null;
+  }
+  function supported(prop, v) {
+    try { return !!(window.CSS && CSS.supports(prop, v)); } catch (e) { return false; }
+  }
+  function okValue(prop, v) {   /* Vuetify 的主题色是 RGB 三元组（"141,81,249"），要套 rgb() 才算合法颜色 */
+    if (supported(prop, v)) return true;
+    return prop === 'color' && supported('color', 'rgb(' + v + ')');
+  }
+  function luma(t) {   /* "231,227,252" → 亮度；判断宿主是深色还是浅色 */
+    var m = /^\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(t || '');
+    return m ? (0.2126 * m[1] + 0.7152 * m[2] + 0.0722 * m[3]) / 255 : null;
+  }
+  function adopt() {
+    var doc = hostDoc();
+    if (!doc) return;
+    var host = doc.querySelector('.v-application') || doc.body || doc.documentElement;
+    var win = doc.defaultView || window;
+    var cs = win.getComputedStyle(host), rs = win.getComputedStyle(doc.documentElement), n = 0;
+    Object.keys(VARS).forEach(function (k) {
+      var v = ((cs.getPropertyValue(k) || '').trim()) || ((rs.getPropertyValue(k) || '').trim());
+      if (!v || v.length > 400 || v.indexOf('var(') >= 0) return;
+      if (!okValue(VARS[k], v)) return;
+      R.style.setProperty(k, v);
+      n++;
+    });
+    var l = luma(R.style.getPropertyValue('--v-theme-on-surface'));
+    if (l !== null) R.toggleAttribute('data-mp-light', l < 0.5);
+    return n;
+  }
+  if (hostDoc()) {
+    R.setAttribute('data-mp-embed', '');
+    try {
+      var fe = window.frameElement;   /* 同源才能拿到；让宿主页的 iframe 底变透明，壁纸透出来 */
+      if (fe && fe.style) fe.style.background = 'transparent';
+    } catch (e) { }
+  }
+  adopt();
+  document.addEventListener('DOMContentLoaded', adopt);
+  window.addEventListener('load', function () { setTimeout(adopt, 300); });
+  try {
+    var doc = hostDoc();
+    if (doc && doc.documentElement && window.MutationObserver) {
+      var mo = new MutationObserver(adopt);
+      var opt = { attributes: true, attributeFilter: ['data-theme', 'data-glass-appearance', 'data-glass-quality',
+        'data-glass-ui-style', 'data-glass-renderer-state', 'data-glass-navbar-refraction',
+        'data-glass-background-visibility', 'class', 'style'] };
+      mo.observe(doc.documentElement, opt);
+      if (doc.body) mo.observe(doc.body, opt);
+    }
+  } catch (e) { }
+})();
+</script>
+</head>
+<body>
+
+<header>
+  <div class="searchbox">
+    <input id="qInput" placeholder="搜索番号 / 演员（如 SSIS-001）…" autocomplete="off">
+    <button id="qBtn">搜索</button>
+  </div>
+  <div class="spacer"></div>
+  <button class="ghost" id="bellBtn">🔔 通知<span class="bellbadge zero" id="bellCount">0</span></button>
+</header>
+
+<div id="authbar">
+  <span id="authbarText">未取到登录凭据，请重新登录 MoviePilot</span>
+  <span class="sp"></span>
+  <button id="authRetry">重新获取凭据</button>
+</div>
+
+<nav id="nav">
+  <button data-v="discover" class="on">🔍 发现榜单</button>
+  <button data-v="actors">⭐ 我的演员<span class="pill" id="pillFavs">0</span></button>
+  <button data-v="subs">📌 订阅<span class="pill" id="pillSubs">0</span></button>
+  <button data-v="tasks">📋 任务<span class="pill warn" id="pillTasks">0</span></button>
+  <button data-v="downloads">⏬ 下载<span class="pill" id="pillQueue">0</span></button>
+  <button data-v="sites">🧲 站点搜索</button>
+</nav>
+
+<main id="main"></main>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer">
+  <div class="dh"><b id="drawerTitle">详情</b><div style="flex:1"></div>
+    <button class="ghost" id="drawerReload" style="display:none">↻ 重新抓取</button>
+    <button class="ghost" id="drawerClose">关闭</button></div>
+  <div class="db" id="drawerBody"></div>
+</aside>
+<aside class="drawer ndrawer" id="ndrawer">
+  <div class="dh"><b>🔔 通知</b><div style="flex:1"></div>
+    <button class="ghost" id="nClear">清空</button>
+    <button class="ghost" id="nClose">关闭</button></div>
+  <div class="db" id="nBody"></div>
+</aside>
+<div class="modal" id="modal">
+  <div class="mh" id="modalTitle">标题</div>
+  <div class="mb" id="modalBody"></div>
+  <div class="mf" id="modalFoot"></div>
+</div>
+<div id="lb">
+  <img id="lbImg" alt="">
+  <div class="nav prev" id="lbPrev">‹</div>
+  <div class="nav next" id="lbNext">›</div>
+  <div class="ctr" id="lbCtr"></div>
+  <div class="close" id="lbClose">✕</div>
+</div>
+<div id="toasts"></div>
+<div id="hints"></div>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
