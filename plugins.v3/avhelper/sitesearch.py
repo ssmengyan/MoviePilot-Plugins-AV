@@ -54,6 +54,38 @@ _MT_DOWNLOAD_FACTOR = {
 }
 _MT_UPLOAD_FACTOR = {"_2X": 2.0, "_2X_FREE": 2.0, "_2X_PERCENT_50": 2.0}
 
+# 馒头自带的元数据字段映射（2026-10-11 用 240 条成人区样本交叉统计得出：
+# 名字含 1080p 的 65 条全部 standard=1、含 720p 的 59 条全为 3、含 2160p/4K 的 64 条全为 6；
+# 名字含 H265/x265 的样本 videoCodec=16，其余为 1）。只映射有证据的值，未验证的留空走标题正则。
+MTEAM_STANDARD = {"1": "1080p", "3": "720p", "6": "2160p"}
+MTEAM_VIDEO_CODEC = {"1": "H264", "16": "H265"}
+_UNCENSORED_MARKERS = ("无码", "無碼", "破解", "流出", "uncensored", "leak")
+
+
+def _warn(message: str) -> None:
+    """写宿主日志（延迟导入，保持本模块在无宿主环境下可单测）。"""
+    try:
+        from app.sdk.logging import logger
+
+        logger.warning(f"AVHelper {message}")
+    except Exception:
+        pass
+
+
+def mteam_hints(row: Dict[str, Any]) -> Dict[str, Any]:
+    """从馒头自带元数据生成打分提示（比只看种名可靠）。
+
+    馒头成人区每条结果都带 `standard`（分辨率）、`videoCodec`、`hasChineseSubtitle`
+    （中文字幕标记）与 `smallDescr`（含「[无码破解]」这类前缀），这些比种名正则准得多。
+    """
+    status_text = f"{row.get('name') or ''} {row.get('smallDescr') or ''}".lower()
+    return {
+        "res_hint": MTEAM_STANDARD.get(str(row.get("standard") or ""), ""),
+        "codec_hint": MTEAM_VIDEO_CODEC.get(str(row.get("videoCodec") or ""), ""),
+        "cnsub_hint": bool(row.get("hasChineseSubtitle")),
+        "uncensored_hint": any(mark in status_text for mark in _UNCENSORED_MARKERS),
+    }
+
 
 def text_of(row: Any, key: str, default: Any = "") -> Any:
     """同时兼容 dict 与宿主对象（TorrentInfo）的取字段写法。"""
@@ -87,6 +119,20 @@ def adapter_label(site: Dict[str, Any]) -> str:
     return ADAPTER_LABELS.get(detect_adapter(site), ADAPTER_LABELS[ADAPTER_MP])
 
 
+def registered_domain(host: str) -> str:
+    """按 MoviePilot 的站点规则取注册域名（≤3 段取末两段，>3 段原样）。
+
+    宿主给插件的索引器配置里 `domain` 可能是入口子域（实测馒头是 `kp.m-team.cc`），
+    直接拼 `api.` 会得到不存在的 `api.kp.m-team.cc`。
+    """
+    labels = [part for part in str(host or "").split(".") if part]
+    if not labels:
+        return ""
+    if len(labels) <= 3:
+        return ".".join(labels[-2:]) if len(labels) >= 2 else labels[0]
+    return ".".join(labels)
+
+
 def mteam_api_host(site: Dict[str, Any]) -> str:
     """解析 M-Team API 主机：优先站点配置，其次 `api.<注册域>`。"""
     for key in ("api_domain", "api_host"):
@@ -95,11 +141,12 @@ def mteam_api_host(site: Dict[str, Any]) -> str:
             host = value.split("://")[-1].split("/")[0]
             if host:
                 return host
-    domain = str(site.get("domain") or "").strip()
-    host = domain.split("://")[-1].split("/")[0]
+    raw = str(site.get("domain") or site.get("url") or "")
+    host = raw.split("://")[-1].split("/")[0]
     if host.startswith("api."):
         return host
-    return f"api.{host}" if host else "api.m-team.cc"
+    base = registered_domain(host)
+    return f"api.{base}" if base else "api.m-team.cc"
 
 
 def mteam_search_payload(keyword: str, mode: Optional[str] = "adult",
@@ -224,7 +271,8 @@ def mteam_rows(site: Dict[str, Any], payload: Any, apikey: str,
         labels = row.get("labelsNew") or []
         if not isinstance(labels, list):
             labels = []
-        out.append({
+        hints = mteam_hints(row)
+        entry = {
             "site": site.get("id"),
             "site_name": site.get("name") or "",
             "site_cookie": "",
@@ -245,7 +293,9 @@ def mteam_rows(site: Dict[str, Any], payload: Any, apikey: str,
             "category": "电影",
             "labels": labels,
             "adapter": ADAPTER_MTEAM,
-        })
+        }
+        entry.update(hints)
+        out.append(entry)
     return out
 
 
@@ -255,7 +305,7 @@ def rousi_rows(site: Dict[str, Any], payload: Any, apikey: str,
     rows = ((payload or {}).get("data") or {}).get("torrents") or []
     if not isinstance(rows, list):
         return []
-    host = str(site.get("domain") or "").split("://")[-1].split("/")[0]
+    host = registered_domain(str(site.get("domain") or site.get("url") or ""))
     out: List[Dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, dict) or row.get("id") is None:
@@ -334,6 +384,7 @@ class SiteSearcher:
                 return self._search_rousi(site, keyword)
             return self._search_mp(site, keyword)
         except Exception as error:  # 站点异常不该打断整轮搜索
+            _warn(f"{site.get('name')} 搜索异常：{error}")
             return [], f"{site.get('name')} 搜索异常：{str(error)[:120]}"
 
     def _search_mteam(self, site: Dict[str, Any], keyword: str) -> Tuple[List[Dict[str, Any]], str]:
@@ -351,7 +402,10 @@ class SiteSearcher:
             "x-api-key": apikey,
         }
         client = self._http(headers=headers, site=site)
-        response = client.post_res(url=url, json=mteam_search_payload(keyword, "adult"))
+        response, error = self._call(client, "post", url,
+                                     json=mteam_search_payload(keyword, "adult"))
+        if response is None:
+            return [], f"{name} 成人区搜索失败：{error or '无响应'}"
         payload = self._json(response)
         if payload is None:
             return [], f"{name} 成人区搜索失败（HTTP {getattr(response, 'status_code', '—')}）"
@@ -359,12 +413,13 @@ class SiteSearcher:
         if rows:
             return rows, f"{name} 成人区命中 {len(rows)} 条"
         # 成人区没有 → 常规区兜底（同样不带分类，避免漏掉放在常规区的 AV）
-        response = client.post_res(url=url, json=mteam_search_payload(keyword, None))
-        payload = self._json(response)
+        response, error = self._call(client, "post", url,
+                                     json=mteam_search_payload(keyword, None))
+        payload = self._json(response) if response is not None else None
         rows = mteam_rows(site, payload, apikey, bool(site.get("proxy"))) if payload else []
         if rows:
             return rows, f"{name} 常规区命中 {len(rows)} 条（成人区无结果）"
-        return [], f"{name} 未命中（成人区 + 常规区都为空）"
+        return [], f"{name} 未命中（成人区 + 常规区都为空）{('：' + error) if error else ''}"
 
     def _search_rousi(self, site: Dict[str, Any], keyword: str) -> Tuple[List[Dict[str, Any]], str]:
         """肉丝：不带 category 搜索（带上分类会把 9kg 区过滤掉）。"""
@@ -379,8 +434,11 @@ class SiteSearcher:
             "User-Agent": str(site.get("ua") or UA),
         }
         client = self._http(headers=headers, site=site)
-        response = client.get_res(url=f"https://{host}/api/v1/torrents",
-                                  params={"keyword": keyword, "page": 1, "page_size": PAGE_SIZE})
+        response, error = self._call(client, "get", f"https://{host}/api/v1/torrents",
+                                     params={"keyword": keyword, "page": 1,
+                                             "page_size": PAGE_SIZE})
+        if response is None:
+            return [], f"{name} 搜索失败：{error or '无响应'}"
         payload = self._json(response)
         if payload is None:
             return [], f"{name} 搜索失败（HTTP {getattr(response, 'status_code', '—')}）"
@@ -447,10 +505,8 @@ class SiteSearcher:
         params = recipe.get("params") if isinstance(recipe.get("params"), dict) else None
         cookies = (site or {}).get("cookie") if recipe.get("cookie") else None
         client = self._http(headers=headers, site=site or {}, cookies=cookies)
-        if str(recipe.get("method") or "get").lower() == "get":
-            response = client.get_res(request_url, params=params)
-        else:
-            response = client.post_res(request_url, params=params)
+        method = "get" if str(recipe.get("method") or "get").lower() == "get" else "post"
+        response, _ = self._call(client, method, request_url, params=params)
         payload = self._json(response)
         if payload is None:
             return None
@@ -465,7 +521,7 @@ class SiteSearcher:
         cookies = None if recipe else (site or {}).get("cookie")
         try:
             client = self._http(headers=headers, site=site or {}, cookies=cookies)
-            response = client.get_res(url)
+            response, _ = self._call(client, "get", url)
             if response is None or response.status_code != 200:
                 return None
             blob = response.content or b""
@@ -482,6 +538,16 @@ class SiteSearcher:
 
         return RequestUtils(headers=headers, cookies=cookies, proxies=self._proxies(site or {}),
                             timeout=TIMEOUT, verify=False)
+
+    @staticmethod
+    def _call(client: Any, method: str, url: str, **kwargs: Any) -> Tuple[Any, str]:
+        """发一次请求；失败时把异常类型与文本带回来（不抛给上层，便于写进任务说明）。"""
+        try:
+            if str(method).lower() == "post":
+                return client.post_res(url=url, raise_exception=True, **kwargs), ""
+            return client.get_res(url=url, raise_exception=True, **kwargs), ""
+        except Exception as error:
+            return None, f"{type(error).__name__}: {str(error)[:160]}"
 
     @staticmethod
     def _json(response: Any) -> Optional[Dict[str, Any]]:

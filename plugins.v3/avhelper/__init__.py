@@ -709,14 +709,17 @@ class AVHelper(_PluginBase):
                 "message": f"搜到 {len(task.get('cands') or [])} 个候选"}
 
     async def api_task_download(self, request: Request) -> Dict[str, Any]:
-        """提交下载：优先站点命中项或用户指定站点。"""
+        """提交下载：优先站点命中项或用户指定站点。
+
+        `force=true` 表示“仍要下载”被规则淘汰的候选（界面里手动挑选时用）。
+        """
         payload = await self._json_body(request)
         tid = str(payload.get("id") or "").strip()
         if not tid:
             return {"success": False, "message": "缺少任务 id"}
         result = await asyncio.to_thread(
             self.engine.download, tid, str(payload.get("site") or ""),
-            str(request.base_url).rstrip("/"),
+            str(request.base_url).rstrip("/"), bool(payload.get("force")),
         )
         return {"success": bool(result.get("ok")), "message": result.get("message") or "",
                 "notice": result.get("notice"), "hash": result.get("hash"),

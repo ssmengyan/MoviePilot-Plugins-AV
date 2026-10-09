@@ -31,7 +31,9 @@ from .store import Store
 # 默认规则（与前端契约 defaultRule 一致；站点名对不上时自动忽略）
 DEFAULT_RULE: Dict[str, Any] = {
     "res": "1080p",
-    "mustCnsub": True,
+    # 中字默认只加分不淘汰：AV 站上中字是少数（实测馒头成人区 240 条里仅 39 条带中字标记），
+    # 默认「必须中字」会让绝大多数番号直接变成「没有合格候选」。想要硬门槛可在订阅规则里打开。
+    "mustCnsub": False,
     "preferUncensored": True,
     "allow4k": True,
     "minSeeders": 3,
@@ -222,10 +224,12 @@ class TaskEngine:
 
     # ---------- 下载 ----------
 
-    def download(self, tid: str, site_name: str = "", image_base: str = "") -> Dict[str, Any]:
+    def download(self, tid: str, site_name: str = "", image_base: str = "",
+                 force: bool = False) -> Dict[str, Any]:
         """按任务 id 提交下载（用户点“下载”或自动订阅命中后调用）。
 
         :param image_base: 通知附图的绝对地址前缀（由调用方从请求里取），为空时退化为不带图
+        :param force: 允许下载被规则淘汰的候选（界面上的「仍要下载」，手动挑选时用）
         """
         task = self.store.task_get(tid)
         if not task:
@@ -233,7 +237,10 @@ class TaskEngine:
         cands = task.get("cands") or []
         cand = None
         if site_name:
-            cand = next((c for c in cands if c.get("site") == site_name and c.get("pass")), None)
+            cand = next((c for c in cands
+                         if c.get("site") == site_name and (force or c.get("pass"))), None)
+        if not cand and force and site_name:
+            cand = next((c for c in cands if c.get("site") == site_name), None)
         cand = cand or next((c for c in cands if c.get("picked")), None) \
             or next((c for c in cands if c.get("pass")), None)
         if not cand:

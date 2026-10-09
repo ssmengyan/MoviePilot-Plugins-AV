@@ -416,7 +416,7 @@ const apiDelete = (p, q)    => request('DELETE', p, q);
 
 /* ============ 状态 ============ */
 const DEFAULT_RULE = {
-  res:'1080p', mustCnsub:true, preferUncensored:true, allow4k:true, minSeeders:3,
+  res:'1080p', mustCnsub:false, preferUncensored:true, allow4k:true, minSeeders:3,
   sites:[], prefSites:['馒头','Rousi'], btFallback:true, savePath:'/media/9kg/avi',
   category:'avi', downloader:'qb', trigger:'notify', maxPerDay:6, minIntervalMin:240
 };
@@ -1150,7 +1150,7 @@ function subActorDialog(name, zh, avatar){
     + [['1080p','1080P 优先'],['2160p','4K 优先'],['only4k','仅 4K']].map(([v,n]) =>
         '<button data-r="' + v + '" class="' + (r.res === v ? 'on' : '') + '">' + n + '</button>').join('')
     + '</div></div>'
-    + '<div class="sw"><div><div class="lbl">必须中文字幕</div><div class="dsc">没有中字的种直接淘汰</div></div>'
+    + '<div class="sw"><div><div class="lbl">必须中文字幕</div><div class="dsc">打开则没有中字的种直接淘汰；默认关（AV 站中字少，关掉时中字仍加 32 分优先选）</div></div>'
     + '<input type="checkbox" id="cCn"' + (r.mustCnsub ? ' checked' : '') + '></div>'
     + '<div class="sw"><div><div class="lbl">破解 / 无码版优先</div><div class="dsc">同类条件下优先选破解版</div></div>'
     + '<input type="checkbox" id="cUc"' + (r.preferUncensored ? ' checked' : '') + '></div>'
@@ -1281,7 +1281,8 @@ function candTable(t, idx){
       + (pass ? esc(c.score == null ? '—' : c.score) : '淘汰') + '</span></td>'
       + '<td>' + (pass
           ? '<button class="ghost" data-dl="' + esc(c.site || '') + '" data-task="' + esc(t.id || '') + '">下载</button>'
-          : '<span class="hint">不符合规则</span>') + '</td></tr>';
+          : '<button class="ghost" data-dl="' + esc(c.site || '') + '" data-task="' + esc(t.id || '')
+            + '" data-force="1" title="' + esc(c.breakdown || '') + '">仍要下载</button>') + '</td></tr>';
   };
   return '<div class="q" style="padding:0;overflow:hidden">'
     + '<div style="padding:12px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
@@ -1314,9 +1315,9 @@ function ptSearch(number, actor){
     S.actor = null; S.view = 'tasks'; render();
   });
 }
-function startDownload(taskId, site, btn){
+function startDownload(taskId, site, btn, force){
   if (btn) btn.disabled = true;
-  apiPost('/tasks/download', {id:taskId, site:site}).then(r => {
+  apiPost('/tasks/download', force ? {id:taskId, site:site, force:true} : {id:taskId, site:site}).then(r => {
     if (!r.ok){
       if (btn) btn.disabled = false;
       toast('下载失败', r.message || '请稍后重试', 'warn');
@@ -1353,7 +1354,7 @@ function sitePickList(){
 function bindDownloadButtons(root){
   (root || document).querySelectorAll('[data-dl]').forEach(b => b.onclick = () => {
     const t = S.tasks.filter(x => String(x.id) === String(b.dataset.task))[0] || S.siteTask;
-    if (t) startDownload(t.id, b.dataset.dl, b);
+    if (t) startDownload(t.id, b.dataset.dl, b, b.dataset.force === '1');
   });
 }
 function doSiteSearch(){

@@ -73,12 +73,19 @@ def human_size(size_bytes: Any) -> str:
 
 
 def candidate_from_torrent(torrent: Any, pref_sites: Optional[List[str]] = None) -> Dict[str, Any]:
-    """把一条搜索结果（宿主 TorrentInfo 或站点适配层返回的 dict）转成统一候选结构。"""
+    """把一条搜索结果（宿主 TorrentInfo 或站点适配层返回的 dict）转成统一候选结构。
+
+    站点适配层能给出权威元数据时（馒头成人区带 `standard`/`hasChineseSubtitle` 等），
+    优先用 `*_hint` 字段；没有提示的站点退回种名/副标题正则。
+    """
     title = str(_get(torrent, "title"))
+    description = str(_get(torrent, "description"))
     site = str(_get(torrent, "site_name"))
-    res = detect_resolution(title)
-    codec = detect_codec(title) or "—"
-    uncensored = detect_uncensored(title)
+    res = str(_get(torrent, "res_hint", "")) or detect_resolution(title)
+    codec = str(_get(torrent, "codec_hint", "")) or detect_codec(title) or "—"
+    cnsub = bool(_get(torrent, "cnsub_hint", False)) or detect_cnsub(title) or detect_cnsub(description)
+    uncensored = (bool(_get(torrent, "uncensored_hint", False))
+                  or detect_uncensored(title) or detect_uncensored(description))
     try:
         seeders = int(_get(torrent, "seeders", 0) or 0)
     except (TypeError, ValueError):
@@ -93,7 +100,7 @@ def candidate_from_torrent(torrent: Any, pref_sites: Optional[List[str]] = None)
         "src": "PT",
         "site": site,
         "spec": spec,
-        "cnsub": detect_cnsub(title),
+        "cnsub": cnsub,
         "uncensored": uncensored,
         "size": human_size(_get(torrent, "size", 0)),
         "seeders": seeders,

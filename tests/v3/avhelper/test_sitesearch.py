@@ -90,6 +90,17 @@ class TestAdapter:
         assert ss.mteam_api_host(MTEAM_SITE) == "api.m-team.cc"
         assert ss.mteam_api_host(dict(MTEAM_SITE, domain="api.m-team.cc")) == "api.m-team.cc"
 
+    def test_api_host_strips_entry_subdomain(self):
+        """宿主给插件的 domain 是入口子域 kp.m-team.cc（实测），不能拼成 api.kp.m-team.cc。"""
+        assert ss.mteam_api_host({"domain": "kp.m-team.cc"}) == "api.m-team.cc"
+        assert ss.mteam_api_host({"url": "https://kp.m-team.cc/"}) == "api.m-team.cc"
+        assert ss.registered_domain("kp.m-team.cc") == "m-team.cc"
+        assert ss.registered_domain("m-team.cc") == "m-team.cc"
+        assert ss.registered_domain("") == ""
+
+    def test_api_host_prefers_configured_value(self):
+        assert ss.mteam_api_host(dict(MTEAM_SITE, api_domain="https://api.example.cc")) == "api.example.cc"
+
 
 class TestMteamParams:
     """馒头请求体：成人区必须显式带 mode=adult，且不带分类过滤。"""
