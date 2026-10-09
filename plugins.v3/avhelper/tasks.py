@@ -490,13 +490,22 @@ class TaskEngine:
         return {"limited": False, "notices": notices, "message": f"已检查 {len(subs)} 条订阅"}
 
     def _check_actor(self, sub: Dict[str, Any], rule: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """演员订阅：作品史与 known 差集 → 新片搜种。"""
+        """演员订阅：作品史与 known 差集 → 新片搜种。
+
+        作品史按发行时间倒序，新片一定在头部：只看最新的一页（50 部）就够，不再拉全量
+        （`--all` 对上千部的演员要 35 秒）。整页都是已知的（久未检查）才往后多翻一页。
+        """
         name = sub.get("name") or ""
-        data = self.plugin.cli().actor(name, limit=0) or {}
-        movies = data.get("movies") or []
+        known = set(self.store.known_all())
+        movies: List[Dict[str, Any]] = []
+        for page in (1, 2):
+            data = self.plugin.cli().actor(name, page=page, limit=50) or {}
+            batch = [m for m in (data.get("movies") or []) if isinstance(m, dict)]
+            movies.extend(batch)
+            if any(m.get("number") and m.get("number") not in known for m in batch) or len(batch) < 50:
+                break
         if not movies:
             return [self.notifier.info("检查完成", f"{name}：没有取到作品史")]
-        known = set(self.store.known_all())
         fresh = [m for m in movies if m.get("number") and m.get("number") not in known]
         if not fresh:
             return [self.notifier.info("检查完成", f"{name}：没有新片")]

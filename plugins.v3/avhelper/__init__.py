@@ -44,6 +44,8 @@ TTL_ACTOR = 24 * 3600      # 演员作品史 24 小时
 TTL_LONG = 7 * 86400       # 长图 URL 7 天
 FAIL_TTL = 120             # 抓取失败后的负缓存：这段时间内不再重试（避免每次打开都重付等待）
 CACHE_MAX_GB = 60          # 缓存总量上限（超出按最旧淘汰）
+ACTOR_PAGE = 30            # 演员作品史每页条数（界面按需续拉，§8.1）
+ACTOR_PAGE_MAX = 50        # 站点单页硬上限：请求更大也只回 50 条（实测）
 ONCE_JOB_ID = "subcheck_now"
 
 
@@ -268,7 +270,7 @@ class AVHelper(_PluginBase):
             {"path": "/actors", "endpoint": self.api_actors, "methods": ["GET"], "auth": "bear",
              "summary": "演员榜"},
             {"path": "/actor", "endpoint": self.api_actor, "methods": ["GET"], "auth": "bear",
-             "summary": "演员档案+作品史"},
+             "summary": "演员档案+作品史(分页)"},
             {"path": "/search", "endpoint": self.api_search, "methods": ["GET"], "auth": "bear",
              "summary": "番号/演员搜索"},
             {"path": "/detail", "endpoint": self.api_detail, "methods": ["GET"], "auth": "bear",
@@ -657,13 +659,20 @@ class AVHelper(_PluginBase):
         ]
         return {"success": True, "actors": actors}
 
-    def api_actor(self, name: str, limit: int = 0) -> Dict[str, Any]:
-        """演员档案 + 作品史。"""
+    def api_actor(self, name: str, page: int = 1, limit: int = ACTOR_PAGE) -> Dict[str, Any]:
+        """演员档案 + 作品史（分页：一次只抓一页，前端按需续拉下一页）。
+
+        javdb 的 `actor --all` 最多连抓 50 页（20/页）≈ 35 秒，且上千部的大牌演员只能拿到
+        1000 部（实测 4376 部的演员），所以改成显式分页：首屏只付一页的钱，翻页键即缓存键
+        （`actor:{name}:p{page}:l{limit}`），某页失败也只冷却那一页。
+        """
         if not name:
             return {"success": False, "message": "缺少演员名", "movies": []}
+        page = max(1, int(page or 1))
+        limit = min(max(int(limit or ACTOR_PAGE), 1), ACTOR_PAGE_MAX)
         data = self._cached(
-            f"actor:{name}:{limit}", TTL_ACTOR,
-            lambda: self.cli().actor(name, limit=limit),
+            f"actor:{name}:p{page}:l{limit}", TTL_ACTOR,
+            lambda: self.cli().actor(name, page=page, limit=limit),
         )
         if data is None:
             return {"success": False, "message": "演员数据抓取失败", "movies": []}
@@ -672,11 +681,12 @@ class AVHelper(_PluginBase):
         self.remember_thumbs(raw_movies)
         movies = [self._movie(m, actor=name) for m in raw_movies]
         self.remember_actor([m["number"] for m in movies], name)
+        total = int(raw_entity.get("videos_count") or 0)
         entity = {
             "name": raw_entity.get("name") or name,
             "zh": raw_entity.get("name_zht") or raw_entity.get("zh") or "",
             "avatar": self.image_url(raw_entity.get("avatar_url") or raw_entity.get("avatar")),
-            "videos_count": raw_entity.get("videos_count") or len(movies),
+            "videos_count": total or len(movies),
             "age": raw_entity.get("age") or "",
             "birthday": raw_entity.get("birthday") or "",
             "height": raw_entity.get("height") or "",
@@ -684,7 +694,10 @@ class AVHelper(_PluginBase):
             "birthplace": raw_entity.get("birthplace") or "",
             "instagram": raw_entity.get("instagram") or "",
         }
-        return {"success": True, "entity": entity, "movies": movies}
+        # 满一页就假定还有下一页；站点有总数时再用总数收口（末页正好整除时少一次空请求）
+        has_more = len(movies) >= limit and (not total or page * limit < total)
+        return {"success": True, "entity": entity, "movies": movies,
+                "page": page, "limit": limit, "total": total, "hasMore": has_more}
 
     def api_search(self, keyword: str) -> Dict[str, Any]:
         """番号/关键词搜索：同时返回影片与演员命中。"""

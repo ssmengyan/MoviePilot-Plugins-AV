@@ -693,7 +693,7 @@ const DEFAULT_RULE = {
 };
 const S = {
   view:'discover', period:'week', kind:'censored',
-  actor:null, actorYear:'', actorAll:false, known:new Set(),
+  actor:null, actorYear:'', known:new Set(),
   favs:[], subs:[], tasks:[], queue:[], notices:[],
   sites:[{id:'',name:'馒头'},{id:'',name:'观众'},{id:'',name:'我堡'},{id:'',name:'高清杜比'},
          {id:'',name:'GGPT'},{id:'',name:'麒麟'},{id:'',name:'象站'},{id:'',name:'织梦'},
@@ -1252,7 +1252,7 @@ function refreshFavButtons(){
 function openActor(name){
   if (!name) return;
   S.actor = name; S.view = 'actors';
-  S.actorYear = ''; S.actorAll = false;     // 换演员时重置作品史的筛选/展开
+  S.actorYear = '';                         // 换演员时重置作品史的年份筛选
   render();
   const m = $('#main'); if (m) m.scrollTop = 0;
 }
@@ -1271,16 +1271,19 @@ function filmRow(mv, i){
     + (mv.lib ? '<span class="tag lib">已入库</span>' : '')
     + '</div></div></div>';
 }
-const FILM_FOLD = 12;                      // 作品史默认只铺 12 部，多的折起来
+/* 作品史按需加载：首屏只抓一页（30 部），滚到底点「加载更多」再续拉下一页。
+   站点单页上限 50；一次一页比原来 `--all` 连抓 50 页（上千部的演员要 35 秒）快得多。 */
+const FILM_PAGE = 30;                      // 每页条数（与后端 ACTOR_PAGE 一致）
+const FILM_PRELOAD = 60;                   // 预热封面的张数上限：不随已加载总数膨胀
 function renderActorDetail(m){
   const name = S.actor;
   const key = 'page:actor:' + name;
   const entry = cached(key);
   const head = '<div class="toolbar"><button class="ghost" id="btnBack">← 返回</button></div>';
   if (!entry){
-    m.innerHTML = head + loadingHtml('正在抓取演员档案与作品史…');
+    m.innerHTML = head + loadingHtml('正在抓取演员档案与最新作品…');
     m.querySelector('#btnBack').onclick = () => { S.actor = null; render(); };
-    apiGet('/actor', {name:name}).then(r => {
+    apiGet('/actor', {name:name, page:1, limit:FILM_PAGE}).then(r => {
       if (!r.ok) put(key, {error:r.message || '抓取失败，请稍后重试'});
       else put(key, {data:r.data || {}, t:Date.now()});
       if (!r.ok) toast('演员抓取失败', r.message || '抓取失败，请稍后重试', 'warn');
@@ -1296,9 +1299,11 @@ function renderActorDetail(m){
   const d = entry.data || {};
   const e = d.entity || {};
   const movies = d.movies || [];
+  const total = Number(d.total || 0) || movies.length;   // 站点记录总数（videos_count）
+  const hasMore = !!d.hasMore;
   const faved = !!findFav(name);
   const sub = S.subs.filter(s => s.type === 'actor' && s.name === name)[0] || null;
-  /* 作品史：先按年份收敛，再对超长的折叠，避免一次把整页铺满 */
+  /* 作品史：先按年份收敛（只对已加载的部分），列表本身按需追加下一页 */
   const years = [], yearCount = {};
   movies.forEach(mv => {
     const y = String(mv.date || '').slice(0, 4);
@@ -1306,11 +1311,9 @@ function renderActorDetail(m){
   });
   const year = S.actorYear || '';
   const list = year ? movies.filter(mv => String(mv.date || '').slice(0, 4) === year) : movies;
-  const fold = !S.actorAll && list.length > FILM_FOLD;
-  const shown = fold ? list.slice(0, FILM_FOLD) : list;
   const yearBar = years.length > 1
     ? '<div class="filmyears" id="filmYears">'
-      + '<button data-y="" class="' + (year ? '' : 'on') + '">全部 ' + movies.length + '</button>'
+      + '<button data-y="" class="' + (year ? '' : 'on') + '">全部 ' + movies.length + (hasMore ? '+' : '') + '</button>'
       + years.map(y => '<button data-y="' + y + '" class="' + (year === y ? 'on' : '') + '">'
           + y + '<span style="opacity:.65"> ' + yearCount[y] + '</span></button>').join('')
       + '</div>'
@@ -1328,7 +1331,7 @@ function renderActorDetail(m){
     + (e.cup ? '<span><b>罩杯</b> ' + esc(e.cup) + '</span>' : '')
     + (e.birthplace ? '<span><b>出身</b> ' + esc(e.birthplace) + '</span>' : '')
     + (e.instagram ? '<span><b>IG</b> ' + esc(e.instagram) + '</span>' : '')
-    + '<span><b>本次返回作品</b> ' + movies.length + ' 部</span>'
+    + '<span><b>已加载</b> ' + movies.length + ' / ' + total + ' 部</span>'
     + '</div>'
     + '<div class="acts">'
     + '<button class="' + (faved ? 'ghost' : 'primary') + '" id="btnFav">' + (faved ? '★ 已收藏' : '☆ 收藏该演员') + '</button>'
@@ -1337,16 +1340,23 @@ function renderActorDetail(m){
     + '<button class="ghost" id="btnCheckActor">⚡ 检查她的新片</button>'
     + '</div>'
     + '</div></div>'
-    + '<div class="secttl">作品史（按发行时间倒序，共 ' + movies.length + ' 部'
+    + '<div class="secttl">作品史（按发行时间倒序，已加载 ' + movies.length + ' 部'
+    + (total > movies.length ? ' / 站点记录 ' + total + ' 部' : '')
     + (year ? '，' + year + ' 年 ' + list.length + ' 部' : '') + '）</div>'
     + yearBar
     + (list.length
-        ? '<div class="films">' + shown.map(filmRow).join('') + '</div>'
-          + (list.length > FILM_FOLD
-              ? '<div class="morebar"><button class="ghost" id="btnMoreFilms">'
-                + (fold ? '展开其余 ' + (list.length - FILM_FOLD) + ' 部' : '收起') + '</button></div>'
-              : '')
-        : emptyHtml(year ? '该年份没有作品记录。' : '这位演员暂无作品数据。'));
+        ? '<div class="films">' + list.map(filmRow).join('') + '</div>'
+        : emptyHtml(year
+            ? (hasMore ? '已加载的 ' + movies.length + ' 部里没有 ' + year + ' 年的作品，继续加载试试。'
+                       : '该年份没有作品记录。')
+            : '这位演员暂无作品数据。'))
+    + (hasMore
+        ? '<div class="morebar"><button class="ghost" id="btnMoreFilms">'
+          + (year ? '继续加载 ' + FILM_PAGE + ' 部（往更早的年份找）'
+                  : '加载更多（已显示 ' + movies.length + ' / 共 ' + total + ' 部）') + '</button></div>'
+        : (movies.length > FILM_PAGE
+            ? '<div class="morebar"><span class="hint">已加载全部 ' + movies.length + ' 部</span></div>'
+            : ''));
 
   m.querySelector('#btnBack').onclick = () => { S.actor = null; render(); };
   m.querySelector('#btnFav').onclick = () => toggleFav(name, e.avatar || '');
@@ -1356,24 +1366,53 @@ function renderActorDetail(m){
   const yb = m.querySelector('#filmYears');
   if (yb) yb.onclick = ev => {
     const b = ev.target.closest('button'); if (!b) return;
-    S.actorYear = b.dataset.y; S.actorAll = false; render();
+    S.actorYear = b.dataset.y; render();
   };
   const mb = m.querySelector('#btnMoreFilms');
-  if (mb) mb.onclick = () => {
-    const expanding = !S.actorAll;
-    S.actorAll = expanding;
-    render();
-    if (!expanding){                       // 收起后回到「作品史」标题，避免停在半空
-      const t = $('#main').querySelector('.secttl');
-      if (t) t.scrollIntoView({block:'start'});
-    }
-  };
+  if (mb) mb.onclick = () => loadMoreFilms(name, mb);
   m.querySelectorAll('.film').forEach(el => {
     el.onclick = ev => { ev.stopPropagation(); openMovie(el.dataset.num, el.dataset.id || ''); };
     el.onmouseenter = () => prefetchDetail(el.dataset.num, el.dataset.id || '');
   });
   prefetchCards(m, PREFETCH_N);
-  preload(shown.map(x => x.thumb));
+  preload(movies.slice(0, FILM_PRELOAD).map(x => x.thumb));
+}
+
+/* 续拉下一页作品史：追加到已加载列表后面（按 id+番号去重，翻页期间站点新增作品会导致整体位移）。
+   整页重画，年份筛选跟着已加载的部分走；这一批里没有当前年份的作品时给个提示，免得像没反应。 */
+function loadMoreFilms(name, btn){
+  const key = 'page:actor:' + name;
+  const entry = cached(key);
+  const d = (entry && entry.data) || null;
+  if (!d){ render(); return; }
+  const page = (Number(d.page) || 1) + 1;
+  const before = S.actorYear ? yearCountOf(d.movies || [], S.actorYear) : 0;
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = '正在加载…';
+  apiGet('/actor', {name:name, page:page, limit:FILM_PAGE}).then(r => {
+    if (!r.ok){
+      btn.disabled = false; btn.textContent = label;
+      toast('加载更多失败', r.message || '请稍后重试', 'warn');
+      return;
+    }
+    const nd = r.data || {};
+    const seen = {};
+    (d.movies || []).forEach(x => { seen[(x.id || '') + '|' + (x.number || '')] = 1; });
+    const add = (nd.movies || []).filter(x => !seen[(x.id || '') + '|' + (x.number || '')]);
+    d.movies = (d.movies || []).concat(add);
+    d.page = page;
+    d.hasMore = !!nd.hasMore;
+    d.total = nd.total || d.total;
+    d.entity = nd.entity || d.entity;
+    if (S.view !== 'actors' || S.actor !== name) return;      // 已经切走了：只更新缓存
+    render();
+    if (S.actorYear && yearCountOf(d.movies, S.actorYear) === before){
+      toast('继续加载', '这一批没有 ' + S.actorYear + ' 年的作品，已加载 ' + d.movies.length + ' 部', 'warn');
+    }
+  });
+}
+function yearCountOf(movies, year){
+  return movies.filter(mv => String(mv.date || '').slice(0, 4) === year).length;
 }
 
 /* ---------- 3. 订阅 ---------- */

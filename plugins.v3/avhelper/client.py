@@ -59,10 +59,16 @@ class JavdbClient:
         """演员榜。"""
         return self._run("actors_rank", ["rankings", "actors"])
 
-    def actor(self, name: str, limit: int = 0) -> Optional[Dict]:
-        """演员档案 + 作品史（--all 全量，limit>0 则截断）。"""
-        args = ["actor", name, "--all"] if not limit else ["actor", name, "--limit", str(limit)]
-        return self._run(f"actor:{name}", args)
+    def actor(self, name: str, page: int = 1, limit: int = 30) -> Optional[Dict]:
+        """演员档案 + 作品史（一次只取一页；站点单页上限 50）。
+
+        不再用 `--all`：它最多连抓 50 页（20/页）≈ 35 秒，且上千部的大牌演员只能拿到 1000 部
+        （实测 4376 部的演员）。调用方按页取，翻页键即缓存键，避免一个演员只坏一页就整体冷却。
+        """
+        page = max(1, int(page or 1))
+        limit = max(1, int(limit or 30))
+        args = ["actor", name, "--page", str(page), "--limit", str(limit)]
+        return self._run(f"actor:{name}:p{page}:l{limit}", args)
 
     def search(self, keyword: str) -> Optional[Dict]:
         """番号/关键词搜索。"""
