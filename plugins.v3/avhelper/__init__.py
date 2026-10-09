@@ -40,6 +40,7 @@ TTL_RANK = 6 * 3600        # 榜单 6 小时
 TTL_DETAIL = 7 * 86400     # 番号详情 7 天
 TTL_ACTOR = 24 * 3600      # 演员作品史 24 小时
 TTL_LONG = 7 * 86400       # 长图 URL 7 天
+FAIL_TTL = 120             # 抓取失败后的负缓存：这段时间内不再重试（避免每次打开都重付等待）
 CACHE_MAX_GB = 60          # 缓存总量上限（超出按最旧淘汰）
 ONCE_JOB_ID = "subcheck_now"
 
@@ -50,7 +51,7 @@ class AVHelper(_PluginBase):
     plugin_name = "AV 资源助手"
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
     plugin_icon = "Moviepilot_A.png"
-    plugin_version = "0.2.0"
+    plugin_version = "0.2.1"
     plugin_label = "发现"
     plugin_author = "local"
     plugin_config_prefix = "avhelper_"
@@ -127,7 +128,11 @@ class AVHelper(_PluginBase):
         """
         if str(media_source or "") != "javdb" or not media_id:
             return None
-        detail = await asyncio.to_thread(self.cli().detail, str(media_id))
+        # 与自带界面共用同一份 7 天详情缓存：任一侧抓过，另一侧就直接命中
+        detail = await asyncio.to_thread(
+            self._cached, f"detail:{media_id}", TTL_DETAIL,
+            lambda: self.cli().detail(str(media_id)),
+        )
         if not detail:
             return None
         try:
@@ -178,7 +183,7 @@ class AVHelper(_PluginBase):
                     },
                     {"component": "VAlert",
                      "props": {"type": "info", "variant": "tonal", "class": "mt-2"},
-                     "text": "完整界面在插件详情页内（内嵌应用），也可在新标签页打开。"},
+                     "text": "完整界面在插件详情页内（内嵌应用）：榜单、演员、订阅、任务、通知与站点检索都在里面。"},
                 ],
             }
         ]
@@ -194,17 +199,6 @@ class AVHelper(_PluginBase):
             }]
         src = f"/api/v1/plugin/{PLUGIN_ID}/ui?v={self.plugin_version}"
         return [
-            {
-                "component": "div",
-                "props": {"class": "d-flex align-center ga-3 px-2 pt-2"},
-                "content": [
-                    {"component": "span", "props": {"class": "text-body-2 text-medium-emphasis"},
-                     "text": "AV 资源助手"},
-                    {"component": "a",
-                     "props": {"href": src, "target": "_blank", "class": "text-caption"},
-                     "text": "在新标签页打开完整界面 ↗"},
-                ],
-            },
             {
                 "component": "iframe",
                 "props": {
@@ -352,15 +346,55 @@ class AVHelper(_PluginBase):
         except Exception as error:
             logger.error(f"AVHelper 写缓存失败 {key}：{error}")
 
+    def _cache_forget(self, key: str) -> None:
+        """删掉某个 key 的缓存文件与索引行（用于清失败标记）。"""
+        try:
+            self._cache_file(key).unlink(missing_ok=True)
+        except Exception:
+            pass
+        self.store.cache_drop([key])
+
     def _cached(self, key: str, ttl: int, loader: Any) -> Any:
-        """带文件缓存的读取；失败（None）不落盘，下次会重试。"""
+        """带文件缓存的读取；失败写 FAIL_TTL 负缓存，避免每次重开都重付抓取时间。"""
         hit = self._cache_read(key, ttl)
         if hit is not None:
             return hit
+        fail_key = f"fail:{key}"
+        if self._cache_read(fail_key, FAIL_TTL) is not None:
+            return None
         data = loader()
         if data is not None:
             self._cache_write(key, data, ttl)
+            self._cache_forget(fail_key)
+        else:
+            self._cache_write(fail_key, {"at": time.strftime("%Y-%m-%d %H:%M:%S")}, FAIL_TTL)
         return data
+
+    def _detail_pair(self, number: str, mid: str = "") -> Tuple[Optional[Dict], Optional[Dict]]:
+        """取「详情 + 磁力」，能合并就合并成一次子进程调用。
+
+        两者都缺 → 一条 `detail --magnets`；只缺一样 → 只跑那一样；都命中缓存 → 不起进程。
+        取回的结果分别落各自的 7 天缓存，下次（含另一入口 `_recognize_media`）直接命中。
+        """
+        detail_key, magnet_key = f"detail:{number}", f"magnets:{number}"
+        detail = self._cache_read(detail_key, TTL_DETAIL)
+        magnets = self._cache_read(magnet_key, TTL_DETAIL)
+        if detail is None and magnets is None:
+            data = self._cached(detail_key, TTL_DETAIL,
+                                lambda: self.cli().detail(number, mid=mid, with_magnets=True))
+            if isinstance(data, dict):
+                raw = data.get("magnets")
+                detail = data
+                if isinstance(raw, list):
+                    magnets = {"number": number, "magnets": raw}
+                    # 详情里嵌着磁力，落一份到磁力缓存，省掉下一次单独跑 magnets
+                    self._cache_write(magnet_key, magnets, TTL_DETAIL)
+        elif detail is None:
+            detail = self._cached(detail_key, TTL_DETAIL, lambda: self.cli().detail(number, mid=mid))
+        elif magnets is None:
+            magnets = self._cached(magnet_key, TTL_DETAIL,
+                                   lambda: self.cli().magnets(number, cnsub=False))
+        return detail, magnets
 
     def _movie(self, raw: Dict[str, Any], kind: str = "", actor: str = "") -> Dict[str, Any]:
         """把 javdb 记录归一化成契约里的 movie 结构（图片转代理地址）。"""
@@ -495,11 +529,16 @@ class AVHelper(_PluginBase):
         ]
         return {"success": True, "movies": movies[:24], "actors": actors[:24]}
 
-    def api_detail(self, number: str) -> Dict[str, Any]:
-        """影片详情：归一化信息 + 演员 + 预览图（代理地址）+ 磁力 + 长图 URL。"""
+    def api_detail(self, number: str, id: str = "") -> Dict[str, Any]:
+        """影片详情：归一化信息 + 演员 + 预览图（代理地址）+ 磁力。
+
+        `id` 是 javdb 内部 id（榜单卡片里就有），带上可省掉一次「番号 → id」搜索往返。
+        长图地址只读缓存：未命中就留空，由前端点开长图时再调 /longimage（projectjav
+        那一跳比详情本身还慢，不能挂在首屏关键路径上）。
+        """
         if not number:
             return {"success": False, "message": "缺少番号"}
-        data = self._cached(f"detail:{number}", TTL_DETAIL, lambda: self.cli().detail(number))
+        data, magnets_raw = self._detail_pair(number, str(id or ""))
         if data is None:
             return {"success": False, "message": "详情抓取失败，请稍后重试"}
         actors = [
@@ -515,9 +554,6 @@ class AVHelper(_PluginBase):
             self.image_url(p.get("large_url") or p.get("thumb_url"))
             for p in (data.get("preview_images") or []) if isinstance(p, dict)
         ]
-        magnets_raw = self._cached(
-            f"magnets:{number}", TTL_DETAIL, lambda: self.cli().magnets(number, cnsub=False)
-        )
         magnets = []
         if isinstance(magnets_raw, dict):
             for item in (magnets_raw.get("magnets") or []):
@@ -533,11 +569,19 @@ class AVHelper(_PluginBase):
             "actors": actors,
             "previews": previews,
             "magnets": magnets,
-            "longimage": self._long_url(number),
+            "longimage": self.long_cached(number),
         }
 
+    def long_cached(self, number: str) -> str:
+        """只读长图 URL 缓存（不抓取）；未命中返回空串。"""
+        return str(self.store.kv_get(f"long:{number}") or "")
+
     def _long_url(self, number: str) -> str:
-        """解析并缓存长图 URL（只解析不下载，图片由前端直连）。"""
+        """解析并缓存长图 URL（只解析不下载，图片由前端直连）。
+
+        一次列表页抓取即可拿到长图链接（实测卡片自带 data-featherlight），
+        只有该路径失效时才回退进详情页，所以首次约 5 秒、命中后 7 天免费。
+        """
         cache_key = f"long:{number}"
         cached = self.store.kv_get(cache_key)
         if cached is not None:
@@ -610,15 +654,22 @@ class AVHelper(_PluginBase):
         return {"success": True, "tasks": self.store.task_list(), "queue": self.engine.queue()}
 
     async def api_task_search(self, request: Request) -> Dict[str, Any]:
-        """按番号搜种并打分（真实站点搜索，受 §8.2 限流约束）。"""
+        """按番号/关键词搜索站点并打分（真实站点搜索，受 §8.2 限流约束）。
+
+        `keyword` 与 `number` 等价（单独检索时用 keyword 更贴切）；
+        `sites` 可只搜指定站点（界面里做单站/多站检索）。
+        """
         payload = await self._json_body(request)
-        number = str(payload.get("number") or "").strip()
-        if not number:
-            return {"success": False, "message": "缺少番号"}
+        keyword = str(payload.get("keyword") or payload.get("number") or "").strip()
+        if not keyword:
+            return {"success": False, "message": "缺少搜索词"}
         actor = str(payload.get("actor") or "")
         rule = merge_rule(payload.get("rule"))
         thumb = str(payload.get("thumb") or "")
-        task = await asyncio.to_thread(self.engine.build_task, number, actor, rule, False, thumb)
+        sites = payload.get("sites")
+        only_sites = [str(x) for x in sites] if isinstance(sites, list) and sites else None
+        task = await asyncio.to_thread(self.engine.build_task, keyword, actor, rule, False,
+                                       thumb, only_sites)
         return {"success": True, "task": task,
                 "message": f"搜到 {len(task.get('cands') or [])} 个候选"}
 

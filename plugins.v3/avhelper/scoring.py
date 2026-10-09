@@ -73,18 +73,18 @@ def human_size(size_bytes: Any) -> str:
 
 
 def candidate_from_torrent(torrent: Any, pref_sites: Optional[List[str]] = None) -> Dict[str, Any]:
-    """把宿主 TorrentInfo 转成本插件统一的候选结构。"""
-    title = str(getattr(torrent, "title", "") or "")
-    site = str(getattr(torrent, "site_name", "") or "")
+    """把一条搜索结果（宿主 TorrentInfo 或站点适配层返回的 dict）转成统一候选结构。"""
+    title = str(_get(torrent, "title"))
+    site = str(_get(torrent, "site_name"))
     res = detect_resolution(title)
     codec = detect_codec(title) or "—"
     uncensored = detect_uncensored(title)
     try:
-        seeders = int(getattr(torrent, "seeders", 0) or 0)
+        seeders = int(_get(torrent, "seeders", 0) or 0)
     except (TypeError, ValueError):
         seeders = 0
     try:
-        dvf = getattr(torrent, "downloadvolumefactor", None)
+        dvf = _get(torrent, "downloadvolumefactor", None)
         free = dvf is not None and float(dvf) == 0
     except (TypeError, ValueError):
         free = False
@@ -95,18 +95,27 @@ def candidate_from_torrent(torrent: Any, pref_sites: Optional[List[str]] = None)
         "spec": spec,
         "cnsub": detect_cnsub(title),
         "uncensored": uncensored,
-        "size": human_size(getattr(torrent, "size", 0)),
+        "size": human_size(_get(torrent, "size", 0)),
         "seeders": seeders,
         "free": free,
         "res": res,
         "pref": bool(pref_sites) and site in (pref_sites or []),
-        "group": detect_group(title) or (str(getattr(torrent, "site_name", "") or "") + " 发布"),
+        "group": detect_group(title) or (site + " 发布"),
         "title": title,
         "score": 0,
         "pass": True,
         "breakdown": "",
         "picked": False,
     }
+
+
+def _get(row: Any, key: str, default: Any = "") -> Any:
+    """同时兼容 dict 与宿主对象（TorrentInfo）的取字段写法。"""
+    if isinstance(row, dict):
+        value = row.get(key)
+    else:
+        value = getattr(row, key, None)
+    return default if value is None else value
 
 
 def candidate_from_magnet(magnet: Dict[str, Any], pref_sites: Optional[List[str]] = None) -> Dict[str, Any]:

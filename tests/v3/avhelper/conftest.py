@@ -53,3 +53,9 @@ def longshot_mod():
 def ratelimit_mod():
     """ratelimit 模块。"""
     return _load("ratelimit")
+
+
+@pytest.fixture(scope="session")
+def client_mod():
+    """client 模块（javdb-cli 调用门面）。"""
+    return _load("client")

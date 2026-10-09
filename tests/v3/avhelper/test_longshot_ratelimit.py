@@ -20,6 +20,20 @@ class TestLongshot:
     </div>
     """
 
+    # 真实列表页结构：每个结果一张 video-item 卡片，卡片自带长图链接
+    LIST_HTML = """
+    <div class="col-md-4 mb-4 video-item" data-movie-id="1">
+      <a href="/movie/other-001-1">OTHER-001 别的作品</a>
+      <a href="https://images.projectjav.com/data/screenshots/other-001.jpg?v=1"
+         data-featherlight="image">Screenshot</a>
+    </div>
+    <div class="col-md-4 mb-4 video-item" data-movie-id="2">
+      <a href="/movie/ipzz-961-2">IPZZ-961 某作品</a>
+      <a href="https://images.projectjav.com/data/screenshots/ipzz-961.jpg?v=2"
+         data-featherlight="image">Screenshot</a>
+    </div>
+    """
+
     def test_norm_number(self, longshot_mod):
         assert longshot_mod.norm_number("IPZZ-961") == "ipzz961"
         assert longshot_mod.norm_number("ipzz 961") == "ipzz961"
@@ -62,6 +76,33 @@ class TestLongshot:
     def test_resolve_returns_none_when_page_missing(self, longshot_mod):
         assert longshot_mod.resolve_long("IPZZ-961", lambda u, r: None) is None
         assert longshot_mod.resolve_long("", lambda u, r: self.SEARCH_HTML) is None
+
+    def test_resolve_from_list_card_without_detail_page(self, longshot_mod):
+        """列表卡片自带长图链接时只抓一次，且必须取本番号卡片里那张（不跨卡片）。"""
+        calls = []
+
+        def fetcher(url, referer):
+            calls.append(url)
+            return self.LIST_HTML
+
+        url = longshot_mod.resolve_long("IPZZ-961", fetcher)
+        assert url == "https://images.projectjav.com/data/screenshots/ipzz-961.jpg?v=2"
+        assert len(calls) == 1 and "searchTerm" in calls[0]
+
+    def test_resolve_falls_back_to_detail_page(self, longshot_mod):
+        """卡片里没有长图链接时仍走详情页（页面结构变化时的兜底）。"""
+        calls = []
+
+        def fetcher(url, referer):
+            calls.append(url)
+            if "searchTerm" in url:
+                return ('<div class="col-md-4 video-item">'
+                        '<a href="/movie/abcdef">IPZZ-961 某作品</a></div>')
+            return self.DETAIL_HTML
+
+        assert longshot_mod.resolve_long("IPZZ-961", fetcher) \
+            == "https://images.projectjav.com/data/screenshots/234496.jpg"
+        assert any("/movie/abcdef" in c for c in calls)
 
 
 class FakeStore:

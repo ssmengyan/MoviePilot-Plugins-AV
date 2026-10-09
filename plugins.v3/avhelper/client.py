@@ -68,9 +68,22 @@ class JavdbClient:
         """番号/关键词搜索。"""
         return self._run(f"search:{keyword}", ["search", keyword])
 
-    def detail(self, number: str) -> Optional[Dict]:
-        """影片详情。"""
-        return self._run(f"detail:{number}", ["detail", number])
+    def detail(self, number: str, mid: str = "", with_magnets: bool = False) -> Optional[Dict]:
+        """影片详情。
+
+        :param number: 番号（决定失败计数与缓存键，日志里也用它）
+        :param mid: javdb 内部 id；已知时走 --id，省掉一次「番号 → id」的搜索往返
+        :param with_magnets: 同一条命令一并取磁力，省掉第二次进程启动与重复解析
+        :return: 影片字段字典；with_magnets 时额外带一个 `magnets` 列表
+        """
+        args = ["detail"]
+        if mid:
+            args += ["--id", str(mid)]
+        else:
+            args.append(str(number))
+        if with_magnets:
+            args.append("--magnets")
+        return self._run(f"detail:{number}", args)
 
     def magnets(self, number: str, cnsub: bool = True) -> Optional[Dict]:
         """磁力链接列表。"""

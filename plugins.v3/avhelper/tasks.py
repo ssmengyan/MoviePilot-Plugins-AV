@@ -1,12 +1,17 @@
-"""订阅检查与“搜种 → 打分 → 下载”编排（执行方案 §6.4/§6.5/§6.6）。
+"""订阅检查与“搜种 → 打分 → 下载”编排（执行方案 §6.4/§6.5/§6.6/§6.7）。
 
 订阅检查：
   演员订阅 → javdb 作品史（24h 缓存）与 known 表做差集 → 新片发“订阅命中新片”通知 → 搜种；
   番号订阅 → 直接搜该番号，文案固定为“订阅命中，开始搜索”。
   搜到候选后：rule.trigger == 'auto' 且有通过项 → 直接下载；否则建任务等用户点“下载”。
 
-搜种顺序（§8.2）：先搜优先站点，命中即停；没有通过项再搜其余站点；站点之间串行并随机间隔。
-BT 兜底：仅当 rule.btFallback 且 PT 段无通过项时，取 javdb 磁力作为备选来源。
+搜种（§6.7）：交给 `sitesearch.SiteSearcher` 按站点分派适配器——
+馒头走成人区 API（`mode=adult`），肉丝不带分类过滤，其余站点走 MP 原生索引器但不带媒体类型；
+顺序仍是“优先站点 → 其余站点”，命中即停，站点之间串行并随机间隔（§8.2）。
+
+下载（§6.6）：候选的 enclosure 若为 `[base64]{url}` 两段式，先由 `SiteSearcher.resolve`
+换票取回种子字节，再交给下载链；下载器默认 qb，分类默认 avi（qB 分类目录已指向
+/media/9kg/avi，因此不需要手工维护目录）。
 """
 
 import time
@@ -14,13 +19,13 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.schemas.types import MediaType
 from app.sdk.config import settings
 from app.sdk.logging import logger
 from app.sdk.network import SitesHelper
 
 from . import scoring
 from .ratelimit import is_antibot_error
+from .sitesearch import SiteSearcher
 from .store import Store
 
 # 默认规则（与前端契约 defaultRule 一致；站点名对不上时自动忽略）
@@ -31,17 +36,19 @@ DEFAULT_RULE: Dict[str, Any] = {
     "allow4k": True,
     "minSeeders": 3,
     "sites": [],
-    "prefSites": ["馒头", "观众"],
+    "prefSites": ["馒头", "Rousi"],
     "btFallback": True,
     "trigger": "notify",
     "maxPerDay": 6,
     "minIntervalMin": 240,
     "savePath": "/media/9kg/avi",
-    "downloader": "",
+    "category": "avi",
+    "downloader": "qb",
 }
 
 QUEUE_KEY = "queue"
 DEFAULT_SAVE_PATH = "/media/9kg/avi"
+DEFAULT_CATEGORY = "avi"
 
 
 def merge_rule(rule: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -60,6 +67,8 @@ class TaskEngine:
         self.store = store
         self.limiter = limiter
         self.notifier = notifier
+        self.searcher = SiteSearcher(chain=getattr(plugin, "chain", None),
+                                     proxy=str(getattr(plugin, "_proxy", "") or ""))
 
     # ---------- 站点 ----------
 
@@ -72,40 +81,54 @@ class TaskEngine:
             return []
 
     def site_options(self) -> List[Dict[str, Any]]:
-        """给界面用的站点清单（只有 id 与名称）。"""
-        return [
-            {"id": site.get("id"), "name": site.get("name") or ""}
-            for site in self.sites() if site.get("name")
-        ]
+        """给界面用的站点清单（名称、id 与索引能力说明）。"""
+        out = []
+        for site in self.sites():
+            if not site.get("name"):
+                continue
+            out.append(self.searcher.describe(site))
+        return out
+
+    def _site_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        """按站点名取站点配置（搜索要用到 apikey/cookie，只在内存里流转）。"""
+        for site in self.sites():
+            if site.get("name") == name:
+                return site
+        return None
 
     def _site_cookie(self, site_name: str) -> str:
         """按站点名取 cookie（不落库，避免把密钥写进插件存储）。"""
-        for site in self.sites():
-            if site.get("name") == site_name:
-                return str(site.get("cookie") or "")
-        return ""
+        site = self._site_by_name(site_name)
+        return str((site or {}).get("cookie") or "")
 
     # ---------- 搜索 ----------
 
     def _collect(self, cands: List[Dict[str, Any]], results: List[Any],
                  pref_sites: List[str], rule: Dict[str, Any]) -> None:
-        """把宿主搜索结果转成候选并即时打分。"""
+        """把站点搜索结果转成候选并即时打分。"""
         for torrent in results or []:
             cand = scoring.candidate_from_torrent(torrent, pref_sites)
-            cand["_enclosure"] = str(getattr(torrent, "enclosure", "") or "")
-            cand["_page_url"] = str(getattr(torrent, "page_url", "") or "")
-            cand["_site_name"] = str(getattr(torrent, "site_name", "") or "")
+            cand["_enclosure"] = str(scoring._get(torrent, "enclosure"))
+            cand["_page_url"] = str(scoring._get(torrent, "page_url"))
+            cand["_site_name"] = str(scoring._get(torrent, "site_name"))
+            cand["adapter"] = str(scoring._get(torrent, "adapter"))
             scoring.score_candidate(cand, rule)
             cands.append(cand)
 
-    def search_candidates(self, number: str, rule: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[str]]:
-        """按“优先站点 → 其余站点”顺序搜种，返回（候选, 过程说明）。"""
+    def search_candidates(self, keyword: str, rule: Dict[str, Any],
+                          only_sites: Optional[List[str]] = None
+                          ) -> Tuple[List[Dict[str, Any]], List[str]]:
+        """按“优先站点 → 其余站点”顺序搜种，返回（候选, 过程说明）。
+
+        :param keyword: 搜索词（AV 场景通常是番号，也支持任意关键词做单独检索）
+        :param only_sites: 只搜这些站点（界面里单独检索时用），None 表示按规则选站
+        """
         rule = merge_rule(rule)
         pref_names = [str(x) for x in (rule.get("prefSites") or [])]
-        allow_names = [str(x) for x in (rule.get("sites") or [])]
+        allow_names = [str(x) for x in (only_sites or rule.get("sites") or [])]
         all_sites = self.sites()
         by_name = {s.get("name"): s for s in all_sites if s.get("name")}
-        pref = [by_name[n] for n in pref_names if n in by_name]
+        pref = [by_name[n] for n in pref_names if n in by_name and (not allow_names or n in allow_names)]
         others = [
             s for s in all_sites
             if s not in pref and (not allow_names or s.get("name") in allow_names)
@@ -124,9 +147,9 @@ class TaskEngine:
                     continue
                 self.limiter.throttle()
                 try:
-                    results = self.plugin.chain.search_torrents(
-                        site=site, keyword=number, mtype=MediaType.MOVIE
-                    )
+                    results, note = self.searcher.search(site, keyword)
+                    if note:
+                        notes.append(f"{label}/{note}")
                 except Exception as error:  # 单站失败不影响其它站
                     if is_antibot_error(error):
                         self.limiter.site_cooldown(name)
@@ -138,7 +161,7 @@ class TaskEngine:
                     self.limiter.note_site_search(name)
                 before = len(cands)
                 self._collect(cands, results, pref_names, rule)
-                logger.info(f"AVHelper 在 {name}（{label}）搜到 {len(cands) - before} 个候选：{number}")
+                logger.info(f"AVHelper 在 {name}（{label}）搜到 {len(cands) - before} 个候选：{keyword}")
                 if any(c.get("pass") for c in cands):
                     notes.append(f"{label} {name} 已命中合格候选，停止继续搜索")
                     break
@@ -149,7 +172,7 @@ class TaskEngine:
             notes.append("没有可搜索的站点：请先在 MoviePilot 里配置站点，或在订阅规则里勾选站点")
 
         if not any(c.get("pass") for c in cands) and rule.get("btFallback"):
-            magnets = self.plugin.cli().magnets(number, cnsub=False) or {}
+            magnets = self.plugin.cli().magnets(keyword, cnsub=False) or {}
             for item in (magnets.get("magnets") or [])[:5]:
                 if isinstance(item, dict) and item.get("hash"):
                     cand = scoring.candidate_from_magnet(item, pref_names)
@@ -162,10 +185,11 @@ class TaskEngine:
         return cands, notes
 
     def build_task(self, number: str, actor: str = "", rule: Optional[Dict[str, Any]] = None,
-                   auto: bool = False, thumb: str = "") -> Dict[str, Any]:
+                   auto: bool = False, thumb: str = "",
+                   only_sites: Optional[List[str]] = None) -> Dict[str, Any]:
         """搜种并落库一条任务（含打分明细），返回任务体。"""
         rule = merge_rule(rule)
-        cands, notes = self.search_candidates(number, rule)
+        cands, notes = self.search_candidates(number, rule, only_sites)
         reason = scoring.explain(cands, rule)
         if notes:
             reason = reason + "｜" + "；".join(notes)
@@ -204,18 +228,26 @@ class TaskEngine:
 
         rule = merge_rule(task.get("rule"))
         save_path = str(rule.get("savePath") or DEFAULT_SAVE_PATH)
+        category = str(rule.get("category") or DEFAULT_CATEGORY)
         content = str(cand.get("_enclosure") or "")
         if not content and cand.get("src") == "BT" and cand.get("hash"):
             content = f"magnet:?xt=urn:btih:{cand['hash']}"
         if not content:
             return {"ok": False, "message": "候选缺少下载地址（种子链接或磁力）", "notice": None}
 
-        cookie = self._site_cookie(str(cand.get("_site_name") or ""))
+        # 两段式 enclosure（馒头换票 / 肉丝详情）必须先在插件侧换成种子字节：
+        # 下载链只认种子内容或磁力，宿主解析换票的 download_torrent() 不在插件的可用面上。
+        site = self._site_by_name(str(cand.get("_site_name") or "")) or {}
+        cookie = str(site.get("cookie") or "")
+        resolved, why = self.searcher.resolve(content, site)
+        if resolved is None:
+            return {"ok": False, "message": why or "下载地址解析失败", "notice": None}
         try:
             result = self.plugin.chain.download(
-                content=content,
+                content=resolved,
                 download_dir=Path(save_path),
                 cookie=cookie,
+                category=category or None,
                 downloader=str(rule.get("downloader") or "") or None,
             )
         except Exception as error:
@@ -247,6 +279,8 @@ class TaskEngine:
             "size": cand.get("size") or "",
             "hash": str(torrent_hash or ""),
             "downloader": str(downloader_name or ""),
+            "category": category,
+            "savePath": save_path,
             "state": "down",
             "progress": 0,
             "added": time.strftime("%Y-%m-%d %H:%M:%S"),
