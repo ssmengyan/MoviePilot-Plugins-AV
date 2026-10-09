@@ -10,17 +10,19 @@ import {
   type PluginConfig,
 } from '../composables/usePluginApi'
 import { useRuntimeInfo } from '../composables/useRuntimeInfo'
+import { useSettingsDraft, type RuleState } from '../composables/useSettingsDraft'
+import { useHostConfirm } from '../composables/useHostDialogs'
+import { SETTINGS_SECTIONS, type SectionItem } from './settings/panels'
+import GeneralPanel from './settings/GeneralPanel.vue'
+import SitesPanel from './settings/SitesPanel.vue'
+import RulePanel from './settings/RulePanel.vue'
+import NotifyPanel from './settings/NotifyPanel.vue'
+import LibraryPanel from './settings/LibraryPanel.vue'
+import RuntimePanel from './settings/RuntimePanel.vue'
+import AboutPanel from './settings/AboutPanel.vue'
 
-/** 壳只有两种模式：`data` = 数据台（iframe），`settings` = 设置台（逐栏做实）。 */
+/** 壳只有两种模式：`data` = 数据台（iframe），`settings` = 设置台（七个栏目）。 */
 type ConsoleMode = 'data' | 'settings'
-
-interface SectionItem {
-  key: string
-  title: string
-  icon: string
-  /** 设置台占位卡片里的一句「本栏后续会做什么」。 */
-  hint?: string
-}
 
 /**
  * props 默认值必须自包含（`defineProps()` 会被提升到 setup 之外，不能引用本地变量）：
@@ -50,45 +52,6 @@ const DATA_SECTIONS: SectionItem[] = [
   { key: 'sitesearch', title: '站点搜索', icon: 'mdi-magnify' },
 ]
 
-const SETTINGS_SECTIONS: SectionItem[] = [
-  {
-    key: 'sites',
-    title: '搜索站点',
-    icon: 'mdi-web',
-    hint: '搜索范围站点与优先站点（优先站点命中即停）。按用户要求按钮化：主界面只显示已选站点 chips ＋「选择站点」「优先站点」两个按钮，勾选与排序都在弹窗里做，不再把十几个站点平铺在界面上。数据走 POST /rule 的 sites / prefSites。',
-  },
-  {
-    key: 'rule',
-    title: '下载规则',
-    icon: 'mdi-filter-cog',
-    hint: '分辨率策略、必须中文字幕、破解优先、允许 4K 择优、做种下限、BT 兜底、命中后自动下载还是仅通知、每日检查上限。数据走 POST /rule。',
-  },
-  {
-    key: 'notify',
-    title: '通知',
-    icon: 'mdi-bell',
-    hint: '通知渠道沿用 MoviePilot 原生通知（本插件不另建渠道）；本栏管已读位点与清空，数据走 GET / DELETE /notices。',
-  },
-  {
-    key: 'library',
-    title: '媒体库',
-    icon: 'mdi-server',
-    hint: 'Emby 地址与 API 密钥；两栏都留空 = 自动复用 MoviePilot「设置 → 媒体服务器」里已配置的 Emby。本栏的改动属于宿主配置，走 emit(save) 交给宿主 PUT。',
-  },
-  {
-    key: 'runtime',
-    title: '运行与缓存',
-    icon: 'mdi-database-cog',
-    hint: '缓存占用与清理、javdb 二进制状态，以及限流参数只读展示（订阅检查每天 ≤6 次、间隔 ≥240 分钟，参数不放宽）。',
-  },
-  {
-    key: 'about',
-    title: '关于',
-    icon: 'mdi-information-outline',
-    hint: '版本号、仓库地址、文档链接。',
-  },
-]
-
 const pluginId = computed(() => props.pluginId || props.sourcePluginId || '')
 
 /** iframe 必须用实例 id（普通插件 = pluginId；分身共享同一份联邦产物）。 */
@@ -97,6 +60,10 @@ const framePluginId = computed(() => props.pluginId || props.sourcePluginId || '
 const section = ref<string>(props.mode === 'settings' ? SETTINGS_SECTIONS[0]!.key : DATA_SECTIONS[0]!.key)
 const running = ref(false)
 const version = ref('')
+/** 「清空通知」请求在跑（确认框关闭后到请求结束之间的按钮态）。 */
+const noticeClearing = ref(false)
+
+const isSettings = computed(() => props.mode === 'settings')
 
 const activeSection = computed<SectionItem>(
   () => SETTINGS_SECTIONS.find(item => item.key === section.value) || SETTINGS_SECTIONS[0]!,
@@ -105,6 +72,8 @@ const activeSection = computed<SectionItem>(
 /** 宿主要求复用的统一 toast（官方指南 §5.8）；拿不到时静默降级，不自建 Toast。 */
 const injectedToast = inject<any>('moviepilot:toast', null)
 const toast = hostToast(injectedToast)
+/** 宿主要求复用的确认弹窗（官方指南 §5.10）；拿不到时降级 `window.confirm`。 */
+const confirm = useHostConfirm()
 
 /** 拉不到宿主 api 时的兜底实现：请求立刻失败，走错误分支。 */
 const FALLBACK_API: PluginApi = {
@@ -117,11 +86,61 @@ function currentApi(): PluginApi {
 }
 
 const runtime = useRuntimeInfo(currentApi())
-const { overview, updatedAt, error: runtimeError, loading: runtimeLoading, refresh: refreshRuntime } = runtime
+const { data: bootstrap, overview, updatedAt, error: runtimeError, loading: runtimeLoading, refresh: refreshRuntime } = runtime
+
+/** 设置台草稿：脏标记与保存顺序都在这里（设计文档 §5）。 */
+const draft = useSettingsDraft({
+  api: currentApi(),
+  initialConfig: props.initialConfig,
+  toast: injectedToast,
+  onSaveHost: (config: PluginConfig) => emit('save', config),
+})
+
+/**
+ * 解构出来给模板用：`draft` 是普通对象，模板里 `draft.rule` 拿到的是 ref 本身
+ * 而不是值（只有 `setup()` 返回值与顶层 ref 才会自动解包），所以显式取出。
+ */
+const {
+  rule: ruleDraft,
+  hostConfig,
+  sites,
+  sitesLoaded,
+  notices,
+  cacheText,
+  checkInfo,
+  dirty,
+  enabledKnown,
+  saveButtonLabel,
+  validation,
+  loading: draftLoading,
+  saving: draftSaving,
+  noticeLoading,
+  cacheCleaning,
+  error: draftError,
+  sectionDirty,
+  load: loadDraft,
+  applyBootstrap,
+  save: saveDraft,
+  loadNotices,
+  clearNotices: clearNoticesDraft,
+  cleanCache: cleanCacheDraft,
+} = draft
+
+/** `/bootstrap` 轮询结果灌进草稿：站点清单、缓存占用、限流信息只有它有。 */
+watch(bootstrap, value => applyBootstrap(value), { immediate: true })
 
 const activeNavKey = computed(() =>
-  props.mode === 'settings' ? section.value : `data:${section.value}`,
+  isSettings.value ? section.value : `data:${section.value}`,
 )
+
+/** 草稿还没就绪时（`/rule` 在飞）为 null，面板按需隐藏/回显空值。 */
+const ruleView = computed<RuleState | null>(() => ruleDraft.value)
+
+function patchRule(patch: Partial<RuleState>): void {
+  const current = ruleDraft.value
+  if (!current) return
+  ruleDraft.value = { ...current, ...patch }
+}
 
 function pick(item: SectionItem): void {
   section.value = item.key
@@ -171,10 +190,49 @@ async function runCheck(): Promise<void> {
   }
 }
 
-/** 顶条「保存修改」（仅设置台）：把宿主配置交回宿主保存。 */
-function saveConfig(): void {
-  if (props.mode !== 'settings') return
-  emit('save', { ...(props.initialConfig || {}) } as PluginConfig)
+/**
+ * 顶条「保存修改」（仅设置台）：严格按设计文档 §5 —— 草稿层先 `POST /rule`，
+ * 失败就 toast 报错并**不**把宿主配置交出去（弹窗不关）；成功后才 `emit('save')`。
+ */
+async function saveAll(): Promise<void> {
+  if (draftSaving.value) return
+  const ok = await saveDraft()
+  if (!ok) return
+  emit('action')
+  await refreshRuntime()
+}
+
+/** 「清理缓存」：破坏性操作，先过宿主确认（拿不到注入就降级 `window.confirm`）。 */
+async function cleanCache(): Promise<void> {
+  const ok = await confirm({
+    type: 'warn',
+    title: '清理缓存',
+    content: '将删除插件缓存目录里的图片与 JSON 缓存（不影响已下载的媒体、不删数据库）。确认继续？',
+    confirmText: '清理',
+    cancelText: '取消',
+  })
+  if (!ok) return
+  const done = await cleanCacheDraft()
+  if (!done) return
+  await refreshRuntime()
+}
+
+/** 「清空通知」：不可恢复，同样先确认。 */
+async function clearNotices(): Promise<void> {
+  const ok = await confirm({
+    type: 'warn',
+    title: '清空通知',
+    content: `将清空全部 ${notices.value.length} 条通知，且无法恢复。确认继续？`,
+    confirmText: '清空',
+    cancelText: '取消',
+  })
+  if (!ok) return
+  noticeClearing.value = true
+  try {
+    await clearNoticesDraft()
+  } finally {
+    noticeClearing.value = false
+  }
 }
 
 function closePanel(): void {
@@ -193,6 +251,7 @@ onMounted(() => {
   emit('layout', { maxWidth: DEFAULT_MAX_WIDTH })
   runtime.start()
   void loadVersion()
+  if (props.mode === 'settings') void loadDraft()
 })
 
 onBeforeUnmount(() => {
@@ -227,13 +286,14 @@ onBeforeUnmount(() => {
       >运行一次</v-btn>
 
       <v-btn
-        v-if="props.mode === 'settings'"
-        color="primary"
-        variant="tonal"
+        v-if="isSettings"
+        :color="dirty ? 'warning' : 'primary'"
+        :variant="dirty ? 'flat' : 'tonal'"
         prepend-icon="mdi-content-save"
+        :loading="draftSaving"
         class="me-2"
-        @click="saveConfig"
-      >保存修改</v-btn>
+        @click="saveAll"
+      >{{ saveButtonLabel }}</v-btn>
 
       <v-btn variant="text" prepend-icon="mdi-close" class="me-2" @click="closePanel">关闭</v-btn>
     </v-toolbar>
@@ -244,7 +304,7 @@ onBeforeUnmount(() => {
       <!-- 左栏：栏目导航 -->
       <nav class="avh-nav">
         <v-list density="compact" nav :selected="[activeNavKey]" mandatory>
-          <template v-if="props.mode === 'data'">
+          <template v-if="!isSettings">
             <v-list-subheader>数据台</v-list-subheader>
             <v-list-item
               v-for="item in DATA_SECTIONS"
@@ -265,7 +325,17 @@ onBeforeUnmount(() => {
               :prepend-icon="item.icon"
               :title="item.title"
               @click="pick(item)"
-            />
+            >
+              <template #append>
+                <v-icon
+                  v-if="sectionDirty(item.key)"
+                  icon="mdi-circle"
+                  size="8"
+                  color="warning"
+                  title="本栏有未保存改动"
+                />
+              </template>
+            </v-list-item>
           </template>
         </v-list>
 
@@ -274,17 +344,17 @@ onBeforeUnmount(() => {
           block
           size="small"
           variant="text"
-          :prepend-icon="props.mode === 'settings' ? 'mdi-view-dashboard-outline' : 'mdi-cog-outline'"
+          :prepend-icon="isSettings ? 'mdi-view-dashboard-outline' : 'mdi-cog-outline'"
           class="mt-2"
           @click="emit('switch')"
-        >{{ props.mode === 'settings' ? '打开数据台' : '打开设置台' }}</v-btn>
+        >{{ isSettings ? '打开数据台' : '打开设置台' }}</v-btn>
       </nav>
 
       <v-divider vertical />
 
       <!-- 内容区 -->
       <section class="avh-content">
-        <template v-if="props.mode === 'data'">
+        <template v-if="!isSettings">
           <AppFrame
             v-if="framePluginId"
             :plugin-id="framePluginId"
@@ -297,26 +367,79 @@ onBeforeUnmount(() => {
         </template>
 
         <template v-else>
-          <v-card variant="tonal" class="avh-placeholder">
-            <v-card-item>
-              <template #prepend>
-                <v-icon :icon="activeSection.icon" color="primary" />
-              </template>
-              <v-card-title>{{ activeSection.title }}</v-card-title>
-              <v-card-subtitle>设置台骨架 · S5 阶段做实</v-card-subtitle>
-            </v-card-item>
-            <v-card-text>
-              <p class="mb-3">{{ activeSection.hint }}</p>
-              <v-divider class="my-4" />
-              <p class="text-caption text-medium-emphasis mb-2">
-                保存语义（设计文档 §5）：先提交插件自管数据（<code>POST /rule</code>），再 <code>emit('save', config)</code>
-                交给宿主保存插件配置；第一步失败就不提交第二步，弹窗不关。
-              </p>
-              <p class="text-caption text-medium-emphasis mb-0">
-                未保存标记：任一字段变脏就在顶条显示「● 未保存」。
-              </p>
-            </v-card-text>
-          </v-card>
+          <v-alert
+            v-if="draftError"
+            type="warning"
+            variant="tonal"
+            density="compact"
+            class="text-caption mb-3"
+          >{{ draftError }}</v-alert>
+
+          <!-- 规则草稿还没到位时才出骨架（`/rule` 在飞）。它是独立的，不参与下面的
+               v-if/v-else-if 链：否则「常规」「通知」这些不依赖规则的栏目会被一起挡住。 -->
+          <v-skeleton-loader v-if="draftLoading && !ruleView" type="article" class="mb-3" />
+
+          <GeneralPanel
+            v-if="section === 'general'"
+            :config="hostConfig"
+            :enabled-known="enabledKnown"
+            @patch="(patch: any) => Object.assign(hostConfig, patch)"
+          />
+
+          <SitesPanel
+            v-else-if="section === 'sites'"
+            :sites="ruleView?.sites || []"
+            :pref-sites="ruleView?.prefSites || []"
+            :options="sites"
+            :loaded="sitesLoaded"
+            @update:sites="(value: string[]) => patchRule({ sites: value })"
+            @update:pref-sites="(value: string[]) => patchRule({ prefSites: value })"
+          />
+
+          <RulePanel
+            v-else-if="section === 'rule' && ruleView"
+            :rule="ruleView"
+            :policy-min-interval="checkInfo?.minIntervalMin || 0"
+            :site-scope-count="ruleView.sites.length"
+            @patch="patchRule"
+          />
+
+          <NotifyPanel
+            v-else-if="section === 'notify'"
+            :notices="notices"
+            :loading="noticeLoading"
+            :clearing="noticeClearing"
+            @clear="clearNotices"
+            @reload="loadNotices"
+          />
+
+          <LibraryPanel
+            v-else-if="section === 'library'"
+            :config="hostConfig"
+            :validation="validation"
+            @patch="(patch: any) => Object.assign(hostConfig, patch)"
+          />
+
+          <RuntimePanel
+            v-else-if="section === 'runtime'"
+            :cache-text="cacheText"
+            :check="checkInfo"
+            :cleaning="cacheCleaning"
+            :loading="runtimeLoading"
+            @clean="cleanCache"
+            @refresh="refreshRuntime()"
+          />
+
+          <AboutPanel
+            v-else-if="section === 'about'"
+            :version="version"
+            :plugin-id="props.pluginId"
+            :source-plugin-id="props.sourcePluginId"
+          />
+
+          <v-alert v-else type="info" variant="tonal">
+            未知栏目：{{ activeSection.title }}
+          </v-alert>
         </template>
       </section>
 

@@ -1,17 +1,20 @@
 import { computed, ref, type Ref } from 'vue'
 import { errorText, type PluginApi } from './usePluginApi'
+import {
+  formatBytes,
+  formatCheckTime,
+  toCheckInfo,
+  type BootstrapLike,
+  type CheckInfo,
+} from './settingsModel'
 
 /** `/bootstrap` 里用得到的字段（其余原样透传，不做假设）。 */
-export interface BootstrapData {
-  enabled?: boolean
-  sites?: any[]
+export interface BootstrapData extends BootstrapLike {
   favs?: any[]
   subs?: any[]
   known?: any[]
-  notices?: any[]
   tasks?: any[]
   queue?: any[]
-  defaultRule?: Record<string, any>
 }
 
 /** 右栏「运行概况」能显示的几行。取不到的行显示 `—`，不编造数据。 */
@@ -22,10 +25,12 @@ export interface RuntimeOverview {
   downloading: number | null
   favorites: number | null
   notices: number | null
-  /** 后端暂未提供缓存占用（`/bootstrap` 里没有该字段）：显示 `—`。 */
+  /** 缓存占用：`/bootstrap.cacheSizeText` 优先，没有就用 `cacheSize` 换算，都没有 = `—`。 */
   cacheSize: string
-  /** 后端暂未提供下次检查时间（`/bootstrap` 里没有该字段）：显示 `—`。 */
+  /** 下次可检查时间：`/bootstrap.check.nextAt`（epoch 秒，`0` = 现在可检查），没上线 = `—`。 */
   nextCheck: string
+  /** 限流只读展示用的归一结果（字段没上线 = `null`）。 */
+  check: CheckInfo | null
 }
 
 export const POLL_INTERVAL_MS = 15_000
@@ -49,6 +54,10 @@ export function useRuntimeInfo(api: PluginApi) {
     const d = data.value
     const queue = Array.isArray(d?.queue) ? d?.queue : null
     const tasks = Array.isArray(d?.tasks) ? d?.tasks : null
+    const check = toCheckInfo(d?.check)
+    const cacheText = typeof d?.cacheSizeText === 'string' ? d.cacheSizeText.trim() : ''
+    const cacheBytes = Number.isFinite(Number(d?.cacheSize)) ? Number(d?.cacheSize) : null
+
     return {
       enabled: typeof d?.enabled === 'boolean' ? d.enabled : null,
       subs: len(d?.subs),
@@ -56,8 +65,10 @@ export function useRuntimeInfo(api: PluginApi) {
       downloading: queue ? queue.filter((item: any) => item?.state !== 'done').length : null,
       favorites: len(d?.favs),
       notices: len(d?.notices),
-      cacheSize: '—',
-      nextCheck: '—',
+      // 两个字段都是后端本轮在补的：取不到就 `—`，不编造。
+      cacheSize: cacheText || formatBytes(cacheBytes) || '—',
+      nextCheck: formatCheckTime(check?.nextAt, 'next'),
+      check,
     }
   })
 

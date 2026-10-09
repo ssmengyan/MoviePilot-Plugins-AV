@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import Console from './Console.vue'
 import { consoleEmits } from './emitContract'
-import { HOST_PROPS_DEFAULTS, type ConfigProps } from './contract'
+import { type ConfigProps } from './contract'
 
 /**
  * 暴露给宿主的 `./Config`：插件配置弹窗正文（`initialConfig` = `get_form()` 的 model）。
