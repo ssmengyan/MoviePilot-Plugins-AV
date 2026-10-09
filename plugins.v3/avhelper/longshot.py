@@ -1,11 +1,16 @@
-"""长缩略图（长条剧情图）解析：projectjav 渠道，只解析 URL 不下载图片（执行方案 §7.2）。
+"""长缩略图（长条剧情图）解析：projectjav 主源 + javfree 备源，只解析 URL 不下载图片（执行方案 §7.2）。
 
-解析链路：搜索页 `?searchTerm={番号}` → 在该番号的结果卡片里取
-`a[data-featherlight="image"]` 的 href（实测列表页的卡片本身就带这个链接，1224×5817，
-与详情页取到的是同一张）；卡片里没有时才退回进详情页取。实测该图无防盗链，但域名需走代理，
-因此图片本身交给浏览器直连加载，后端只负责解析并把 URL 缓存 7 天。
+渠道照抄油猴脚本 JHS-enhance/src/plugins/screenshot.js 的 Thumbnail 类：
+  1) projectjav：`?searchTerm={番号}` 的列表卡片自带 `a[data-featherlight="image"]`，
+     实测与详情页取到的是同一张（1224×5817），所以先按卡片取；卡片里没有才进详情页。
+  2) javfree：`/search/{番号}` → `.entry-title > a` 命中的详情页 → `p > img` 里优先 `-1080p`，
+     其次 `-demosaic`，再次 `_1`（实测 1200×6858，比 projectjav 还长，且不校验 Referer）。
+  javstore 的 "CLICK HERE" 规则对现行页面已失效（油猴脚本里也只剩兜底），不实现。
 
-javstore 的 "CLICK HERE" 规则已失效，不实现。
+⚠️ 防盗链（2026-10-11 实测）：images.projectjav.com 会校验 Referer —— 空 Referer 或
+projectjav 自己域名放行，带 MoviePilot 页面地址（或 https://javdb.com/）一律 403。
+所以前端 <img> 必须带 referrerpolicy="no-referrer"，否则图片一定加载失败。
+图片本身始终由浏览器直连加载，后端只负责解析 URL 并缓存 7 天。
 """
 
 import html
@@ -13,8 +18,10 @@ import re
 import urllib.parse
 from typing import Callable, List, Optional
 
-PJ_SEARCH = "https://projectjav.com/?searchTerm=%s"
-PJ_REFERER = "https://projectjav.com/"
+PJ_HOST = "https://projectjav.com"
+PJ_SEARCH = PJ_HOST + "/?searchTerm=%s"
+JF_HOST = "https://javfree.me"
+JF_SEARCH = JF_HOST + "/search/%s"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
 
@@ -29,6 +36,13 @@ _FEATHER_RE2 = re.compile(
 )
 # 列表页的结果卡片边界：每张卡片一个 video-item 块，长图链接必须按卡片取，不能跨卡片拿
 _CARD_SPLIT_RE = re.compile(r'<div[^>]+class=["\'][^"\']*\bvideo-item\b[^"\']*["\']', re.I)
+# javfree（WordPress）：搜索结果标题链 + 详情页正文图
+_JF_LINK_RE = re.compile(
+    r'<h[1-6][^>]*class=["\'][^"\']*entry-title[^"\']*["\'][^>]*>\s*'
+    r'<a[^>]+href=["\']([^"\']+)["\']', re.I)
+_JF_IMG_RE = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.I)
+# 油猴脚本的优先级：1080p 长图 → 去马赛克版 → 单张预览
+_JF_PREFER = ("-1080p.", "-demosaic.", "_1.")
 
 
 def norm_number(text: str) -> str:
@@ -66,39 +80,80 @@ def _long_from_cards(page: str, want: str) -> Optional[str]:
     return None
 
 
+def _detail_hrefs(page: str, want: str) -> List[str]:
+    """列表页里命中该番号的详情页链接（去重、保序）。"""
+    hrefs = [
+        href for href, text in _MOVIE_LINK_RE.findall(page)
+        if want in norm_number(_TAG_RE.sub("", text))
+    ]
+    return list(dict.fromkeys(hrefs))
+
+
+def from_projectjav(number: str, fetcher: Callable[[str, str], Optional[str]]) -> Optional[str]:
+    """projectjav：列表卡片 → 详情页（同款选择器）。"""
+    search_url = PJ_SEARCH % urllib.parse.quote(str(number))
+    page = fetcher(search_url, PJ_HOST + "/")
+    if not page:
+        return None
+    want = norm_number(number)
+    found = _long_from_cards(page, want)
+    if found:
+        return found
+    for href in _detail_hrefs(page, want)[:2]:
+        detail = fetcher(PJ_HOST + href, search_url)
+        if not detail:
+            continue
+        found = _long_url_in(detail)
+        if found:
+            return found
+    return None
+
+
+def from_javfree(number: str, fetcher: Callable[[str, str], Optional[str]]) -> Optional[str]:
+    """javfree：搜索页 → 番号命中的详情页 → 正文图里按优先级挑长图。"""
+    want = norm_number(number)
+    if not want:
+        return None
+    search_url = JF_SEARCH % urllib.parse.quote(str(number))
+    page = fetcher(search_url, JF_HOST + "/")
+    if not page:
+        return None
+    link = next(
+        (href for href in _JF_LINK_RE.findall(page) if want in norm_number(href)),
+        None,
+    )
+    if not link:
+        return None
+    if link.startswith("//"):
+        link = "https:" + link
+    detail = fetcher(link, search_url)
+    if not detail:
+        return None
+    urls = [html.unescape(u) for u in _JF_IMG_RE.findall(detail) if want in norm_number(u)]
+    for key in _JF_PREFER:
+        hit = next((u for u in urls if key in u.lower()), None)
+        if hit:
+            return hit
+    return None
+
+
 def resolve_long(number: str, fetcher: Callable[[str, str], Optional[str]]) -> Optional[str]:
-    """解析一个番号的长图 URL。
+    """按油猴脚本的源顺序解析一个番号的长图 URL。
 
     :param number: 番号，如 IPZZ-961
     :param fetcher: (url, referer) -> 页面 HTML 或 None；由调用方注入带代理的抓取实现
-    :return: 长图 URL；找不到或异常时返回 None
+    :return: 长图 URL；所有源都没找到或异常时返回 None
     """
     if not number:
         return None
     want = norm_number(number)
     if not want:
         return None
-    try:
-        search_url = PJ_SEARCH % urllib.parse.quote(str(number))
-        page = fetcher(search_url, PJ_REFERER)
-        if not page:
-            return None
-        # 列表页卡片里通常已经带长图链接：命中就省掉一次详情页抓取（实测省一半时间）
-        found = _long_from_cards(page, want)
-        if found:
-            return found
-        # 回退：进详情页取（页面结构变化时的兜底路径）
-        candidates = [
-            href for href, text in _MOVIE_LINK_RE.findall(page)
-            if want in norm_number(_TAG_RE.sub("", text))
-        ]
-        for href in candidates[:2]:
-            detail = fetcher("https://projectjav.com" + href, PJ_REFERER)
-            if not detail:
-                continue
-            found = _long_url_in(detail)
-            if found:
-                return found
-        return None
-    except Exception:  # 外部站点改版属于常态，失败即降级为“未找到长图”
-        return None
+    for source in (from_projectjav, from_javfree):
+        try:
+            url = source(number, fetcher)
+        except Exception:  # 外部站点改版属于常态，单源失败不影响下一个源
+            url = None
+        if url:
+            return url
+    return None

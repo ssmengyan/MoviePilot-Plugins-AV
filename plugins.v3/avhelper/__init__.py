@@ -24,7 +24,7 @@ from app.sdk.network import RequestUtils
 from app.sdk.plugin import _PluginBase
 from app.sdk.scheduler import add_plugin_once_job, remove_plugin_once_job
 
-from . import imgproxy, longshot, scoring
+from . import emby, imgproxy, longshot, scoring
 from .client import JavdbClient
 from .notify import Notifier
 from .ratelimit import RateLimiter
@@ -58,7 +58,7 @@ class AVHelper(_PluginBase):
     plugin_name = "AV 资源助手"
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
     plugin_icon = "Moviepilot_A.png"
-    plugin_version = "0.2.4"
+    plugin_version = "0.2.5"
     plugin_label = "发现"
     plugin_author = "local"
     plugin_config_prefix = "avhelper_"
@@ -72,6 +72,10 @@ class AVHelper(_PluginBase):
     _limiter: Optional[RateLimiter] = None
     _notifier: Optional[Notifier] = None
     _engine: Optional[TaskEngine] = None
+    _emby_host = ""
+    _emby_apikey = ""
+    _emby_lib: Optional[emby.EmbyLibrary] = None
+    _emby_sig: Optional[Tuple[str, str]] = None
 
     # ---------- 生命周期 ----------
 
@@ -85,9 +89,15 @@ class AVHelper(_PluginBase):
         self._engine = TaskEngine(self, self._store, self._limiter, self._notifier)
 
         self._enabled = False
+        self._emby_host = ""
+        self._emby_apikey = ""
         if config:
             self._enabled = bool(config.get("enabled"))
             self._proxy = str(config.get("proxy") or self._proxy)
+            self._emby_host = str(config.get("emby_host") or "").strip()
+            self._emby_apikey = str(config.get("emby_apikey") or "").strip()
+        self._emby_lib = None
+        self._emby_sig = None
         self._client = JavdbClient(proxy=self._proxy)
 
     def get_state(self) -> bool:
@@ -188,13 +198,31 @@ class AVHelper(_PluginBase):
                                                     "placeholder": "http://host:port"}}]},
                         ],
                     },
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {"component": "VCol", "props": {"cols": 12, "md": 6},
+                             "content": [{"component": "VTextField",
+                                          "props": {"model": "emby_host", "label": "Emby 地址（可留空）",
+                                                    "placeholder": "留空则用 MoviePilot 已配置的媒体服务器"}}]},
+                            {"component": "VCol", "props": {"cols": 12, "md": 6},
+                             "content": [{"component": "VTextField",
+                                          "props": {"model": "emby_apikey", "label": "Emby API 密钥（可留空）",
+                                                    "placeholder": "留空则用 MoviePilot 已配置的媒体服务器"}}]},
+                        ],
+                    },
                     {"component": "VAlert",
                      "props": {"type": "info", "variant": "tonal", "class": "mt-2"},
                      "text": "完整界面在插件详情页内（内嵌应用）：榜单、演员、订阅、任务、通知与站点检索都在里面。"},
+                    {"component": "VAlert",
+                     "props": {"type": "info", "variant": "tonal", "class": "mt-2"},
+                     "text": "Emby 用于给界面里的番号打「已入库」标记（没有的片不显示标记）。"
+                             "两栏都留空时自动复用 MoviePilot「设置 → 媒体服务器」里的 Emby。"},
                 ],
             }
         ]
-        return form, {"enabled": self._enabled, "proxy": self._proxy}
+        return form, {"enabled": self._enabled, "proxy": self._proxy,
+                      "emby_host": self._emby_host, "emby_apikey": self._emby_apikey}
 
     def get_page(self) -> Optional[List[dict]]:
         """详情页：内嵌自带应用界面（宿主 JSON 页面无法承载交互式界面）。"""
@@ -211,7 +239,7 @@ class AVHelper(_PluginBase):
                 "props": {
                     "src": src,
                     "style": "width:100%;height:78vh;min-height:560px;border:0;margin-top:8px;"
-                             "border-radius:10px;background:#0b0f17",
+                             "border-radius:10px;background:transparent",
                 },
             },
         ]
@@ -259,6 +287,8 @@ class AVHelper(_PluginBase):
              "auth": "bear", "summary": "搜种并打分"},
             {"path": "/tasks/download", "endpoint": self.api_task_download, "methods": ["POST"],
              "auth": "bear", "summary": "提交下载"},
+            {"path": "/magnet-download", "endpoint": self.api_magnet_download, "methods": ["POST"],
+             "auth": "bear", "summary": "详情页磁力直接下载"},
             {"path": "/check", "endpoint": self.api_check, "methods": ["POST"], "auth": "bear",
              "summary": "手动检查订阅(受限流)"},
             {"path": "/notices", "endpoint": self.api_notices, "methods": ["GET", "DELETE"],
@@ -303,6 +333,24 @@ class AVHelper(_PluginBase):
         if self._client is None:
             self._client = JavdbClient(proxy=self._proxy)
         return self._client
+
+    def emby(self) -> emby.EmbyLibrary:
+        """Emby 库查询入口（连接信息变了就换实例，索引随之重建）。"""
+        host, apikey = self._emby_conn()
+        sig = (host, apikey)
+        if self._emby_lib is None or self._emby_sig != sig:
+            self._emby_lib = emby.EmbyLibrary(host, apikey)
+            self._emby_sig = sig
+        return self._emby_lib
+
+    def _emby_conn(self) -> Tuple[str, str]:
+        """Emby 连接：插件自己配了就用插件的，否则复用 MP 的媒体服务器配置。
+
+        两条路都取不到时返回空串，查询一律落空 → 界面不显示任何「已入库」标记。
+        """
+        if self._emby_host and self._emby_apikey:
+            return self._emby_host, self._emby_apikey
+        return emby.mp_emby_conf()
 
     def image_url(self, url: Any) -> str:
         """把图床地址转成本插件图片代理地址（前端可直接 <img src>）。"""
@@ -387,7 +435,6 @@ class AVHelper(_PluginBase):
                 item["thumb"] = hit
                 changed = True
         return changed
-
 
     def global_rule(self) -> Dict[str, Any]:
         """全局默认规则：用户在界面编辑、存 kv 表；手动搜种与新建订阅都以它为基准。"""
@@ -505,7 +552,11 @@ class AVHelper(_PluginBase):
         return detail, magnets
 
     def _movie(self, raw: Dict[str, Any], kind: str = "", actor: str = "") -> Dict[str, Any]:
-        """把 javdb 记录归一化成契约里的 movie 结构（图片转代理地址）。"""
+        """把 javdb 记录归一化成契约里的 movie 结构（图片转代理地址）。
+
+        额外带一个 `lib` 字段：番号已在 Emby 库中时是 `{id,name,path,url}`，否则不带该字段
+        （前端只在有 `lib` 时显示「已入库」，没有就什么都不显示）。
+        """
         number = str(raw.get("number") or "")
         who = actor or self._actor_of(number)
         uncensored = (
@@ -513,7 +564,7 @@ class AVHelper(_PluginBase):
             or str(raw.get("type") or "").lower() == "uncensored"
             or number.upper().startswith("FC2")
         )
-        return {
+        movie = {
             "number": number,
             "title": str(raw.get("title") or raw.get("origin_title") or ""),
             "cover": self.image_url(raw.get("cover_url")),
@@ -529,6 +580,10 @@ class AVHelper(_PluginBase):
             "actor_avatar": self.image_url(raw.get("actor_avatar")),
             "id": str(raw.get("id") or ""),
         }
+        lib = self.emby().lookup(number)
+        if lib:
+            movie["lib"] = lib
+        return movie
 
     # ---------- API：界面与图片 ----------
 
@@ -547,11 +602,14 @@ class AVHelper(_PluginBase):
         return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
     def api_img(self, url: str) -> Response:
-        """图片代理：白名单内 URL → XOR 解包后的 JPEG，否则 404。"""
+        """图片代理：白名单内 URL → XOR 解包后的图片，否则 404。
+
+        平时只服务 javdb 封面/预览图；长缩略图在浏览器直连失败时才退回这里（WebP 原样透传）。
+        """
         blob = imgproxy.fetch(url or "")
         if blob is None:
             return Response(status_code=404)
-        return Response(content=blob, media_type="image/jpeg",
+        return Response(content=blob, media_type=imgproxy.media_type(blob),
                         headers={"Cache-Control": "public, max-age=2592000"})
 
     # ---------- API：只读数据 ----------
@@ -647,8 +705,8 @@ class AVHelper(_PluginBase):
         """影片详情：归一化信息 + 演员 + 预览图（代理地址）+ 磁力。
 
         `id` 是 javdb 内部 id（榜单卡片里就有），带上可省掉一次「番号 → id」搜索往返。
-        长图地址只读缓存：未命中就留空，由前端点开长图时再调 /longimage（projectjav
-        那一跳比详情本身还慢，不能挂在首屏关键路径上）。
+        长图地址只读缓存：未命中就留空，前端把详情画完后再自己调 /longimage 补上
+        （projectjav/javfree 那一跳比详情本身还慢，不能挂在首屏关键路径上）。
         """
         if not number:
             return {"success": False, "message": "缺少番号"}
@@ -694,31 +752,34 @@ class AVHelper(_PluginBase):
         """只读长图 URL 缓存（不抓取）；未命中返回空串。"""
         return str(self.store.kv_get(f"long:{number}") or "")
 
-    def _long_url(self, number: str) -> str:
+    def _long_url(self, number: str, force: bool = False) -> str:
         """解析并缓存长图 URL（只解析不下载，图片由前端直连）。
 
-        一次列表页抓取即可拿到长图链接（实测卡片自带 data-featherlight），
-        只有该路径失效时才回退进详情页，所以首次约 5 秒、命中后 7 天免费。
+        渠道与油猴脚本 JHS-enhance 一致，见 longshot.py：projectjav 列表卡片一次抓取通常就能
+        拿到长图链接（实测卡片自带 data-featherlight），拿不到才进详情页，再不行退 javfree。
+        首次约 5 秒、命中后 7 天免费；`force` 供界面上的「重试」绕过缓存重新解析。
         """
         cache_key = f"long:{number}"
-        cached = self.store.kv_get(cache_key)
-        if cached is not None:
-            return str(cached or "")
+        if not force:
+            cached = self.store.kv_get(cache_key)
+            if cached is not None:
+                return str(cached or "")
 
         def fetcher(url: str, referer: str) -> Optional[str]:
-            """带代理抓取 projectjav 页面。"""
+            """带代理抓取 projectjav / javfree 页面。"""
             return RequestUtils().get(url, headers={"User-Agent": longshot.UA, "Referer": referer},
                                       proxies={"http": self._proxy, "https": self._proxy})
 
         url = longshot.resolve_long(number, fetcher) or ""
-        self.store.kv_set(cache_key, url, ttl=TTL_LONG)
+        # 找到了压 7 天；没找到只压 2 分钟负缓存——否则新片/改版会被判「没有」整整一周，重试也没用
+        self.store.kv_set(cache_key, url, ttl=TTL_LONG if url else FAIL_TTL)
         return url
 
-    def api_longimage(self, number: str) -> Dict[str, Any]:
-        """只取长图 URL。"""
+    def api_longimage(self, number: str, force: bool = False) -> Dict[str, Any]:
+        """只取长图 URL；`force=1` 绕过缓存重新解析（界面上的「重试」）。"""
         if not number:
             return {"success": False, "message": "缺少番号", "url": ""}
-        return {"success": True, "url": self._long_url(number)}
+        return {"success": True, "url": self._long_url(number, force)}
 
     def api_sites(self) -> Dict[str, Any]:
         """返回 MoviePilot 已配置的站点清单。"""
@@ -820,6 +881,24 @@ class AVHelper(_PluginBase):
         return {"success": bool(result.get("ok")), "message": result.get("message") or "",
                 "notice": result.get("notice"), "hash": result.get("hash"),
                 "downloader": result.get("downloader"), "queue": self.engine.queue()}
+
+    async def api_magnet_download(self, request: Request) -> Dict[str, Any]:
+        """把详情页某条磁力直接推给下载器（界面上的「下载」按钮）。
+
+        以前只有磁力 Hash 可复制，用户得自己粘到下载器里；现在一步到位。
+        用的是全局规则里的保存路径 / 分类 / 下载器，推成功会进「下载」队列。
+        """
+        payload = await self._json_body(request)
+        info_hash = str(payload.get("hash") or "").strip()
+        if not info_hash:
+            return {"success": False, "message": "缺少磁力 Hash"}
+        result = await asyncio.to_thread(
+            self.engine.download_magnet, str(payload.get("number") or ""), info_hash,
+            str(payload.get("name") or ""),
+        )
+        return {"success": bool(result.get("ok")), "message": result.get("message") or "",
+                "hash": result.get("hash"), "downloader": result.get("downloader"),
+                "queue": self.engine.queue()}
 
     async def api_check(self, request: Request) -> Dict[str, Any]:
         """手动检查订阅（受限流；也可由定时任务触发）。"""

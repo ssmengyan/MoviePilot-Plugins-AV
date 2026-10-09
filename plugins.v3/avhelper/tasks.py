@@ -14,6 +14,7 @@
 /media/9kg/avi，因此不需要手工维护目录）。
 """
 
+import re
 import time
 import uuid
 from pathlib import Path
@@ -316,6 +317,64 @@ class TaskEngine:
             task["number"], cand, image=self._absolute(task.get("thumb"), image_base)
         )
         return {"ok": True, "message": str(message or "已提交下载"), "notice": notice,
+                "hash": torrent_hash, "downloader": downloader_name}
+
+    def download_magnet(self, number: str, info_hash: str, name: str = "") -> Dict[str, Any]:
+        """详情页磁力直接推给下载器（界面上的「下载」，省掉复制再粘贴）。
+
+        与 download() 的区别：候选不是站点搜来的，而是 javdb 详情页里的磁力 Hash，
+        没有打分与规则淘汰一说，直接用全局规则里的保存路径、分类与下载器。
+        """
+        digest = re.sub(r"[^0-9a-fA-F]", "", str(info_hash or "")).lower()
+        if len(digest) != 40:
+            return {"ok": False, "message": "磁力 Hash 不是 40 位十六进制", "notice": None}
+        rule = merge_rule(self.plugin.global_rule())
+        save_path = str(rule.get("savePath") or DEFAULT_SAVE_PATH)
+        category = str(rule.get("category") or DEFAULT_CATEGORY)
+        try:
+            result = self.plugin.chain.download(
+                content=f"magnet:?xt=urn:btih:{digest}",
+                download_dir=Path(save_path),
+                cookie="",
+                category=category or None,
+                downloader=str(rule.get("downloader") or "") or None,
+            )
+        except Exception as error:
+            logger.error(f"AVHelper 磁力提交失败：{error}")
+            return {"ok": False, "message": f"提交下载失败：{str(error)[:160]}", "notice": None}
+        if not result:
+            return {"ok": False, "message": "下载器没有接受该磁力，请检查下载器配置", "notice": None}
+
+        # 宿主返回 (下载器名, 种子Hash, 布局, 消息)：成功与否只能看 hash 是否存在
+        logger.info(f"AVHelper 磁力下载返回：{result!r}")
+        parts = list(result) if isinstance(result, (list, tuple)) else [result]
+        downloader_name = parts[0] if len(parts) > 0 else None
+        torrent_hash = parts[1] if len(parts) > 1 else None
+        message = parts[3] if len(parts) > 3 else None
+        if not torrent_hash:
+            return {"ok": False, "message": f"下载器未返回种子 Hash：{message or '未知原因'}",
+                    "notice": None}
+
+        if number:
+            self.store.known_add(number, "")
+        queue = self.store.kv_get(QUEUE_KEY, []) or []
+        queue.insert(0, {
+            "id": "q" + uuid.uuid4().hex[:8],
+            "number": number,
+            "thumb": self.plugin.thumbs_of([number]).get(number, "") if number else "",
+            "site": "JavDB 磁力",
+            "spec": str(name or "")[:60],
+            "size": "",
+            "hash": str(torrent_hash or ""),
+            "downloader": str(downloader_name or ""),
+            "category": category,
+            "savePath": save_path,
+            "state": "down",
+            "progress": 0,
+            "added": time.strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        self.store.kv_set(QUEUE_KEY, queue[:50])
+        return {"ok": True, "message": str(message or "已提交下载"), "notice": None,
                 "hash": torrent_hash, "downloader": downloader_name}
 
     @staticmethod

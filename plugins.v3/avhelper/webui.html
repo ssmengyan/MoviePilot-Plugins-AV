@@ -24,10 +24,8 @@ input,select{font:inherit}
 ::-webkit-scrollbar{width:10px;height:10px}
 ::-webkit-scrollbar-thumb{background:#2b3542;border-radius:6px}
 
-/* 顶栏 */
-header{display:flex;align-items:center;gap:12px;padding:10px 16px;background:var(--bg2);border-bottom:1px solid var(--line);flex:none}
-.logo{font-weight:700;display:flex;align-items:center;gap:8px;white-space:nowrap}
-.logo b{color:var(--acc)}
+/* 顶栏（左上角不再放标题：宿主插件页已经写了「AV 资源助手」，重复多余） */
+header{display:flex;align-items:center;gap:12px;padding:8px 14px;background:var(--bg2);border-bottom:1px solid var(--line);flex:none}
 .bellbadge{display:inline-block;background:var(--acc2);color:#fff;border-radius:999px;font-size:11px;padding:0 6px;line-height:16px;min-width:16px;text-align:center;margin-left:6px}
 .bellbadge.zero{display:none}
 .searchbox{display:flex;align-items:center;gap:0;flex:1;max-width:420px}
@@ -45,13 +43,13 @@ header{display:flex;align-items:center;gap:12px;padding:10px 16px;background:var
 .ghost:disabled{opacity:.45;cursor:not-allowed}
 
 /* 导航 */
-nav{display:flex;gap:2px;padding:0 16px;background:var(--bg2);border-bottom:1px solid var(--line);flex:none}
-nav button{padding:11px 16px;color:var(--fg3);border-bottom:2px solid transparent;font-size:13px;display:flex;align-items:center;gap:7px}
+nav{display:flex;gap:2px;padding:0 14px;background:var(--bg2);border-bottom:1px solid var(--line);flex:none}
+nav button{padding:9px 14px;color:var(--fg3);border-bottom:2px solid transparent;font-size:13px;display:flex;align-items:center;gap:7px}
 nav button.on{color:var(--fg);border-bottom-color:var(--acc)}
 nav .pill{background:var(--acc2);color:#fff;border-radius:999px;font-size:11px;padding:0 6px;line-height:16px;min-width:16px;text-align:center}
 nav .pill.warn{background:var(--warn);color:#2b2100}
 
-main{flex:1;overflow:auto;padding:16px}
+main{flex:1;overflow:auto;padding:14px}
 .toolbar{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
 .tabs{display:flex;gap:4px;background:var(--bg3);border:1px solid var(--line);border-radius:8px;padding:3px}
 .tabs button{padding:4px 12px;border-radius:6px;font-size:12px;color:var(--fg3)}
@@ -123,8 +121,13 @@ main{flex:1;overflow:auto;padding:16px}
 .actorchip{display:flex;align-items:center;gap:7px;background:var(--bg3);border:1px solid var(--line);border-radius:999px;padding:3px 12px 3px 3px;cursor:pointer;font-size:13px}
 .actorchip:hover{border-color:var(--pink)}
 .actorchip img{width:26px;height:26px;border-radius:50%;object-fit:cover;background:#2a3442}
-.shots{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));margin-top:6px}
-.shots img{width:100%;display:block;border-radius:8px;cursor:zoom-in;background:#2a3442;aspect-ratio:4/3;object-fit:cover}
+.shots{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));margin-top:6px}
+/* 预览图横竖混排（实测 800×534 与 534×800 都有）：格子固定 16:9 铺满，图用 contain 完整显示，
+   底下垫一层同图模糊底填满留白——固定比例 + cover 会把竖图裁掉一半 */
+.shot{position:relative;aspect-ratio:16/9;border-radius:8px;overflow:hidden;background:#2a3442;cursor:zoom-in}
+.shot::before{content:'';position:absolute;inset:-10px;background-image:var(--bg,none);background-size:cover;background-position:center;filter:blur(16px);opacity:.45}
+.shots img{position:relative;z-index:1;width:100%;height:100%;object-fit:contain;display:block}
+.shot .noimg{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;color:var(--fg3);font-size:12px}
 .longwrap{margin-top:8px}
 .longwrap img{max-width:100%;display:block;border-radius:8px;cursor:zoom-in;background:#2a3442}
 .longerr{color:var(--warn);font-size:12px;line-height:1.8}
@@ -464,14 +467,12 @@ tr.bt td{background:rgba(var(--g-on),.05)}
 <body>
 
 <header>
-  <div class="logo">🎬 AV 资源管理 <b>· AVHelper</b></div>
   <div class="searchbox">
     <input id="qInput" placeholder="搜索番号 / 演员（如 SSIS-001）…" autocomplete="off">
     <button id="qBtn">搜索</button>
   </div>
   <div class="spacer"></div>
   <button class="ghost" id="bellBtn">🔔 通知<span class="bellbadge zero" id="bellCount">0</span></button>
-  <button class="ghost" id="resetBtn">重载</button>
 </header>
 
 <div id="authbar">
@@ -669,9 +670,10 @@ function renderPills(){
   $('#pillSubs').textContent = S.subs.length;
   $('#pillTasks').textContent = pend;
   $('#pillQueue').textContent = S.queue.filter(q => q.state !== 'done').length;
+  const n = noticeUnread();
   const bc = $('#bellCount');
-  bc.textContent = S.notices.length;
-  bc.classList.toggle('zero', !S.notices.length);
+  bc.textContent = n;
+  bc.classList.toggle('zero', !n);
   Array.prototype.forEach.call($('#nav').children, b => b.classList.toggle('on', b.dataset.v === S.view));
 }
 const loadingHtml = t => '<div class="loading">' + esc(t || '加载中…') + '</div>';
@@ -905,7 +907,6 @@ function detailHtml(d, number){
         ? '<img src="' + esc(mv.cover) + '" alt="' + esc(num) + '" onclick="AVH.openLb(' + esc(JSON.stringify(imgs)) + ',0)"'
           + ' onerror="this.onerror=null;this.src=\'' + IMG_FALLBACK + '\'">'
         : '<div class="hint">后端未返回封面（/img 代理可能不可用）</div>')
-    + '<div class="hint" style="margin-top:6px">点击图片查看大图（←/→ 切换 / ESC 关闭）</div>'
     + '</div>'
     + '<div class="info">'
     + '<h2>' + esc(num) + '</h2>'
@@ -941,16 +942,17 @@ function detailHtml(d, number){
         : '')
     + '</div>'
     + '</div></div>'
-    + '<div class="secttl">预览图（' + previews.length + ' 张，点击放大）</div>'
+    + '<div class="secttl">预览图（' + previews.length + ' 张）</div>'
     + '<div class="shots">'
     + (previews.length
-        ? previews.map((p,i) => '<div data-lb="' + i + '">' + imgTag(p, '', '预览图') + '<div class="noimg" style="display:none">预览图加载失败</div></div>').join('')
+        ? previews.map((p,i) => '<div class="shot" data-lb="' + i + '"'
+            + (p ? ' style="--bg:url(\'' + cssUrl(p) + '\')"' : '') + '>'
+            + imgTag(p, '', '预览图') + '<div class="noimg" style="display:none">预览图加载失败</div></div>').join('')
         : '<span class="hint">该片没有预览图</span>')
     + '</div>'
     + '<div class="secttl">磁力链接（' + magnets.length + ' 条）</div>'
     + magnetListHtml(magnets)
-    + '<div class="secttl">长缩略图（剧情长图）</div>'
-    + '<div class="longwrap" id="longWrap">' + longInitialHtml(d, num) + '</div>';
+    + '<div class="longwrap" id="longWrap"></div>';
 }
 function magnetListHtml(magnets){
   if (!magnets.length) return '<div class="hint">没有磁力链接</div>';
@@ -966,16 +968,27 @@ function magnetListHtml(magnets){
       + (mg.size ? '<span class="tag">' + esc(mg.size) + '</span>' : '')
       + '</div>'
       + (magnet ? '<div class="mh" style="margin-top:4px">'
-          + '<a href="' + esc(magnet) + '" style="color:var(--acc)" title="复制磁力：' + esc(magnet) + '">' + esc(hash) + '</a></div>' : '')
+          + '<a href="' + esc(magnet) + '" style="color:var(--acc)" title="用系统下载器打开">' + esc(hash) + '</a></div>' : '')
       + '</div>'
-      + '<button class="ghost" data-magnet="' + esc(hash) + '">📋 复制</button>'
+      + '<button class="ghost" data-dlhash="' + esc(hash) + '" data-dlname="' + esc(mg.name || '') + '">⬇ 下载</button>'
       + '</div>';
   }).join('') + '</div>';
 }
-function longInitialHtml(d, num){
-  const url = d.longimage;
-  return '<button class="ghost" id="btnLong">📜 ' + (url ? '加载长图' : '查询长图地址') + '</button>'
-    + '<div class="hint" style="margin-top:6px">首次解析需要几秒，结果缓存 7 天</div>';
+/* 磁力「下载」：直接推给下载器，不用先复制再粘到下载器里（保存路径/分类/下载器取全局规则） */
+function dlMagnet(number, hash, name, btn){
+  if (!hash) return;
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳ 提交中…';
+  apiPost('/magnet-download', {number:number, hash:hash, name:name || ''}).then(r => {
+    if (!r.ok){
+      btn.disabled = false; btn.textContent = old;
+      toast('下载失败', r.message || '请检查下载器配置', 'warn');
+      return;
+    }
+    btn.textContent = '✅ 已提交';
+    if (r.data && Array.isArray(r.data.queue)){ S.queue = r.data.queue; renderPills(); }
+    toast('已提交下载', (r.data && r.data.message) || '进度见「下载」页', 'ok');
+  });
 }
 function bindDetail(number){
   const db = $('#drawerBody');
@@ -1001,9 +1014,9 @@ function bindDetail(number){
   if (bn) bn.onclick = () => subscribeNumber(number);
   const bf = db.querySelector('#btnFavInDetail');
   if (bf) bf.onclick = () => toggleFav(mv.actor, mv.actor_avatar || '');
-  const bl = db.querySelector('#btnLong');
-  if (bl) bl.onclick = () => loadLong(number, d.longimage || '');
-  db.querySelectorAll('[data-magnet]').forEach(b => b.onclick = () => copyText(b.dataset.magnet, b));
+  db.querySelectorAll('[data-dlhash]').forEach(b =>
+    b.onclick = () => dlMagnet(number, b.dataset.dlhash, b.dataset.dlname, b));
+  loadLong(number, d.longimage || '');     // 详情画完就自己去补长缩略图，不用再点按钮
 }
 function copyText(text, btn){
   const done = () => toast('已复制', '磁力链接已复制到剪贴板');
@@ -1019,42 +1032,53 @@ function copyText(text, btn){
     ta.remove();
   }
 }
-/* 长缩略图：/longimage 返回 projectjav 原始外链，由前端直连加载 */
-function loadLong(number, knownUrl){
-  const w = $('#longWrap');
-  if (!w) return;
-  const paint = url => {
-    if (!url){
-      w.innerHTML = '<div class="hint" style="color:var(--warn)">该番号在 javfree / projectjav / javstore 三个源里都没找到长图。</div>';
-      return;
-    }
-    w.innerHTML = '<div class="hint">加载中…</div>';
-    const im = new Image();
-    im.alt = '长缩略图';
-    im.style.cursor = 'zoom-in';
-    im.onload = () => {
-      w.innerHTML = '';
-      w.appendChild(im);
-      const tip = document.createElement('div');
-      tip.className = 'hint'; tip.style.marginTop = '6px';
-      tip.textContent = '点击查看大图';
-      w.appendChild(tip);
-      im.onclick = () => openLb([im.src], 0);
-    };
-    im.onerror = () => {
-      w.innerHTML = '<div class="longerr">图片源需要代理，浏览器直连失败<br>'
-        + '<code style="word-break:break-all">' + esc(url) + '</code></div>';
-    };
-    im.src = url;
+/* 长缩略图（剧情长图）：后端只解析 URL（/longimage，缓存 7 天），图片由浏览器直连加载。
+   ⚠️ images.projectjav.com 校验 Referer：带本页地址（或 javdb 地址）一律 403，所以必须
+   referrerpolicy="no-referrer"；浏览器直连不通（本机没走代理）时再退回插件图片代理 /img。 */
+const LONG_STATE = {};   // number -> {url} 已拿到 | {err} 失败 | {loading:true} 解析中
+function longHint(text, warn){
+  return '<div class="hint"' + (warn ? ' style="color:var(--warn)"' : '') + '>' + esc(text) + '</div>';
+}
+function longFail(w, number, text, url){
+  w.innerHTML = longHint(text, true)
+    + (url ? '<div class="hint" style="word-break:break-all;margin-top:4px">' + esc(url) + '</div>' : '')
+    + '<div style="margin-top:6px"><button class="ghost" id="btnLongRetry">重试</button></div>';
+  w.querySelector('#btnLongRetry').onclick = () => loadLong(number, '', true);
+}
+function paintLong(w, number, url){
+  w.innerHTML = longHint('⏳ 正在加载长缩略图…');
+  const im = new Image();
+  im.alt = '长缩略图';
+  im.className = 'longimg';
+  im.decoding = 'async';
+  im.referrerPolicy = 'no-referrer';            // 关键：带 Referer 图床直接 403
+  im.onload = () => { w.innerHTML = ''; w.appendChild(im); im.onclick = () => openLb([im.src], 0); };
+  im.onerror = () => {
+    if (im.dataset.fb !== '1'){ im.dataset.fb = '1'; im.src = apiUrl('/img', {url:url}); return; }
+    longFail(w, number, '长缩略图加载失败：浏览器直连与插件代理都没取到。', url);
   };
-  if (knownUrl){ paint(knownUrl); return; }
-  w.innerHTML = loadingHtml('正在查询长图地址…');
-  apiGet('/longimage', {number:number}).then(r => {
-    if (!r.ok){ w.innerHTML = '<div class="hint" style="color:var(--warn)">长图地址查询失败：' + esc(r.message || '') + '</div>'; return; }
-    const url = (r.data && r.data.url) || (r.data && r.data.longimage) || '';
+  w.appendChild(im);
+  im.src = url;
+}
+function loadLong(number, knownUrl, force){
+  const w = $('#longWrap');
+  if (!w || !number) return;
+  if (force) delete LONG_STATE[number];            // 「重试」：连后端缓存一起绕过（/longimage?force=1）
+  if (knownUrl) LONG_STATE[number] = {url: knownUrl};
+  const st = LONG_STATE[number];
+  if (st && st.url) return paintLong(w, number, st.url);
+  if (st && st.err) return longFail(w, number, st.err, '');
+  w.innerHTML = longHint('⏳ 正在获取长缩略图…');    // 首次解析要几秒，别让用户对着空位
+  if (st && st.loading) return;                    // 已有请求在飞：等它回来统一重绘
+  LONG_STATE[number] = {loading: true};
+  apiGet('/longimage', force ? {number:number, force:1} : {number:number}).then(r => {
+    const url = r.ok ? String((r.data && (r.data.url || r.data.longimage)) || '') : '';
+    LONG_STATE[number] = r.ok
+      ? (url ? {url: url} : {err: '该番号在 projectjav / javfree 里都没找到长图。'})
+      : {err: '长图地址查询失败：' + (r.message || '请稍后重试')};
     const e = cached('detail:' + number);
-    if (e && e.data) e.data.longimage = url || '';
-    paint(url);
+    if (e && e.data) e.data.longimage = url;
+    if ($('#drawer').classList.contains('on') && curDetail === number) loadLong(number);
   });
 }
 
@@ -1757,6 +1781,23 @@ function renderSiteSearch(m){
 }
 
 /* ---------- 7. 通知（顶栏铃铛 → 右侧抽屉） ---------- */
+/* 「已读」只销角标、不删记录：通知永远留在列表里，铃铛上的数字只统计没看过的新通知。
+   已读位点按本机记（localStorage，隐私模式下退回内存变量），看一次就一直归零，
+   之后来的新通知才会重新把数字顶上去。 */
+const SEEN_KEY = 'avh.noticesSeen';
+let SEEN_MEM = '';
+function noticeSeenAt(){
+  try { return localStorage.getItem(SEEN_KEY) || SEEN_MEM; } catch (e) { return SEEN_MEM; }
+}
+function noticeUnread(){
+  const seen = noticeSeenAt();
+  return S.notices.filter(n => String(n.time || '') > seen).length;
+}
+function noticeMarkSeen(){
+  const latest = S.notices.reduce((a, n) => (String(n.time || '') > a ? String(n.time) : a), noticeSeenAt());
+  SEEN_MEM = latest;
+  try { localStorage.setItem(SEEN_KEY, latest); } catch (e) { /* 写不了就只用内存位点 */ }
+}
 function notifyBodyHtml(){
   return '<div class="tg">'
     + (S.notices.length
@@ -1779,10 +1820,16 @@ function openNotify(){
   $('#drawer').classList.remove('on');
   $('#modal').classList.remove('on');
   $('#drawerReload').style.display = 'none';
-  $('#nBody').innerHTML = loadingHtml('加载中…');
+  const nb = $('#nBody');
+  nb.innerHTML = loadingHtml('加载中…');
+  nb.scrollTop = 0;                     // 抽屉每次都是新开的一张，别继承上次的滚动位置
   $('#scrim').classList.add('on');
   $('#ndrawer').classList.add('on');
-  loadNotices(false);
+  loadNotices(false).then(ok => {       // 打开即算已读：角标清零，通知列表照旧全留着
+    if (!ok) return;
+    noticeMarkSeen();
+    renderPills();
+  });
 }
 function paintNotify(){
   if ($('#ndrawer').classList.contains('on')) $('#nBody').innerHTML = notifyBodyHtml();
@@ -1869,6 +1916,7 @@ function closeAll(){
 function openDrawer(title, html){
   $('#drawerTitle').textContent = title;
   $('#drawerBody').innerHTML = html;
+  $('#drawerBody').scrollTop = 0;       // 换一部片要从头看，不继承上一部的滚动位置
   $('#scrim').classList.add('on');
   $('#drawer').classList.add('on');
 }
@@ -1919,7 +1967,7 @@ function loadBootstrap(){
     return ensureSites().then(() => true);
   });
 }
-/* 首屏与「重载」按钮共用：拉状态 → 重绘 */
+/* 首屏：拉状态 → 重绘 */
 function bootAndRender(){
   S.bootError = '';
   renderPills();
@@ -1982,10 +2030,6 @@ function bindUi(){
       S.notices = []; renderPills(); paintNotify();
       toast('已清空', '通知已清空', 'ok');
     });
-  };
-  $('#resetBtn').onclick = () => {
-    toast('重新加载状态', '正在重新拉取插件状态…');
-    bootAndRender();
   };
   $('#authRetry').onclick = () => {
     const t = readToken(true);
