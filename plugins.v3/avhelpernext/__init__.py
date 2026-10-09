@@ -311,8 +311,13 @@ class AVHelperNext(_PluginBase):
         ]
 
     def get_render_mode(self) -> Tuple[str, Optional[str]]:
-        """使用 Vuetify JSON 模式（页面里内嵌自带应用，无需联邦构建产物）。"""
-        return "vuetify", None
+        """使用 Vue 联邦模式：弹窗正文交给 `frontend/dist/assets` 里的远程组件。
+
+        切到 `vue` 之后宿主**不再画右下角那个齿轮按钮**（那是 `vuetify` 分支专有的 `VFab`），
+        设置台与数据台都由组件自己绘制。`get_form()` 仍提供宿主配置模型的默认值，
+        `get_page()` 保留 iframe 作为旧宿主/联邦加载失败时的回退。
+        """
+        return "vue", "frontend/dist/assets"
 
     def get_sidebar_nav(self) -> List[Dict[str, Any]]:
         """侧栏联邦入口需要 Vue 构建产物，本插件不提供。"""
