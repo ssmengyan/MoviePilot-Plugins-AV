@@ -1,0 +1,733 @@
+"""AV 资源助手（AVHelper）：JAV 榜单/演员/详情浏览 + 番号订阅、PT 选种下载、通知与缓存治理。
+
+界面说明：宿主 Vuetify JSON 页面无法承载搜索框、灯箱等交互（当前宿主前端在事件调用后不会
+重新拉取页面），因此完整界面由本插件自带的 `webui.html` 经匿名路由 `/ui` 下发，插件页用
+iframe 承载；前端自己带状态、自己调接口（契约见 docs/AVHelper-API契约.md）。
+
+安全边界：只有 `/ui` 与 `/img` 匿名；`/img` 仅反代白名单图床且无写能力，其余数据接口一律
+bear 鉴权。`API_TOKEN` 不出现在任何 URL 或页面里，前端从同源 localStorage 取会话 JWT。
+"""
+
+import asyncio
+import hashlib
+import json
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
+
+from fastapi import Request, Response
+from fastapi.responses import HTMLResponse
+
+from app.sdk.logging import logger
+from app.sdk.network import RequestUtils
+from app.sdk.plugin import _PluginBase
+from app.sdk.scheduler import add_plugin_once_job, remove_plugin_once_job
+
+from . import imgproxy, longshot
+from .client import JavdbClient
+from .notify import Notifier
+from .ratelimit import RateLimiter
+from .store import Store
+from .tasks import DEFAULT_RULE, TaskEngine, merge_rule
+
+PLUGIN_ID = "AVHelper"
+CACHE_ROOT = Path("/avhelper/cache")
+META_DIR = CACHE_ROOT / "meta"
+DEFAULT_PROXY = "http://192.0.2.11:7890"
+# 缓存 TTL（执行方案 §8.1，不得放宽）
+TTL_RANK = 6 * 3600        # 榜单 6 小时
+TTL_DETAIL = 7 * 86400     # 番号详情 7 天
+TTL_ACTOR = 24 * 3600      # 演员作品史 24 小时
+TTL_LONG = 7 * 86400       # 长图 URL 7 天
+CACHE_MAX_GB = 60          # 缓存总量上限（超出按最旧淘汰）
+ONCE_JOB_ID = "subcheck_now"
+
+
+class AVHelper(_PluginBase):
+    """AV 资源助手：JAV 番号订阅、榜单浏览、PT 自动选种下载。"""
+
+    plugin_name = "AV 资源助手"
+    plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
+    plugin_icon = "Moviepilot_A.png"
+    plugin_version = "0.2.0"
+    plugin_label = "发现"
+    plugin_author = "local"
+    plugin_config_prefix = "avhelper_"
+    plugin_order = 100
+    auth_level = 1
+
+    _enabled = False
+    _proxy = DEFAULT_PROXY
+    _client: Optional[JavdbClient] = None
+    _store: Optional[Store] = None
+    _limiter: Optional[RateLimiter] = None
+    _notifier: Optional[Notifier] = None
+    _engine: Optional[TaskEngine] = None
+
+    # ---------- 生命周期 ----------
+
+    def init_plugin(self, config: Optional[Dict[str, Any]] = None) -> None:
+        """读取配置并装配存储、限流、通知与任务引擎；允许重复调用。"""
+        self.stop_service()
+        self._store = Store()
+        self._store.init()
+        self._limiter = RateLimiter(self._store)
+        self._notifier = Notifier(self, self._store)
+        self._engine = TaskEngine(self, self._store, self._limiter, self._notifier)
+
+        self._enabled = False
+        if config:
+            self._enabled = bool(config.get("enabled"))
+            self._proxy = str(config.get("proxy") or self._proxy)
+        self._client = JavdbClient(proxy=self._proxy)
+
+    def get_state(self) -> bool:
+        """获取插件启用状态。"""
+        return self._enabled
+
+    def stop_service(self) -> None:
+        """释放后台资源：取消挂起的“立即检查”任务，宿主会自动摘除 cron 服务。"""
+        try:
+            remove_plugin_once_job(self.__class__.__name__, ONCE_JOB_ID)
+        except Exception:
+            pass
+
+    @staticmethod
+    def get_command() -> List[Dict[str, Any]]:
+        """本插件不注册远程命令。"""
+        return []
+
+    # ---------- 宿主扩展点 ----------
+
+    def get_service(self) -> List[Dict[str, Any]]:
+        """注册定时服务：订阅检查（每天 3 次）与缓存清理（每天 4 点）。"""
+        return [
+            {"id": "subcheck", "name": "AV 订阅检查", "trigger": "cron",
+             "kwargs": {"hour": "9,14,21", "minute": "30"}, "func": self.job_subcheck},
+            {"id": "cacheclean", "name": "AV 缓存清理", "trigger": "cron",
+             "kwargs": {"hour": 4, "minute": 0}, "func": self.job_cacheclean},
+        ]
+
+    def get_media_source(self) -> Optional[List[Dict[str, Any]]]:
+        """注册插件提供的 JAVDB 媒体数据源。"""
+        return [{"name": "JAVDB", "media_source": "javdb", "media_types": ["电影"]}]
+
+    def get_module(self) -> Optional[Dict[str, Any]]:
+        """胁持媒体识别：只接手 javdb 来源的番号识别。"""
+        return {"async_recognize_media": self._recognize_media}
+
+    async def _recognize_media(self, meta: Any = None, mtype: Any = None,
+                               media_source: Any = None, media_id: Any = None,
+                               **kwargs: Any) -> Any:
+        """番号识别钩子：仅处理 media_source == 'javdb' 的请求，其它一律返回 None。
+
+        参数名必须与宿主分发实参一致（media_source/media_id），否则识别会静默失配；
+        必须容忍 meta=None（详情端点不会传 meta）。
+        """
+        if str(media_source or "") != "javdb" or not media_id:
+            return None
+        detail = await asyncio.to_thread(self.cli().detail, str(media_id))
+        if not detail:
+            return None
+        try:
+            from app.sdk.media import MediaInfo  # 延迟导入，避免模块导入期依赖宿主
+
+            info = MediaInfo()
+            info.media_source = "javdb"
+            info.media_id = str(media_id)
+            title = str(detail.get("title") or detail.get("origin_title") or media_id)
+            info.title = title
+            info.original_title = str(detail.get("origin_title") or "")
+            info.year = str(detail.get("release_date") or "")[:4]
+            info.poster = self.image_url(detail.get("cover_url"))
+            info.overview = str(detail.get("summary") or "")
+            info.actors = [
+                {"name": a.get("name"), "avatar": self.image_url(a.get("avatar_url"))}
+                for a in (detail.get("actors") or []) if isinstance(a, dict) and a.get("name")
+            ]
+            info.directors = [detail.get("director_name")] if detail.get("director_name") else []
+            info.production_companies = (
+                [detail.get("maker_name")] if detail.get("maker_name") else []
+            )
+            self.remember_actor([str(media_id)], (info.actors or [{}])[0].get("name") or "")
+            return info
+        except Exception as error:  # 识别失败必须让原生模块继续工作
+            logger.error(f"AVHelper 识别 {media_id} 失败：{error}")
+            return None
+
+    # ---------- 配置与页面 ----------
+
+    def get_form(self) -> Tuple[Optional[List[dict]], Dict[str, Any]]:
+        """配置页：启用开关与 javdb 用的代理地址。"""
+        form = [
+            {
+                "component": "VForm",
+                "content": [
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {"component": "VCol", "props": {"cols": 12, "md": 6},
+                             "content": [{"component": "VSwitch",
+                                          "props": {"model": "enabled", "label": "启用插件"}}]},
+                            {"component": "VCol", "props": {"cols": 12, "md": 6},
+                             "content": [{"component": "VTextField",
+                                          "props": {"model": "proxy", "label": "代理地址",
+                                                    "placeholder": "http://host:port"}}]},
+                        ],
+                    },
+                    {"component": "VAlert",
+                     "props": {"type": "info", "variant": "tonal", "class": "mt-2"},
+                     "text": "完整界面在插件详情页内（内嵌应用），也可在新标签页打开。"},
+                ],
+            }
+        ]
+        return form, {"enabled": self._enabled, "proxy": self._proxy}
+
+    def get_page(self) -> Optional[List[dict]]:
+        """详情页：内嵌自带应用界面（宿主 JSON 页面无法承载交互式界面）。"""
+        if not self._enabled:
+            return [{
+                "component": "VAlert",
+                "props": {"type": "warning", "variant": "tonal", "class": "ma-2"},
+                "text": "插件尚未启用：请先在插件设置中开启。",
+            }]
+        src = f"/api/v1/plugin/{PLUGIN_ID}/ui?v={self.plugin_version}"
+        return [
+            {
+                "component": "div",
+                "props": {"class": "d-flex align-center ga-3 px-2 pt-2"},
+                "content": [
+                    {"component": "span", "props": {"class": "text-body-2 text-medium-emphasis"},
+                     "text": "AV 资源助手"},
+                    {"component": "a",
+                     "props": {"href": src, "target": "_blank", "class": "text-caption"},
+                     "text": "在新标签页打开完整界面 ↗"},
+                ],
+            },
+            {
+                "component": "iframe",
+                "props": {
+                    "src": src,
+                    "style": "width:100%;height:78vh;min-height:560px;border:0;margin-top:8px;"
+                             "border-radius:10px;background:#0b0f17",
+                },
+            },
+        ]
+
+    def get_render_mode(self) -> Tuple[str, Optional[str]]:
+        """使用 Vuetify JSON 模式（页面里内嵌自带应用，无需联邦构建产物）。"""
+        return "vuetify", None
+
+    def get_sidebar_nav(self) -> List[Dict[str, Any]]:
+        """侧栏联邦入口需要 Vue 构建产物，本插件不提供。"""
+        return []
+
+    # ---------- API 注册 ----------
+
+    def get_api(self) -> List[Dict[str, Any]]:
+        """返回插件 API 列表：/ui 与 /img 匿名，其余 bear 鉴权。"""
+        return [
+            {"path": "/ui", "endpoint": self.api_ui, "methods": ["GET"], "allow_anonymous": True,
+             "summary": "应用界面(HTML)", "description": "自带界面，无密钥"},
+            {"path": "/img", "endpoint": self.api_img, "methods": ["GET"], "allow_anonymous": True,
+             "summary": "图片代理(XOR解包)", "description": "白名单图床，匿名开放"},
+            {"path": "/bootstrap", "endpoint": self.api_bootstrap, "methods": ["GET"], "auth": "bear",
+             "summary": "首屏状态聚合"},
+            {"path": "/rankings", "endpoint": self.api_rankings, "methods": ["GET"], "auth": "bear",
+             "summary": "榜单", "description": "日/周/月 × 有码/无码/FC2"},
+            {"path": "/actors", "endpoint": self.api_actors, "methods": ["GET"], "auth": "bear",
+             "summary": "演员榜"},
+            {"path": "/actor", "endpoint": self.api_actor, "methods": ["GET"], "auth": "bear",
+             "summary": "演员档案+作品史"},
+            {"path": "/search", "endpoint": self.api_search, "methods": ["GET"], "auth": "bear",
+             "summary": "番号/演员搜索"},
+            {"path": "/detail", "endpoint": self.api_detail, "methods": ["GET"], "auth": "bear",
+             "summary": "影片详情"},
+            {"path": "/longimage", "endpoint": self.api_longimage, "methods": ["GET"], "auth": "bear",
+             "summary": "长缩略图 URL"},
+            {"path": "/favs", "endpoint": self.api_favs, "methods": ["GET", "POST", "DELETE"],
+             "auth": "bear", "summary": "收藏演员"},
+            {"path": "/subs", "endpoint": self.api_subs, "methods": ["GET", "POST", "DELETE"],
+             "auth": "bear", "summary": "订阅管理"},
+            {"path": "/tasks", "endpoint": self.api_tasks, "methods": ["GET"], "auth": "bear",
+             "summary": "任务与下载队列"},
+            {"path": "/tasks/search", "endpoint": self.api_task_search, "methods": ["POST"],
+             "auth": "bear", "summary": "搜种并打分"},
+            {"path": "/tasks/download", "endpoint": self.api_task_download, "methods": ["POST"],
+             "auth": "bear", "summary": "提交下载"},
+            {"path": "/check", "endpoint": self.api_check, "methods": ["POST"], "auth": "bear",
+             "summary": "手动检查订阅(受限流)"},
+            {"path": "/notices", "endpoint": self.api_notices, "methods": ["GET", "DELETE"],
+             "auth": "bear", "summary": "通知列表/清空"},
+            {"path": "/sites", "endpoint": self.api_sites, "methods": ["GET"], "auth": "bear",
+             "summary": "已配置站点"},
+        ]
+
+    # ---------- 基础设施 ----------
+
+    @property
+    def store(self) -> Store:
+        """存储入口（懒初始化，保证任一入口先到时也能用）。"""
+        if self._store is None:
+            self._store = Store()
+            self._store.init()
+        return self._store
+
+    @property
+    def limiter(self) -> RateLimiter:
+        """限流器入口。"""
+        if self._limiter is None:
+            self._limiter = RateLimiter(self.store)
+        return self._limiter
+
+    @property
+    def notifier(self) -> Notifier:
+        """通知入口。"""
+        if self._notifier is None:
+            self._notifier = Notifier(self, self.store)
+        return self._notifier
+
+    @property
+    def engine(self) -> TaskEngine:
+        """任务引擎入口。"""
+        if self._engine is None:
+            self._engine = TaskEngine(self, self.store, self.limiter, self.notifier)
+        return self._engine
+
+    def cli(self) -> JavdbClient:
+        """取 javdb 客户端，未初始化时按当前代理兜底。"""
+        if self._client is None:
+            self._client = JavdbClient(proxy=self._proxy)
+        return self._client
+
+    def image_url(self, url: Any) -> str:
+        """把图床地址转成本插件图片代理地址（前端可直接 <img src>）。"""
+        if not url:
+            return ""
+        return f"/api/v1/plugin/{PLUGIN_ID}/img?url={quote(str(url), safe='')}"
+
+    def remember_actor(self, numbers: List[str], actor: str) -> None:
+        """记录“番号 → 演员”映射，让榜单卡片能显示演员与收藏徽标。"""
+        if not actor:
+            return
+        index = self.store.kv_get("num2actor", {}) or {}
+        changed = False
+        for number in numbers:
+            if number and index.get(number) != actor:
+                index[number] = actor
+                changed = True
+        if not changed:
+            return
+        if len(index) > 5000:  # 控制体量，只保留最近的一部分
+            index = dict(list(index.items())[-5000:])
+        self.store.kv_set("num2actor", index)
+
+    def _actor_of(self, number: str) -> str:
+        """按番号查已知演员（未知返回空串）。"""
+        index = self.store.kv_get("num2actor", {}) or {}
+        return str(index.get(number) or "")
+
+    def _cache_file(self, key: str) -> Path:
+        """缓存文件路径（按 key 哈希命名）。"""
+        return META_DIR / (hashlib.sha1(key.encode("utf-8")).hexdigest() + ".json")
+
+    def _cache_read(self, key: str, ttl: int) -> Any:
+        """读 JSON 缓存；不存在或超过 TTL 返回 None。"""
+        path = self._cache_file(key)
+        try:
+            if not path.exists() or time.time() - path.stat().st_mtime > ttl:
+                return None
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def _cache_write(self, key: str, data: Any, ttl: int) -> None:
+        """写 JSON 缓存并登记到清理索引。"""
+        path = self._cache_file(key)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            self.store.cache_put(key, str(path), ttl)
+        except Exception as error:
+            logger.error(f"AVHelper 写缓存失败 {key}：{error}")
+
+    def _cached(self, key: str, ttl: int, loader: Any) -> Any:
+        """带文件缓存的读取；失败（None）不落盘，下次会重试。"""
+        hit = self._cache_read(key, ttl)
+        if hit is not None:
+            return hit
+        data = loader()
+        if data is not None:
+            self._cache_write(key, data, ttl)
+        return data
+
+    def _movie(self, raw: Dict[str, Any], kind: str = "", actor: str = "") -> Dict[str, Any]:
+        """把 javdb 记录归一化成契约里的 movie 结构（图片转代理地址）。"""
+        number = str(raw.get("number") or "")
+        who = actor or self._actor_of(number)
+        uncensored = (
+            kind == "uncensored"
+            or str(raw.get("type") or "").lower() == "uncensored"
+            or number.upper().startswith("FC2")
+        )
+        return {
+            "number": number,
+            "title": str(raw.get("title") or raw.get("origin_title") or ""),
+            "cover": self.image_url(raw.get("cover_url")),
+            "thumb": self.image_url(raw.get("thumb_url") or raw.get("cover_url")),
+            "date": str(raw.get("release_date") or ""),
+            "duration": int(raw.get("duration") or 0),
+            "cnsub": bool(raw.get("has_cnsub")),
+            "uncensored": bool(uncensored),
+            "magnets": int(raw.get("magnets_count") or 0),
+            "maker": str(raw.get("maker_name") or ""),
+            "score": raw.get("score") or "",
+            "actor": who,
+            "actor_avatar": self.image_url(raw.get("actor_avatar")),
+            "id": str(raw.get("id") or ""),
+        }
+
+    # ---------- API：界面与图片 ----------
+
+    def api_ui(self) -> Response:
+        """下发自带应用界面（单文件 HTML，无密钥，可匿名访问）。"""
+        path = Path(__file__).with_name("webui.html")
+        if not path.exists():
+            return HTMLResponse(
+                "<meta charset='utf-8'><h2>界面文件 webui.html 缺失</h2>"
+                "<p>请重新同步插件目录。</p>", status_code=500,
+            )
+        try:
+            html = path.read_text(encoding="utf-8")
+        except Exception as error:
+            return HTMLResponse(f"<meta charset='utf-8'>读取界面失败：{error}", status_code=500)
+        return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+
+    def api_img(self, url: str) -> Response:
+        """图片代理：白名单内 URL → XOR 解包后的 JPEG，否则 404。"""
+        blob = imgproxy.fetch(url or "")
+        if blob is None:
+            return Response(status_code=404)
+        return Response(content=blob, media_type="image/jpeg",
+                        headers={"Cache-Control": "public, max-age=2592000"})
+
+    # ---------- API：只读数据 ----------
+
+    def api_bootstrap(self) -> Dict[str, Any]:
+        """首屏状态聚合：收藏、订阅、任务、队列、通知、站点与默认规则。"""
+        queue = self.engine.queue()
+        return {
+            "success": True,
+            "enabled": self._enabled,
+            "sites": self.engine.site_options(),
+            "favs": self.store.fav_list(),
+            "subs": self.store.sub_list(),
+            "known": self.store.known_all(),
+            "notices": self.store.notice_list(),
+            "tasks": self.store.task_list(),
+            "queue": queue,
+            "defaultRule": DEFAULT_RULE,
+        }
+
+    def api_rankings(self, period: str = "week", kind: str = "censored") -> Dict[str, Any]:
+        """榜单：period=day/week/month，kind=censored/uncensored/fc2。"""
+        data = self._cached(
+            f"rank:{period}:{kind}", TTL_RANK,
+            lambda: self.cli().rankings(period=period, kind=kind),
+        )
+        if data is None:
+            return {"success": False, "message": "榜单抓取失败（站点超时或代理不可达）", "movies": []}
+        movies = [self._movie(m, kind) for m in (data.get("movies") or [])]
+        return {"success": True, "movies": movies, "period": period, "kind": kind}
+
+    def api_actors(self) -> Dict[str, Any]:
+        """演员榜。"""
+        data = self._cached("actors", TTL_RANK, lambda: self.cli().actors_rank())
+        if data is None:
+            return {"success": False, "message": "演员榜抓取失败", "actors": []}
+        actors = [
+            {"name": a.get("name") or "", "zh": a.get("name_zht") or "",
+             "avatar": self.image_url(a.get("avatar_url")), "id": a.get("id") or ""}
+            for a in (data.get("actors") or [])
+        ]
+        return {"success": True, "actors": actors}
+
+    def api_actor(self, name: str, limit: int = 0) -> Dict[str, Any]:
+        """演员档案 + 作品史。"""
+        if not name:
+            return {"success": False, "message": "缺少演员名", "movies": []}
+        data = self._cached(
+            f"actor:{name}:{limit}", TTL_ACTOR,
+            lambda: self.cli().actor(name, limit=limit),
+        )
+        if data is None:
+            return {"success": False, "message": "演员数据抓取失败", "movies": []}
+        raw_entity = data.get("entity") or {}
+        movies = [self._movie(m, actor=name) for m in (data.get("movies") or [])]
+        self.remember_actor([m["number"] for m in movies], name)
+        entity = {
+            "name": raw_entity.get("name") or name,
+            "zh": raw_entity.get("name_zht") or raw_entity.get("zh") or "",
+            "avatar": self.image_url(raw_entity.get("avatar_url") or raw_entity.get("avatar")),
+            "videos_count": raw_entity.get("videos_count") or len(movies),
+            "age": raw_entity.get("age") or "",
+            "birthday": raw_entity.get("birthday") or "",
+            "height": raw_entity.get("height") or "",
+            "cup": raw_entity.get("cup") or "",
+            "birthplace": raw_entity.get("birthplace") or "",
+            "instagram": raw_entity.get("instagram") or "",
+        }
+        return {"success": True, "entity": entity, "movies": movies}
+
+    def api_search(self, keyword: str) -> Dict[str, Any]:
+        """番号/关键词搜索：同时返回影片与演员命中。"""
+        if not keyword:
+            return {"success": False, "message": "搜索词为空", "movies": [], "actors": []}
+        data = self.cli().search(keyword)
+        if data is None:
+            return {"success": False, "message": "搜索失败", "movies": [], "actors": []}
+        movies = [self._movie(m) for m in (data.get("movies") or [])]
+        actors = [
+            {"name": a.get("name") or "", "zh": a.get("name_zht") or "",
+             "avatar": self.image_url(a.get("avatar_url")), "id": a.get("id") or ""}
+            for a in (data.get("actors") or [])
+        ]
+        return {"success": True, "movies": movies[:24], "actors": actors[:24]}
+
+    def api_detail(self, number: str) -> Dict[str, Any]:
+        """影片详情：归一化信息 + 演员 + 预览图（代理地址）+ 磁力 + 长图 URL。"""
+        if not number:
+            return {"success": False, "message": "缺少番号"}
+        data = self._cached(f"detail:{number}", TTL_DETAIL, lambda: self.cli().detail(number))
+        if data is None:
+            return {"success": False, "message": "详情抓取失败，请稍后重试"}
+        actors = [
+            {"name": a.get("name") or "", "zh": "", "avatar": self.image_url(a.get("avatar_url")),
+             "id": a.get("id") or ""}
+            for a in (data.get("actors") or []) if isinstance(a, dict) and a.get("name")
+        ]
+        movie = self._movie(data, actor=(actors[0]["name"] if actors else ""))
+        if actors:
+            movie["actor_avatar"] = actors[0]["avatar"]
+            self.remember_actor([movie["number"]], actors[0]["name"])
+        previews = [
+            self.image_url(p.get("large_url") or p.get("thumb_url"))
+            for p in (data.get("preview_images") or []) if isinstance(p, dict)
+        ]
+        magnets_raw = self._cached(
+            f"magnets:{number}", TTL_DETAIL, lambda: self.cli().magnets(number, cnsub=False)
+        )
+        magnets = []
+        if isinstance(magnets_raw, dict):
+            for item in (magnets_raw.get("magnets") or []):
+                if isinstance(item, dict) and item.get("hash"):
+                    magnets.append({
+                        "hash": item["hash"], "name": item.get("name") or "",
+                        "size": item.get("size") or 0, "cnsub": bool(item.get("cnsub")),
+                        "hd": bool(item.get("hd")),
+                    })
+        return {
+            "success": True,
+            "movie": movie,
+            "actors": actors,
+            "previews": previews,
+            "magnets": magnets,
+            "longimage": self._long_url(number),
+        }
+
+    def _long_url(self, number: str) -> str:
+        """解析并缓存长图 URL（只解析不下载，图片由前端直连）。"""
+        cache_key = f"long:{number}"
+        cached = self.store.kv_get(cache_key)
+        if cached is not None:
+            return str(cached or "")
+
+        def fetcher(url: str, referer: str) -> Optional[str]:
+            """带代理抓取 projectjav 页面。"""
+            return RequestUtils().get(url, headers={"User-Agent": longshot.UA, "Referer": referer},
+                                      proxies={"http": self._proxy, "https": self._proxy})
+
+        url = longshot.resolve_long(number, fetcher) or ""
+        self.store.kv_set(cache_key, url, ttl=TTL_LONG)
+        return url
+
+    def api_longimage(self, number: str) -> Dict[str, Any]:
+        """只取长图 URL。"""
+        if not number:
+            return {"success": False, "message": "缺少番号", "url": ""}
+        return {"success": True, "url": self._long_url(number)}
+
+    def api_sites(self) -> Dict[str, Any]:
+        """返回 MoviePilot 已配置的站点清单。"""
+        return {"success": True, "sites": self.engine.site_options()}
+
+    # ---------- API：收藏 / 订阅 / 任务 / 通知 ----------
+
+    async def api_favs(self, request: Request) -> Dict[str, Any]:
+        """收藏演员：GET 列表、POST 新增、DELETE 取消。"""
+        if request.method == "POST":
+            payload = await self._json_body(request)
+            name = str(payload.get("name") or "").strip()
+            if not name:
+                return {"success": False, "message": "缺少演员名"}
+            await asyncio.to_thread(
+                self.store.fav_add, name, str(payload.get("zh") or ""), str(payload.get("avatar") or "")
+            )
+            return {"success": True, "favs": self.store.fav_list(), "message": f"已收藏 {name}"}
+        if request.method == "DELETE":
+            name = str(request.query_params.get("name") or "").strip()
+            if not name:
+                return {"success": False, "message": "缺少演员名"}
+            await asyncio.to_thread(self.store.fav_del, name)
+            return {"success": True, "favs": self.store.fav_list(), "message": f"已取消收藏 {name}"}
+        return {"success": True, "favs": self.store.fav_list()}
+
+    async def api_subs(self, request: Request) -> Dict[str, Any]:
+        """订阅：GET 列表、POST 新增（含规则）、DELETE 删除。"""
+        if request.method == "POST":
+            payload = await self._json_body(request)
+            sub_type = str(payload.get("type") or "actor")
+            name = str(payload.get("name") or "").strip()
+            if sub_type not in ("actor", "number") or not name:
+                return {"success": False, "message": "订阅参数不完整"}
+            rule = merge_rule(payload.get("rule"))
+            await asyncio.to_thread(self.store.sub_add, sub_type, name, rule)
+            if sub_type == "actor":
+                await asyncio.to_thread(self.store.fav_add, name, "", "")
+            return {"success": True, "subs": self.store.sub_list(),
+                    "message": f"已订阅 {name}"}
+        if request.method == "DELETE":
+            sid = str(request.query_params.get("id") or "")
+            if not sid.isdigit():
+                return {"success": False, "message": "订阅 id 无效"}
+            await asyncio.to_thread(self.store.sub_del, int(sid))
+            return {"success": True, "subs": self.store.sub_list(), "message": "已取消订阅"}
+        return {"success": True, "subs": self.store.sub_list()}
+
+    def api_tasks(self) -> Dict[str, Any]:
+        """任务列表 + 下载队列（队列进度取自下载器真实状态）。"""
+        return {"success": True, "tasks": self.store.task_list(), "queue": self.engine.queue()}
+
+    async def api_task_search(self, request: Request) -> Dict[str, Any]:
+        """按番号搜种并打分（真实站点搜索，受 §8.2 限流约束）。"""
+        payload = await self._json_body(request)
+        number = str(payload.get("number") or "").strip()
+        if not number:
+            return {"success": False, "message": "缺少番号"}
+        actor = str(payload.get("actor") or "")
+        rule = merge_rule(payload.get("rule"))
+        thumb = str(payload.get("thumb") or "")
+        task = await asyncio.to_thread(self.engine.build_task, number, actor, rule, False, thumb)
+        return {"success": True, "task": task,
+                "message": f"搜到 {len(task.get('cands') or [])} 个候选"}
+
+    async def api_task_download(self, request: Request) -> Dict[str, Any]:
+        """提交下载：优先站点命中项或用户指定站点。"""
+        payload = await self._json_body(request)
+        tid = str(payload.get("id") or "").strip()
+        if not tid:
+            return {"success": False, "message": "缺少任务 id"}
+        result = await asyncio.to_thread(
+            self.engine.download, tid, str(payload.get("site") or ""),
+            str(request.base_url).rstrip("/"),
+        )
+        return {"success": bool(result.get("ok")), "message": result.get("message") or "",
+                "notice": result.get("notice"), "hash": result.get("hash"),
+                "downloader": result.get("downloader"), "queue": self.engine.queue()}
+
+    async def api_check(self, request: Request) -> Dict[str, Any]:
+        """手动检查订阅（受限流；也可由定时任务触发）。"""
+        payload = await self._json_body(request)
+        name = str(payload.get("name") or "").strip() or None
+        result = await asyncio.to_thread(self.engine.check, name)
+        return {"success": True, "limited": bool(result.get("limited")),
+                "notices": result.get("notices") or [], "message": result.get("message") or "",
+                "subs": self.store.sub_list(), "tasks": self.store.task_list(),
+                "queue": self.engine.queue()}
+
+    async def api_notices(self, request: Request) -> Dict[str, Any]:
+        """通知列表 / 清空。"""
+        if request.method == "DELETE":
+            await asyncio.to_thread(self.store.notice_clear)
+            return {"success": True, "notices": [], "message": "已清空通知"}
+        return {"success": True, "notices": self.store.notice_list()}
+
+    @staticmethod
+    async def _json_body(request: Request) -> Dict[str, Any]:
+        """安全读取 JSON 请求体（空体或非法 JSON 都返回空字典）。"""
+        try:
+            data = await request.json()
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    # ---------- 定时任务 ----------
+
+    def job_subcheck(self) -> None:
+        """定时订阅检查（受每天次数与最小间隔约束）。"""
+        if not self._enabled:
+            return
+        result = self.engine.check()
+        logger.info(f"AVHelper 订阅检查：{result.get('message')}")
+        if result.get("limited"):
+            logger.info(f"AVHelper 订阅检查被限流：{result.get('message')}")
+
+    def job_cacheclean(self) -> None:
+        """缓存清理：过期文件 → 孤儿文件 → 容量上限淘汰（§8.1）。"""
+        removed_bytes = 0
+        # 1. 过期项
+        expired = self.store.cache_expired()
+        keys, freed = [], 0
+        for item in expired:
+            path = Path(item["path"])
+            try:
+                if path.exists():
+                    freed += path.stat().st_size
+                    path.unlink()
+                keys.append(item["key"])
+            except Exception as error:
+                logger.error(f"AVHelper 删除过期缓存失败 {path}：{error}")
+        self.store.cache_drop(keys)
+        removed_bytes += freed
+
+        # 2. 孤儿文件（在缓存目录里但不在索引里）
+        indexed = {item["path"] for item in self.store.cache_all()}
+        for folder in (META_DIR, CACHE_ROOT / "images"):
+            if not folder.exists():
+                continue
+            for path in folder.glob("*"):
+                if path.is_file() and str(path) not in indexed:
+                    try:
+                        removed_bytes += path.stat().st_size
+                        path.unlink()
+                    except Exception:
+                        pass
+
+        # 3. 容量上限：按 mtime 由旧到新淘汰
+        limit = CACHE_MAX_GB * 1024 ** 3
+        files = [p for p in CACHE_ROOT.rglob("*") if p.is_file()]
+        total = sum(p.stat().st_size for p in files)
+        if total > limit:
+            for path in sorted(files, key=lambda p: p.stat().st_mtime):
+                if total <= limit:
+                    break
+                try:
+                    size = path.stat().st_size
+                    path.unlink()
+                    total -= size
+                    removed_bytes += size
+                except Exception:
+                    pass
+
+        if removed_bytes > 5 * 1024 ** 3:
+            self.notifier.info("缓存清理", f"本次清理释放 {removed_bytes / 1024 ** 3:.1f} GB")
+        logger.info(f"AVHelper 缓存清理完成，释放 {removed_bytes / 1024 ** 2:.1f} MB")
+
+    def trigger_check_now(self) -> None:
+        """界面“立即检查”入口：挂一次性任务，避免阻塞请求线程。"""
+        try:
+            add_plugin_once_job(self.__class__.__name__, ONCE_JOB_ID, self.job_subcheck,
+                                name="AV 订阅立即检查")
+        except Exception as error:
+            logger.error(f"AVHelper 挂起立即检查任务失败：{error}")
