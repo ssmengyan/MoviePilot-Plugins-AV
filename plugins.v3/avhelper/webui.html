@@ -157,6 +157,10 @@ td{padding:9px 10px;border-bottom:1px solid #1e252f;vertical-align:middle}
 tr.best td{background:#12291c}
 tr.dead td{opacity:.42}
 tr.bt td{background:#1a1a26}
+/* 候选行副标题：种子原名（常写着无码/破解之类），排在规格/徽标那一行下面 */
+tr.has-sub td{border-bottom:0}
+tr.candsub td{padding:0 10px 9px;border-bottom:1px solid #1e252f}
+tr.candsub .ttl{color:var(--fg3);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tag{display:inline-block;font-size:10.5px;padding:1px 6px;border-radius:4px;border:1px solid var(--line);color:var(--fg3);margin-right:4px}
 .tag.on{background:#1f6f3f;border-color:#2ea043;color:#d7ffe4}
 .tag.uc{background:#5c2450;border-color:#a44a92;color:#ffd9f4}
@@ -232,6 +236,16 @@ tr.bt td{background:#1a1a26}
 .toast.ok{border-left-color:var(--ok)} .toast.warn{border-left-color:var(--warn)}
 .toast b{display:block;font-size:11px;color:var(--fg3);font-weight:500;margin-bottom:2px}
 @keyframes in{from{opacity:0;transform:translateX(14px)}}
+/* 后台搜索完成的浮动提示：底部居中、依次向下排、各自计时、渐入渐出 */
+#hints{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:59;
+  display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none}
+.hintItem{display:flex;align-items:center;gap:7px;background:var(--bg3);border:1px solid var(--line);
+  border-radius:999px;padding:7px 15px;font-size:12.5px;color:var(--fg2);box-shadow:0 8px 22px #0007;
+  opacity:0;transform:translateY(10px);transition:opacity .3s ease,transform .3s ease}
+.hintItem.on{opacity:1;transform:none}
+.hintItem b{color:var(--fg);font-weight:600}
+.hintItem .tick{color:var(--ok)}
+.hintItem.warn .tick{color:var(--warn)}
 .empty{color:var(--fg3);text-align:center;padding:48px 20px;font-size:13px;line-height:2}
 .secttl{font-size:12px;color:var(--fg3);margin:20px 0 8px;letter-spacing:.4px}
 .secttl:first-child{margin-top:0}
@@ -380,6 +394,9 @@ tr.bt td{background:rgba(var(--g-on),.05)}
 .toast{background-color:var(--g-overlay);background-image:var(--g-sheen);
   -webkit-backdrop-filter:var(--g-overlay-blur);backdrop-filter:var(--g-overlay-blur);
   border:1px solid var(--g-border);box-shadow:var(--g-shadow)}
+.hintItem{background-color:var(--g-surface-raised);background-image:var(--g-sheen);
+  -webkit-backdrop-filter:var(--g-blur);backdrop-filter:var(--g-blur);
+  border:1px solid var(--g-border-raised);box-shadow:var(--g-shadow)}
 /* 异常提示 */
 #authbar{background:rgba(244,67,54,.18);border-bottom:1px solid rgba(244,67,54,.42);color:#ffc8c2}
 #authbar button{border-color:rgba(255,180,173,.45);color:#ffd9d5}
@@ -518,6 +535,7 @@ tr.bt td{background:rgba(var(--g-on),.05)}
   <div class="close" id="lbClose">✕</div>
 </div>
 <div id="toasts"></div>
+<div id="hints"></div>
 
 <script>
 /* =========================================================================
@@ -540,6 +558,25 @@ function toast(title, text, kind){
   el.innerHTML = '<b>' + esc(title) + '</b>' + esc(text == null ? '' : text);
   $('#toasts').appendChild(el);
   setTimeout(() => { el.style.opacity = '0'; el.style.transition = '.3s'; setTimeout(() => el.remove(), 320); }, 4200);
+}
+
+/* 后台任务的小提示（搜索完成之类）：底部居中，新的排在下面，各条自己计时、渐入渐出 */
+const HINT_MS = 2000;         // 停留时长（用户要求 2 秒）
+const HINT_FADE = 320;        // 与 CSS 里的 transition 对齐
+function hint(number, text, kind){
+  const box = $('#hints');
+  if (!box) return;
+  const el = document.createElement('div');
+  el.className = 'hintItem ' + (kind || '');
+  el.innerHTML = '<b>' + esc(number || '') + '</b><span class="tick">'
+    + (kind === 'warn' ? '•' : '✓') + '</span>' + esc(text || '已搜索完成');
+  box.appendChild(el);
+  while (box.children.length > 5) box.removeChild(box.firstChild);   // 连点也不至于糊满屏
+  requestAnimationFrame(() => el.classList.add('on'));               // 下一帧再加 on，过渡才会走
+  setTimeout(() => {
+    el.classList.remove('on');
+    setTimeout(() => el.remove(), HINT_FADE);
+  }, HINT_MS);
 }
 
 /* 图片：加载失败时隐藏自身并显示相邻的 .noimg 占位 */
@@ -1017,7 +1054,7 @@ function bindDetail(number){
   const bs = db.querySelector('#btnPtSearch');
   if (bs) bs.onclick = () => {
     bs.disabled = true; bs.textContent = '⏳ 搜索中…';
-    ptSearch(number, mv.actor || '', mv.thumb || '');
+    ptSearch(number, mv.actor || '', mv.thumb || '', bs);
   };
   const bn = db.querySelector('#btnSubNum');
   if (bn) bn.onclick = () => subscribeNumber(number);
@@ -1546,7 +1583,9 @@ function candTable(t, idx){
   const bt = cands.filter(c => c.src === 'BT');
   const rowOf = c => {
     const pass = c.pass !== false;
-    return '<tr class="' + (c.picked ? 'best ' : '') + (pass ? '' : 'dead ') + (c.src === 'BT' ? 'bt' : '') + '">'
+    const cls = (c.picked ? 'best ' : '') + (pass ? '' : 'dead ') + (c.src === 'BT' ? 'bt' : '');
+    const title = String(c.title || '').trim();      // 种子原名，常写着「无码破解」之类
+    return '<tr class="' + cls + (title ? 'has-sub' : '') + '">'
       + '<td>' + (c.src === 'BT' ? '<span class="tag">BT</span>' : '') + esc(c.site || '') + '</td>'
       + '<td>' + esc(c.spec || '') + '</td>'
       + '<td>' + (c.cnsub ? '<span class="tag on">有</span>' : '<span class="tag">无</span>') + '</td>'
@@ -1560,7 +1599,9 @@ function candTable(t, idx){
       + '<td>' + (pass
           ? '<button class="ghost" data-dl="' + esc(c.site || '') + '" data-task="' + esc(t.id || '') + '">下载</button>'
           : '<button class="ghost" data-dl="' + esc(c.site || '') + '" data-task="' + esc(t.id || '')
-            + '" data-force="1" title="' + esc(c.breakdown || '') + '">仍要下载</button>') + '</td></tr>';
+            + '" data-force="1" title="' + esc(c.breakdown || '') + '">仍要下载</button>') + '</td></tr>'
+      + (title ? '<tr class="candsub ' + cls + '"><td colspan="9"><div class="ttl" title="'
+          + esc(title) + '">' + esc(title) + '</div></td></tr>' : '');
   };
   const origin = t.source === 'sub'
     ? ('来自订阅' + (t.actor ? '：' + esc(t.actor) : ''))
@@ -1581,7 +1622,6 @@ function candTable(t, idx){
     + (bt.length ? '<tr><td colspan="9" class="hint" style="padding:6px 10px">— PT 没有合格候选，以下为 BT 磁力兜底 —</td></tr>' + bt.map(rowOf).join('') : '')
     + (cands.length ? '' : '<tr><td colspan="9" class="hint" style="padding:10px">没有搜到任何候选</td></tr>')
     + '</tbody></table>'
-    + (t.reason ? '<div style="padding:10px 14px;color:var(--fg3);font-size:11.5px;border-top:1px solid var(--line)">💡 ' + esc(t.reason) + '</div>' : '')
     + '</div>';
 }
 /* ---------- 5. 下载队列（从任务页拆出来的独立页） ---------- */
@@ -1647,11 +1687,14 @@ function applyThumb(number, thumb){
 function queueMissingThumbs(items){
   (items || []).filter(x => x && x.number && !x.thumb).map(x => x.number).slice(0, 3).forEach(queueThumb);
 }
-function ptSearch(number, actor, thumb){
+/* 后台搜种：结果落进任务列表，但**不跳页**——只在底部给一条小提示，用户接着看手里的详情 */
+function ptSearch(number, actor, thumb, btn){
   const body = {number:number};
   if (actor) body.actor = actor;
   if (thumb) body.thumb = thumb;      // 详情页顺手把封面带过去，任务列表里就有图了
+  const done = () => { if (btn){ btn.disabled = false; btn.textContent = '🔎 搜索 PT 站'; } };
   apiPost('/tasks/search', body).then(r => {
+    done();
     if (!r.ok){ toast('搜种失败', r.message || '抓取失败，请稍后重试', 'warn'); return; }
     const task = r.data && r.data.task ? r.data.task : r.data;
     if (task && task.id != null){
@@ -1659,11 +1702,9 @@ function ptSearch(number, actor, thumb){
       S.tasks.unshift(task);
     }
     renderPills();
+    loadTasks(true);                  // 后台把任务列表刷好，角标跟着更新
     const n = task && task.cands ? task.cands.length : 0;
-    toast('搜种完成', (task && task.number ? task.number + ' · ' : '') + n + ' 个候选，去「任务」页确认', 'ok');
-    loadTasks(true);
-    closeAll();
-    S.actor = null; S.view = 'tasks'; render();
+    hint((task && task.number) || number, n ? '已搜索完成' : '没有找到候选', n ? '' : 'warn');
   });
 }
 function startDownload(taskId, site, btn, force){
@@ -2071,7 +2112,7 @@ function bindUi(){
 window.AVH = {
   S:S, render:render, closeAll:closeAll, openMovie:openMovie, openActor:openActor,
   openLb:openLb, openActorPicker:openActorPicker, doSearch:doSearch,
-  toast:toast, loadTasks:loadTasks,
+  toast:toast, hint:hint, loadTasks:loadTasks,
   clearCache:function(prefix){ Object.keys(CACHE).forEach(k => { if (!prefix || k.indexOf(prefix) === 0) delete CACHE[k]; }); }
 };
 bindTokenEvents();
