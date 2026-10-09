@@ -583,7 +583,10 @@ class AVHelper(_PluginBase):
                 if isinstance(item, dict) and item.get("hash"):
                     magnets.append({
                         "hash": item["hash"], "name": item.get("name") or "",
-                        "size": item.get("size") or 0, "cnsub": bool(item.get("cnsub")),
+                        # javdb 磁力的 size 单位是 MB，转成人类可读（"7.7 GB"），空值给空串
+                        "size": scoring.human_size(float(item.get("size") or 0) * 1024 * 1024)
+                                if item.get("size") else "",
+                        "cnsub": bool(item.get("cnsub")),
                         "hd": bool(item.get("hd")),
                     })
         return {
