@@ -28,9 +28,8 @@ input,select{font:inherit}
 header{display:flex;align-items:center;gap:12px;padding:10px 16px;background:var(--bg2);border-bottom:1px solid var(--line);flex:none}
 .logo{font-weight:700;display:flex;align-items:center;gap:8px;white-space:nowrap}
 .logo b{color:var(--acc)}
-.chain{display:flex;align-items:center;gap:6px;color:var(--fg3);font-size:12px}
-.chain .node{background:var(--bg3);border:1px solid var(--line);border-radius:999px;padding:2px 9px;color:var(--fg2)}
-.chain .node.on{border-color:#2c5c34;color:#8ee39a}
+.bellbadge{display:inline-block;background:var(--acc2);color:#fff;border-radius:999px;font-size:11px;padding:0 6px;line-height:16px;min-width:16px;text-align:center;margin-left:6px}
+.bellbadge.zero{display:none}
 .searchbox{display:flex;align-items:center;gap:0;flex:1;max-width:420px}
 .searchbox input{flex:1;background:var(--bg3);border:1px solid var(--line);border-right:none;border-radius:8px 0 0 8px;padding:7px 11px;color:var(--fg)}
 .searchbox input:focus{outline:none;border-color:var(--acc)}
@@ -186,6 +185,7 @@ tr.bt td{background:#1a1a26}
 .scrim.on{display:block}
 .drawer{position:fixed;top:0;right:0;bottom:0;width:min(1080px,96vw);background:var(--bg2);border-left:1px solid var(--line);z-index:41;transform:translateX(100%);transition:.22s;display:flex;flex-direction:column}
 .drawer.on{transform:none}
+.drawer.ndrawer{width:min(470px,96vw)}
 .drawer .dh{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line);flex:none}
 .drawer .db{overflow:auto;padding:18px}
 .modal{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:42;width:min(640px,94vw);background:var(--bg2);border:1px solid var(--line);border-radius:12px;display:none;overflow:hidden}
@@ -248,10 +248,8 @@ tr.bt td{background:#1a1a26}
     <input id="qInput" placeholder="搜索番号 / 演员（如 SSIS-001）…" autocomplete="off">
     <button id="qBtn">搜索</button>
   </div>
-  <div class="chain">
-    <span class="node on">javdb-cli</span>→<span class="node on">MoviePilot</span>→<span class="node on">qB</span>→<span class="node on">Emby</span>
-  </div>
   <div class="spacer"></div>
+  <button class="ghost" id="bellBtn">🔔 通知<span class="bellbadge zero" id="bellCount">0</span></button>
   <button class="ghost" id="resetBtn">重载</button>
 </header>
 
@@ -267,7 +265,6 @@ tr.bt td{background:#1a1a26}
   <button data-v="subs">📌 订阅<span class="pill" id="pillSubs">0</span></button>
   <button data-v="tasks">⬇ 任务<span class="pill warn" id="pillTasks">0</span></button>
   <button data-v="sites">🧲 站点搜索</button>
-  <button data-v="notify">🔔 通知<span class="pill" id="pillNotify">0</span></button>
 </nav>
 
 <main id="main"></main>
@@ -278,6 +275,12 @@ tr.bt td{background:#1a1a26}
     <button class="ghost" id="drawerReload" style="display:none">↻ 重新抓取</button>
     <button class="ghost" id="drawerClose">关闭</button></div>
   <div class="db" id="drawerBody"></div>
+</aside>
+<aside class="drawer ndrawer" id="ndrawer">
+  <div class="dh"><b>🔔 通知</b><div style="flex:1"></div>
+    <button class="ghost" id="nClear">清空</button>
+    <button class="ghost" id="nClose">关闭</button></div>
+  <div class="db" id="nBody"></div>
 </aside>
 <div class="modal" id="modal">
   <div class="mh" id="modalTitle">标题</div>
@@ -440,11 +443,12 @@ let curDetailId = '';             // 该番号的 javdb 内部 id（卡片带过
 /* ============ 视图骨架 ============ */
 function renderPills(){
   const pend = S.tasks.filter(t => t.state === 'await').length;
-  const q = S.queue.filter(x => x.state !== 'done').length;
   $('#pillFavs').textContent = S.favs.length;
   $('#pillSubs').textContent = S.subs.length;
-  $('#pillTasks').textContent = pend + q;
-  $('#pillNotify').textContent = S.notices.length;
+  $('#pillTasks').textContent = pend;
+  const bc = $('#bellCount');
+  bc.textContent = S.notices.length;
+  bc.classList.toggle('zero', !S.notices.length);
   Array.prototype.forEach.call($('#nav').children, b => b.classList.toggle('on', b.dataset.v === S.view));
 }
 const loadingHtml = t => '<div class="loading">' + esc(t || '加载中…') + '</div>';
@@ -460,7 +464,7 @@ function render(){
   if (S.actor && S.view === 'actors'){ renderActorDetail(m); return; }
   if (!S.booted && S.view === 'discover'){ m.innerHTML = loadingHtml('正在读取插件状态…'); return; }
   ({discover:renderDiscover, actors:renderActors, subs:renderSubs, tasks:renderTasks,
-    sites:renderSiteSearch, notify:renderNotify}[S.view] || renderDiscover)(m);
+    sites:renderSiteSearch}[S.view] || renderDiscover)(m);
 }
 
 /* ---------- 1. 发现榜单 ---------- */
@@ -478,8 +482,7 @@ function renderDiscover(m){
   m.innerHTML = '<div class="toolbar">'
     + '<div class="tabs" id="periodTabs">' + periodTabsHtml() + '</div>'
     + '<div class="tabs" id="zoneTabs">' + zoneTabsHtml() + '</div>'
-    + '<span class="hint">javdb-cli <code>rankings movies --period ' + esc(S.period) + ' --type ' + esc(S.kind) + '</code>'
-    + (entry && entry.data ? ' · ' + (entry.data.length) + ' 条' : '') + '</span>'
+    + (entry && entry.data ? '<span class="hint">' + entry.data.length + ' 部</span>' : '')
     + '<div style="flex:1"></div>'
     + '<button class="ghost" id="btnReload">↻ 重新抓取</button></div>'
     + '<div id="rankBody">' + (entry ? '' : loadingHtml('正在抓取榜单…')) + '</div>';
@@ -522,7 +525,7 @@ function bindTabs(m){
 function rankBodyHtml(entry){
   if (entry.error) return errHtml(entry.error, 'data-act="rank-retry"');
   const items = entry.data || [];
-  if (!items.length) return emptyHtml('该榜单暂无数据。<br><span class="hint">换一个周期/分类，或点「重新抓取」。</span>');
+  if (!items.length) return emptyHtml('该榜单暂无数据，换个周期 / 分类试试');
   return '<div class="grid">' + items.map(card).join('') + '</div>';
 }
 function loadDiscover(force){
@@ -708,7 +711,6 @@ function detailHtml(d, number){
         ? '<button class="ghost" id="btnFavInDetail">' + (faved ? '★ 已收藏' : '☆ 收藏该演员') + '</button>'
         : '')
     + '</div>'
-    + '<div class="hint" style="margin-top:8px">搜索 PT 站会真的在你的站点里并发搜索并按订阅规则打分，结果出现在「任务」页等你确认下载。</div>'
     + '</div></div>'
     + '<div class="secttl">预览图（' + previews.length + ' 张，点击放大）</div>'
     + '<div class="shots">'
@@ -722,7 +724,7 @@ function detailHtml(d, number){
     + '<div class="longwrap" id="longWrap">' + longInitialHtml(d, num) + '</div>';
 }
 function magnetListHtml(magnets){
-  if (!magnets.length) return '<div class="hint">后端未返回磁力链接。</div>';
+  if (!magnets.length) return '<div class="hint">没有磁力链接</div>';
   return '<div>' + magnets.map(mg => {
     const hash = mg.hash || '';
     const magnet = hash ? ('magnet:?xt=urn:btih:' + hash) : '';
@@ -743,12 +745,8 @@ function magnetListHtml(magnets){
 }
 function longInitialHtml(d, num){
   const url = d.longimage;
-  if (url){
-    return '<button class="ghost" id="btnLong">📜 加载长图（前端直连，不经后端）</button>'
-      + '<div class="hint" style="margin-top:6px">来源 projectjav 原始外链，由浏览器直连加载。</div>';
-  }
-  return '<button class="ghost" id="btnLong">📜 查询长图地址</button>'
-    + '<div class="hint" style="margin-top:6px">详情接口不再等长图（projectjav 那一跳要 5 秒以上），点此单独解析，解析后缓存 7 天。</div>';
+  return '<button class="ghost" id="btnLong">📜 ' + (url ? '加载长图' : '查询长图地址') + '</button>'
+    + '<div class="hint" style="margin-top:6px">首次解析需要几秒，结果缓存 7 天</div>';
 }
 function bindDetail(number){
   const db = $('#drawerBody');
@@ -801,7 +799,7 @@ function loadLong(number, knownUrl){
       w.innerHTML = '<div class="hint" style="color:var(--warn)">该番号在 javfree / projectjav / javstore 三个源里都没找到长图。</div>';
       return;
     }
-    w.innerHTML = '<div class="hint">加载中…（前端直连 projectjav）</div>';
+    w.innerHTML = '<div class="hint">加载中…</div>';
     const im = new Image();
     im.alt = '长缩略图';
     im.style.cursor = 'zoom-in';
@@ -815,8 +813,7 @@ function loadLong(number, knownUrl){
       im.onclick = () => openLb([im.src], 0);
     };
     im.onerror = () => {
-      w.innerHTML = '<div class="longerr">浏览器无法直连 projectjav（需代理）。<br>'
-        + '该域名需经代理访问，浏览器若未走系统代理就会加载失败；真实部署时可让插件代取并缓存。<br>'
+      w.innerHTML = '<div class="longerr">图片源需要代理，浏览器直连失败<br>'
         + '<code style="word-break:break-all">' + esc(url) + '</code></div>';
     };
     im.src = url;
@@ -835,14 +832,13 @@ function loadLong(number, knownUrl){
 /* ---------- 2. 我的演员（只显示收藏） ---------- */
 function renderActors(m){
   if (!S.favs.length){
-    m.innerHTML = '<div class="empty">还没有收藏任何演员。<br>'
-      + '<span class="hint">只有你 ⭐ 收藏的演员才会出现在这里 —— 去「发现榜单」点开一部影片，或从演员榜里挑。</span><br><br>'
+    m.innerHTML = '<div class="empty">还没有收藏演员<br><br>'
       + '<button class="primary" id="btnBrowseActors">➕ 从演员榜挑选</button></div>';
     m.querySelector('#btnBrowseActors').onclick = openActorPicker;
     return;
   }
   m.innerHTML = '<div class="toolbar">'
-    + '<span class="hint">只显示已收藏的演员 · 共 ' + S.favs.length + ' 位</span>'
+    + '<span class="hint">共 ' + S.favs.length + ' 位</span>'
     + '<div style="flex:1"></div>'
     + '<button class="ghost" id="btnAddActor">➕ 添加演员</button></div>'
     + '<div class="actors">'
@@ -862,8 +858,8 @@ function openActorPicker(){
     if (!ent) return loadingHtml('正在抓取演员榜…');
     if (ent.error) return errHtml(ent.error, 'data-act="picker-retry"');
     const avail = (ent.data || []).filter(a => !findFav(a.name));
-    if (!avail.length) return '<div class="hint">演员榜里的人都已经收藏了。</div>';
-    return '<div class="hint" style="margin-bottom:12px">点 ➕ 加入收藏；收藏后才会出现在「我的演员」里。</div>'
+    if (!avail.length) return '<div class="hint">演员榜里的人都已收藏。</div>';
+    return '<div class="hint" style="margin-bottom:12px">点 ➕ 加入收藏</div>'
       + '<div class="actors" style="grid-template-columns:repeat(auto-fill,minmax(120px,1fr))">'
       + avail.map(a => '<div class="actor" data-n="' + esc(a.name) + '" data-av="' + esc(a.avatar || '') + '" data-zh="' + esc(a.zh || '') + '" style="cursor:pointer">'
           + '<div class="av">' + imgWithPlaceholder(a.avatar, a.name) + '</div>'
@@ -973,8 +969,7 @@ function renderActorDetail(m){
   const name = S.actor;
   const key = 'page:actor:' + name;
   const entry = cached(key);
-  const head = '<div class="toolbar"><button class="ghost" id="btnBack">← 返回</button>'
-    + '<span class="hint">javdb-cli <code>actor "' + esc(name) + '" --all</code></span></div>';
+  const head = '<div class="toolbar"><button class="ghost" id="btnBack">← 返回</button></div>';
   if (!entry){
     m.innerHTML = head + loadingHtml('正在抓取演员档案与作品史…');
     m.querySelector('#btnBack').onclick = () => { S.actor = null; render(); };
@@ -1075,32 +1070,37 @@ function renderActorDetail(m){
 }
 
 /* ---------- 3. 订阅 ---------- */
+function ruleSummary(r){
+  r = r || {};
+  return (r.res || '1080p') + ' 优先'
+    + (r.mustCnsub ? ' · 必须中字' : '')
+    + (r.preferUncensored ? ' · 破解优先' : '')
+    + (r.allow4k ? ' · 4K 择优' : '')
+    + ' · 做种≥' + (r.minSeeders || 0)
+    + (r.btFallback ? ' · BT 兜底' : '')
+    + ' · ' + (r.trigger === 'auto' ? '命中自动下载' : '命中仅通知')
+    + ((r.sites || []).length ? ' · 限 ' + r.sites.length + ' 站' : '');
+}
 function renderSubs(m){
-  const r = S.rule;
   m.innerHTML = '<div class="toolbar">'
-    + '<span class="hint">订阅 = 定时检查 → 发现新片 → 按规则搜站打分 → 自动或等你确认入库。'
-    + '检查频率限流：每天 ≤ ' + esc(r.maxPerDay) + ' 次、间隔 ≥ ' + esc(r.minIntervalMin) + ' 分钟（避免触发站点防爬）</span>'
+    + '<span class="hint">默认规则：' + esc(ruleSummary(S.rule)) + '</span>'
     + '<div style="flex:1"></div>'
-    + '<button class="ghost" id="btnCheckAll">⚡ 手动检查一次</button></div>'
+    + '<button class="ghost" id="btnRule">⚙ 默认规则</button>'
+    + '<button class="ghost" id="btnCheckAll">⚡ 检查一次</button></div>'
     + (S.subs.length
       ? S.subs.map(s => {
-          const rule = s.rule || {};
-          const sites = rule.sites || [];
           const last = s.last || s.created || '';
           return '<div class="q"><div class="top"><div>'
             + '<div style="font-weight:600">' + (s.type === 'actor' ? '👤' : '🎞') + ' ' + esc(s.name) + '</div>'
-            + '<div class="hint" style="margin-top:3px">规则：' + esc(rule.res || '1080p') + ' 优先'
-            + (rule.mustCnsub ? ' · 必须中字' : '') + (rule.preferUncensored ? ' · 破解优先' : '')
-            + (rule.allow4k ? ' · 4K 择优' : '') + (rule.btFallback ? ' · BT 兜底' : '')
-            + (sites.length ? ' · 站点：' + esc(sites.slice(0,4).join('/')) + (sites.length > 4 ? '…' : '') : '') + '</div>'
-            + '<div class="hint" style="margin-top:2px">触发：' + (rule.trigger === 'auto' ? '自动下载' : '仅通知我去选')
-            + ' · 累计命中 ' + (s.hits || 0) + ' · 上次检查 ' + esc(last ? shortTime(last) : '—') + '</div>'
+            + '<div class="hint" style="margin-top:3px">' + esc(ruleSummary(s.rule)) + '</div>'
+            + '<div class="hint" style="margin-top:2px">命中 ' + (s.hits || 0) + ' 次 · 上次检查 ' + esc(last ? shortTime(last) : '—') + '</div>'
             + '</div><div style="display:flex;gap:6px">'
             + '<button class="ghost" data-check="' + esc(s.name) + '">检查</button>'
             + '<button class="danger" data-unsub="' + esc(s.id || '') + '">取消</button>'
             + '</div></div></div>';
         }).join('')
-      : emptyHtml('还没有订阅。<br><span class="hint">去「发现榜单」点开一部影片订阅番号，或收藏一位演员后订阅她的新片。</span>'));
+      : emptyHtml('还没有订阅'));
+  m.querySelector('#btnRule').onclick = openRuleDialog;
   m.querySelector('#btnCheckAll').onclick = () => runCheck('');
   m.querySelectorAll('[data-check]').forEach(b => b.onclick = () => runCheck(b.dataset.check));
   m.querySelectorAll('[data-unsub]').forEach(b => b.onclick = () => unsub(b.dataset.unsub, b));
@@ -1134,55 +1134,58 @@ function runCheck(name){
     }
     (d.notices || []).forEach(n => S.notices.unshift(n));
     renderPills();
-    if (S.view === 'subs' || S.view === 'notify') render();
+    if (S.view === 'subs') render();
+    paintNotify();
     loadSubs(true);
     loadTasks(true);
   });
 }
-function subActorDialog(name, zh, avatar){
-  const r = S.rule;
+/* 规则编辑控件：订阅弹窗与「默认规则」弹窗共用 */
+function ruleFieldsHtml(r){
+  r = r || {};
   const sites = S.sites.map(s => s.name).filter(Boolean);
   const cur = id => (r.sites || []).indexOf(id) >= 0;
   const curPref = id => (r.prefSites || []).indexOf(id) >= 0;
-  openModal('订阅演员 · ' + name, ''
-    + '<div class="fld"><label>分辨率策略（决定从 PT 站挑哪个种）</label>'
+  const numStyle = 'width:88px;background:var(--bg3);border:1px solid var(--line);border-radius:7px;padding:5px 8px;color:var(--fg)';
+  const txtStyle = 'background:var(--bg3);border:1px solid var(--line);border-radius:7px;padding:7px 9px;color:var(--fg)';
+  return ''
+    + '<div class="fld"><label>分辨率策略</label>'
     + '<div class="tabs" id="resTabs">'
     + [['1080p','1080P 优先'],['2160p','4K 优先'],['only4k','仅 4K']].map(([v,n]) =>
         '<button data-r="' + v + '" class="' + (r.res === v ? 'on' : '') + '">' + n + '</button>').join('')
     + '</div></div>'
     + '<div class="sw"><div><div class="lbl">必须中文字幕</div><div class="dsc">打开则没有中字的种直接淘汰；默认关（AV 站中字少，关掉时中字仍加 32 分优先选）</div></div>'
     + '<input type="checkbox" id="cCn"' + (r.mustCnsub ? ' checked' : '') + '></div>'
-    + '<div class="sw"><div><div class="lbl">破解 / 无码版优先</div><div class="dsc">同类条件下优先选破解版</div></div>'
+    + '<div class="sw"><div><div class="lbl">破解 / 无码版优先</div></div>'
     + '<input type="checkbox" id="cUc"' + (r.preferUncensored ? ' checked' : '') + '></div>'
-    + '<div class="sw"><div><div class="lbl">允许 4K 择优</div><div class="dsc">1080P 无好种时，若 4K 做种充足则升级</div></div>'
+    + '<div class="sw"><div><div class="lbl">允许 4K 择优</div><div class="dsc">1080P 无好种时升级 4K</div></div>'
     + '<input type="checkbox" id="c4k"' + (r.allow4k ? ' checked' : '') + '></div>'
     + '<div class="sw"><div><div class="lbl">做种数下限</div><div class="dsc">低于此值不下载</div></div>'
-    + '<input type="number" id="nSeed" value="' + esc(r.minSeeders) + '" style="width:88px;background:var(--bg3);border:1px solid var(--line);border-radius:7px;padding:5px 8px;color:var(--fg)"></div>'
-    + '<div class="fld" style="margin-top:14px"><label>搜索站点（来自 MoviePilot 已配置站点）</label>'
+    + '<input type="number" id="nSeed" value="' + esc(r.minSeeders) + '" style="' + numStyle + '"></div>'
+    + '<div class="fld" style="margin-top:14px"><label>搜索站点（不选 = 全部已配置站点）</label>'
     + '<div class="chips" id="siteChips">'
     + (sites.length ? sites.map(s => '<span class="chip' + (cur(s) ? ' on' : '') + '" data-s="' + esc(s) + '">' + esc(s) + '</span>').join('')
                     : '<span class="hint">未取到站点列表</span>')
     + '</div></div>'
-    + '<div class="fld"><label>优先站点（这两个站先搜，命中就不再搜其它站 → 降低被防爬的概率）</label>'
+    + '<div class="fld"><label>优先站点（先搜这些站，命中即停）</label>'
     + '<div class="chips" id="prefChips">'
     + (sites.length ? sites.map(s => '<span class="chip' + (curPref(s) ? ' on' : '') + '" data-s="' + esc(s) + '">' + esc(s) + '</span>').join('')
                     : '<span class="hint">—</span>')
     + '</div></div>'
-    + '<div class="sw"><div><div class="lbl">PT 站搜不到时，允许 BT 种子兜底</div><div class="dsc">公网 BT（磁力）作为备选来源</div></div>'
+    + '<div class="sw"><div><div class="lbl">PT 搜不到时允许 BT 磁力兜底</div></div>'
     + '<input type="checkbox" id="cBt"' + (r.btFallback ? ' checked' : '') + '></div>'
-    + '<div class="sw"><div><div class="lbl">命中后自动下载</div><div class="dsc">关掉则只通知你，由你在「任务」页点下载</div></div>'
+    + '<div class="sw"><div><div class="lbl">命中后自动下载</div><div class="dsc">关闭则只通知，到「任务」页手动下载</div></div>'
     + '<input type="checkbox" id="cAuto"' + (r.trigger === 'auto' ? ' checked' : '') + '></div>'
-    + '<div class="sw"><div><div class="lbl">检查频率上限</div><div class="dsc">每天最多检查几次（防爬）</div></div>'
-    + '<input type="number" id="nFreq" value="' + esc(r.maxPerDay) + '" style="width:88px;background:var(--bg3);border:1px solid var(--line);border-radius:7px;padding:5px 8px;color:var(--fg)"></div>'
-    + '<div class="fld" style="margin-top:12px"><label>保存路径 / 下载器 / 下载器分类</label>'
+    + '<div class="sw"><div><div class="lbl">检查频率上限</div><div class="dsc">每天最多检查次数</div></div>'
+    + '<input type="number" id="nFreq" value="' + esc(r.maxPerDay) + '" style="' + numStyle + '"></div>'
+    + '<div class="fld" style="margin-top:12px"><label>保存路径 / 下载器 / qB 分类</label>'
     + '<div style="display:flex;gap:8px">'
     + '<input type="text" id="pPath" value="' + esc(r.savePath || '') + '">'
-    + '<input type="text" id="pDl" value="' + esc(r.downloader || 'qb') + '" style="width:90px;background:var(--bg3);border:1px solid var(--line);border-radius:7px;padding:7px 9px;color:var(--fg)">'
-    + '<input type="text" id="pCat" value="' + esc(r.category || 'avi') + '" style="width:90px;background:var(--bg3);border:1px solid var(--line);border-radius:7px;padding:7px 9px;color:var(--fg)">'
-    + '</div><div class="hint" style="margin-top:5px">qB 里分类 <code>avi</code> 的保存目录就是 <code>/media/9kg/avi</code>，交给分类自动归位即可，不用手工建目录</div></div>',
-    '<button class="danger" onclick="AVH.closeAll()">取消</button><button class="primary" id="btnDoSub">确认订阅</button>');
-
-  const mb = $('#modalBody');
+    + '<input type="text" id="pDl" value="' + esc(r.downloader || 'qb') + '" style="width:90px;' + txtStyle + '">'
+    + '<input type="text" id="pCat" value="' + esc(r.category || 'avi') + '" style="width:90px;' + txtStyle + '">'
+    + '</div></div>';
+}
+function bindRuleFields(mb){
   mb.querySelector('#resTabs').onclick = e => {
     const b = e.target.closest('button'); if (!b) return;
     Array.prototype.forEach.call(b.parentNode.children, x => x.classList.toggle('on', x === b));
@@ -1191,47 +1194,68 @@ function subActorDialog(name, zh, avatar){
     const box = mb.querySelector(sel); if (!box) return;
     box.onclick = e => { const c = e.target.closest('.chip'); if (c) c.classList.toggle('on'); };
   });
+}
+function collectRule(mb, base){
+  const resBtn = mb.querySelector('#resTabs .on');
+  return {
+    res: resBtn ? resBtn.dataset.r : '1080p',
+    mustCnsub: mb.querySelector('#cCn').checked,
+    preferUncensored: mb.querySelector('#cUc').checked,
+    allow4k: mb.querySelector('#c4k').checked,
+    minSeeders: parseInt(mb.querySelector('#nSeed').value, 10) || 0,
+    maxPerDay: parseInt(mb.querySelector('#nFreq').value, 10) || 6,
+    minIntervalMin: (base || S.rule).minIntervalMin,
+    sites: Array.prototype.map.call(mb.querySelectorAll('#siteChips .chip.on'), c => c.dataset.s),
+    prefSites: Array.prototype.map.call(mb.querySelectorAll('#prefChips .chip.on'), c => c.dataset.s),
+    btFallback: mb.querySelector('#cBt').checked,
+    trigger: mb.querySelector('#cAuto').checked ? 'auto' : 'notify',
+    savePath: mb.querySelector('#pPath').value,
+    category: mb.querySelector('#pCat').value,
+    downloader: mb.querySelector('#pDl').value
+  };
+}
+function openRuleDialog(){
+  openModal('默认规则（手动搜索与新建订阅的基准）', ruleFieldsHtml(S.rule),
+    '<button class="danger" onclick="AVH.closeAll()">取消</button><button class="primary" id="btnSaveRule">保存</button>');
+  const mb = $('#modalBody');
+  bindRuleFields(mb);
+  $('#btnSaveRule').onclick = () => {
+    const rule = collectRule(mb, S.rule);
+    const btn = $('#btnSaveRule');
+    btn.disabled = true;
+    apiPost('/rule', {rule:rule}).then(r => {
+      if (!r.ok){ btn.disabled = false; toast('保存失败', r.message || '请稍后重试', 'warn'); return; }
+      S.rule = (r.data && r.data.rule) ? r.data.rule : Object.assign({}, S.rule, rule);
+      closeAll();
+      toast('默认规则已保存', '', 'ok');
+      if (S.view === 'subs') render();
+    });
+  };
+}
+function subActorDialog(name, zh, avatar){
+  openModal('订阅演员 · ' + name, ruleFieldsHtml(S.rule),
+    '<button class="danger" onclick="AVH.closeAll()">取消</button><button class="primary" id="btnDoSub">确认订阅</button>');
+  const mb = $('#modalBody');
+  bindRuleFields(mb);
   $('#btnDoSub').onclick = () => {
-    const resBtn = mb.querySelector('#resTabs .on');
-    const rule = {
-      res: resBtn ? resBtn.dataset.r : '1080p',
-      mustCnsub: mb.querySelector('#cCn').checked,
-      preferUncensored: mb.querySelector('#cUc').checked,
-      allow4k: mb.querySelector('#c4k').checked,
-      minSeeders: parseInt(mb.querySelector('#nSeed').value, 10) || 0,
-      maxPerDay: parseInt(mb.querySelector('#nFreq').value, 10) || 6,
-      minIntervalMin: S.rule.minIntervalMin,
-      sites: Array.prototype.map.call(mb.querySelectorAll('#siteChips .chip.on'), c => c.dataset.s),
-      prefSites: Array.prototype.map.call(mb.querySelectorAll('#prefChips .chip.on'), c => c.dataset.s),
-      btFallback: mb.querySelector('#cBt').checked,
-      trigger: mb.querySelector('#cAuto').checked ? 'auto' : 'notify',
-      savePath: mb.querySelector('#pPath').value,
-      category: mb.querySelector('#pCat').value,
-      downloader: mb.querySelector('#pDl').value
-    };
+    const rule = collectRule(mb, S.rule);
     const btn = $('#btnDoSub');
     btn.disabled = true;
     apiPost('/subs', {type:'actor', name:name, rule:rule}).then(r => {
       if (!r.ok){ btn.disabled = false; toast('订阅失败', r.message || '请稍后重试', 'warn'); return; }
-      S.rule = Object.assign({}, S.rule, rule);
-      const sub = r.data && r.data.id ? r.data : {id:'', type:'actor', name:name, rule:rule, hits:0, last:nowStr()};
-      if (!S.subs.some(s => String(s.id) === String(sub.id) && sub.id)) S.subs.push(sub);
       if (!findFav(name)) addFav(name, zh, avatar);
       closeAll();
-      toast('订阅已创建', name + ' · ' + rule.res + ' 优先' + (rule.mustCnsub ? ' · 中字' : '') + (rule.preferUncensored ? ' · 破解优先' : ''), 'ok');
+      toast('订阅已创建', name, 'ok');
       S.actor = null; S.view = 'subs'; render();
       loadSubs(true);
     });
   };
 }
 function subscribeNumber(num){
-  const rule = Object.assign({}, S.rule, {trigger:'notify'});
-  apiPost('/subs', {type:'number', name:num, rule:rule}).then(r => {
+  apiPost('/subs', {type:'number', name:num}).then(r => {
     if (!r.ok){ toast('订阅失败', r.message || '请稍后重试', 'warn'); return; }
-    const sub = r.data && r.data.id ? r.data : {id:'', type:'number', name:num, rule:rule, hits:0, last:nowStr()};
-    if (!S.subs.some(s => String(s.id) === String(sub.id) && sub.id)) S.subs.push(sub);
     renderPills();
-    toast('订阅已创建', '只监控番号 ' + num, 'ok');
+    toast('订阅已创建', '番号 ' + num, 'ok');
     closeAll();
     S.actor = null; S.view = 'subs'; render();
     loadSubs(true);
@@ -1243,10 +1267,11 @@ let taskTimer = null;
 function renderTasks(m){
   const pend = S.tasks.filter(t => t.state === 'await');
   m.innerHTML = '<div class="toolbar">'
-    + '<span class="hint">候选来自真实站点检索（馒头成人区 / 肉丝全分类 / 其余站点原生索引器），下载进度来自 <code>/tasks</code> 队列</span>'
     + '<div style="flex:1"></div>'
     + '<button class="ghost" id="btnRefreshTasks">↻ 刷新队列</button></div>'
-    + (pend.length ? pend.map((t,i) => candTable(t, i)).join('') : '')
+    + (pend.length
+        ? '<div class="secttl">待确认（' + pend.length + '）</div>' + pend.map((t,i) => candTable(t, i)).join('')
+        : '<div class="empty">没有待确认的任务</div>')
     + '<div class="secttl">下载队列</div>'
     + (S.queue.length
       ? S.queue.map(q => {
@@ -1258,7 +1283,7 @@ function renderTasks(m){
             + '<div class="hint">' + pct + '%</div></div>'
             + '<div class="bar' + (q.state === 'done' ? ' done' : '') + '"><i style="width:' + pct + '%"></i></div></div>';
         }).join('')
-      : '<div class="empty">队列为空。<br><span class="hint">在「发现榜单」点开一部影片 → 搜索 PT 站 → 选一个候选下载。</span></div>');
+      : '<div class="empty">队列为空</div>');
   m.querySelector('#btnRefreshTasks').onclick = () => { loadTasks(true); toast('任务', '正在刷新…'); };
   bindDownloadButtons(m);
 }
@@ -1274,7 +1299,7 @@ function candTable(t, idx){
       + '<td>' + (c.cnsub ? '<span class="tag on">有</span>' : '<span class="tag">无</span>') + '</td>'
       + '<td>' + (c.uncensored ? '<span class="tag uc">破解</span>' : '<span class="tag">—</span>') + '</td>'
       + '<td>' + esc(c.size || '') + '</td>'
-      + '<td>' + esc(c.seeders == null ? '—' : c.seeders) + '</td>'
+      + '<td>' + (c.src === 'BT' ? '<span class="hint">未知</span>' : esc(c.seeders == null ? '—' : c.seeders)) + '</td>'
       + '<td>' + (c.free ? '<span class="tag free">免费</span>' : '') + (c.pref ? '<span class="tag pref">优先站</span>' : '') + '</td>'
       + '<td title="' + esc(c.breakdown || '') + '"><span class="score '
       + (!pass ? 'lo' : (Number(c.score) >= 80 ? 'hi' : Number(c.score) >= 55 ? 'mid' : 'lo')) + '">'
@@ -1284,17 +1309,20 @@ function candTable(t, idx){
           : '<button class="ghost" data-dl="' + esc(c.site || '') + '" data-task="' + esc(t.id || '')
             + '" data-force="1" title="' + esc(c.breakdown || '') + '">仍要下载</button>') + '</td></tr>';
   };
+  const origin = t.source === 'sub'
+    ? ('来自订阅' + (t.actor ? '：' + esc(t.actor) : ''))
+    : ('手动搜索' + (t.actor ? ' · 演员：' + esc(t.actor) : ''));
   return '<div class="q" style="padding:0;overflow:hidden">'
     + '<div style="padding:12px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
     + '<b>' + esc(t.number || '') + '</b>'
-    + '<span class="hint">' + (t.actor ? '来自订阅：' + esc(t.actor) : '手动搜索') + ' · 搜到 ' + cands.length + ' 个 · 命中 ' + cands.filter(c => c.pass !== false).length + ' 个</span>'
+    + '<span class="hint">' + origin + ' · 搜到 ' + cands.length + ' · 合格 ' + cands.filter(c => c.pass !== false).length + '</span>'
     + '<div style="flex:1"></div>'
-    + '<span class="hint">' + (t.auto ? '该订阅为自动下载：命中即下载（已自动选中最高分）' : '等待确认：请点「下载」（也可在订阅规则里改为自动下载）') + '</span>'
+    + (t.auto && t.source === 'sub' ? '<span class="hint">订阅为自动下载，但无候选合格</span>' : '')
     + '</div>'
     + '<table><thead><tr><th>站点</th><th>规格</th><th>中字</th><th>破解</th><th>大小</th><th>做种</th><th>标记</th><th>匹配分</th><th></th></tr></thead><tbody>'
     + pt.map(rowOf).join('')
-    + (bt.length ? '<tr><td colspan="9" class="hint" style="padding:6px 10px">— PT 站没搜到合适的，以下为 BT 兜底 —</td></tr>' + bt.map(rowOf).join('') : '')
-    + (cands.length ? '' : '<tr><td colspan="9" class="hint" style="padding:10px">没有搜到任何候选。</td></tr>')
+    + (bt.length ? '<tr><td colspan="9" class="hint" style="padding:6px 10px">— PT 没有合格候选，以下为 BT 磁力兜底 —</td></tr>' + bt.map(rowOf).join('') : '')
+    + (cands.length ? '' : '<tr><td colspan="9" class="hint" style="padding:10px">没有搜到任何候选</td></tr>')
     + '</tbody></table>'
     + (t.reason ? '<div style="padding:10px 14px;color:var(--fg3);font-size:11.5px;border-top:1px solid var(--line)">💡 ' + esc(t.reason) + '</div>' : '')
     + '</div>';
@@ -1390,10 +1418,6 @@ function renderSiteSearch(m){
   const picked = S.sitePick || [];
   const infoOf = n => (S.sites || []).filter(s => s.name === n)[0] || {};
   m.innerHTML = '<div class="toolbar">'
-    + '<span class="hint">直接检索 MoviePilot 已配置的 PT 站：<b>馒头</b>走成人区（<code>mode=adult</code>），'
-    + '<b>肉丝</b>不带分类过滤（它的搜索本身含 9kg 区），其余站点走原生索引器但不带媒体类型</span>'
-    + '<div style="flex:1"></div></div>'
-    + '<div class="toolbar">'
     + '<input id="ssInput" placeholder="番号或关键词（如 MIDV-946）…" autocomplete="off" '
     + 'style="min-width:280px;background:var(--bg3);border:1px solid var(--line);border-radius:8px;padding:7px 10px;color:var(--fg)">'
     + '<button class="primary" id="ssBtn">搜索站点</button>'
@@ -1402,9 +1426,9 @@ function renderSiteSearch(m){
     + '<div style="flex:1"></div>'
     + '<span class="hint">' + (S.siteSearchAt
         ? '上次搜索 ' + esc(S.siteSearchAt)
-        : '限流：优先站点命中即停，站点之间间隔 3-8 秒') + '</span>'
+        : '命中即停 · 站点间隔 3-8 秒') + '</span>'
     + '</div>'
-    + '<div class="fld"><label>搜索范围（点站点名切换；括号里是该站的索引方式）</label>'
+    + '<div class="fld"><label>搜索范围（点站点名切换）</label>'
     + '<div class="chips" id="ssChips">'
     + names.map(n => {
         const label = infoOf(n).adapterLabel || '';
@@ -1414,8 +1438,7 @@ function renderSiteSearch(m){
     + '</div></div>'
     + '<div id="ssResult">' + (S.siteTask && (S.siteTask.cands || []).length
         ? candTable(S.siteTask, 0)
-        : '<div class="empty">输入番号或关键词后点「搜索站点」。<br>'
-          + '<span class="hint">结果表里的「下载」直接提交给 qB：分类 <code>avi</code> → 目录 <code>/media/9kg/avi</code>。</span></div>')
+        : '<div class="empty">输入番号或关键词后点「搜索站点」</div>')
     + '</div>';
 
   const input = m.querySelector('#ssInput');
@@ -1440,12 +1463,9 @@ function renderSiteSearch(m){
   bindDownloadButtons(m);
 }
 
-/* ---------- 5. 通知 ---------- */
-function renderNotify(m){
-  m.innerHTML = '<div class="toolbar">'
-    + '<span class="hint">后端推送记录（Telegram 同源）。只有「开始下载」那条带主图，其余纯文字。</span>'
-    + '<div style="flex:1"></div><button class="ghost" id="btnClear">清空</button></div>'
-    + '<div class="tg">'
+/* ---------- 5. 通知（顶栏铃铛 → 右侧抽屉） ---------- */
+function notifyBodyHtml(){
+  return '<div class="tg">'
     + (S.notices.length
       ? S.notices.map(n => {
           const kind = n.kind === 'ok' ? 'ok' : (n.kind === 'warn' ? 'warn' : '');
@@ -1459,15 +1479,20 @@ function renderNotify(m){
             + '<div class="f">' + esc(shortTime(n.time)) + '</div>'
             + '</div></div>';
         }).join('')
-      : '<div class="empty">暂无通知。</div>')
+      : '<div class="empty">暂无通知</div>')
     + '</div>';
-  m.querySelector('#btnClear').onclick = () => {
-    apiDelete('/notices').then(r => {
-      if (!r.ok){ toast('清空失败', r.message || '请稍后重试', 'warn'); return; }
-      S.notices = []; renderPills(); render();
-      toast('已清空', '通知列表已清空', 'ok');
-    });
-  };
+}
+function openNotify(){
+  $('#drawer').classList.remove('on');
+  $('#modal').classList.remove('on');
+  $('#drawerReload').style.display = 'none';
+  $('#nBody').innerHTML = loadingHtml('加载中…');
+  $('#scrim').classList.add('on');
+  $('#ndrawer').classList.add('on');
+  loadNotices(false);
+}
+function paintNotify(){
+  if ($('#ndrawer').classList.contains('on')) $('#nBody').innerHTML = notifyBodyHtml();
 }
 function loadNotices(force){
   return apiGet('/notices').then(r => {
@@ -1475,7 +1500,7 @@ function loadNotices(force){
     const d = r.data || {};
     S.notices = Array.isArray(d.notices) ? d.notices : (Array.isArray(d) ? d : S.notices);
     renderPills();
-    if (S.view === 'notify') render();
+    paintNotify();
     return true;
   });
 }
@@ -1542,6 +1567,7 @@ function lbStep(d){
 function closeAll(){
   $('#scrim').classList.remove('on');
   $('#drawer').classList.remove('on');
+  $('#ndrawer').classList.remove('on');
   $('#modal').classList.remove('on');
   $('#modal').classList.remove('wide');
   $('#drawerReload').style.display = 'none';
@@ -1652,9 +1678,17 @@ function bindUi(){
     S.view = b.dataset.v; S.actor = null;
     closeAll(); render();
     if (S.view === 'tasks') loadTasks(false);
-    if (S.view === 'notify') loadNotices(false);
     if (S.view === 'subs') loadSubs(false);
   });
+  $('#bellBtn').onclick = openNotify;
+  $('#nClose').onclick = closeAll;
+  $('#nClear').onclick = () => {
+    apiDelete('/notices').then(r => {
+      if (!r.ok){ toast('清空失败', r.message || '请稍后重试', 'warn'); return; }
+      S.notices = []; renderPills(); paintNotify();
+      toast('已清空', '通知已清空', 'ok');
+    });
+  };
   $('#resetBtn').onclick = () => {
     toast('重新加载状态', '正在重新拉取插件状态…');
     bootAndRender();
@@ -1678,7 +1712,8 @@ function bindUi(){
       if (e.key === 'ArrowRight'){ lbStep(1); return; }
     }
     if (e.key === 'Escape'){
-      if ($('#modal').classList.contains('on') || $('#drawer').classList.contains('on')) closeAll();
+      if ($('#modal').classList.contains('on') || $('#drawer').classList.contains('on')
+          || $('#ndrawer').classList.contains('on')) closeAll();
     }
   });
   $('#qBtn').onclick = () => doSearch($('#qInput').value);
