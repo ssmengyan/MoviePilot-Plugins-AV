@@ -71,6 +71,7 @@ main{flex:1;overflow:auto;padding:16px}
 .badge.cn{background:#1f6f3f;border-color:#2ea043}
 .badge.uc{background:#7a2f6a;border-color:#db61a2}
 .badge.new{background:#8a5a00;border-color:var(--gold)}
+.badge.lib{background:#1b4f7a;border-color:var(--acc)}
 .card .meta{padding:8px 9px 10px}
 .card .num{font-weight:700;font-size:13px}
 .card .sub{color:var(--fg3);font-size:11px;margin-top:3px;display:flex;justify-content:space-between;gap:6px}
@@ -158,6 +159,10 @@ tr.bt td{background:#1a1a26}
 .tag.uc{background:#5c2450;border-color:#a44a92;color:#ffd9f4}
 .tag.free{background:#4a3a00;border-color:var(--gold);color:#ffe9a8}
 .tag.pref{background:#14324f;border-color:var(--acc);color:#cfe6ff}
+.tag.lib{background:#1b4f7a;border-color:var(--acc);color:#dcecff}
+.librow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px;padding:7px 12px;
+  background:#11324a;border:1px solid var(--acc);border-radius:8px;font-size:13px;color:#dcecff}
+.librow a{color:#9ecbff}
 .score{font-weight:700;font-variant-numeric:tabular-nums}
 .score.hi{color:var(--ok)} .score.mid{color:var(--warn)} .score.lo{color:var(--fg3)}
 
@@ -166,6 +171,15 @@ tr.bt td{background:#1a1a26}
 .bar{height:7px;background:#222b36;border-radius:99px;overflow:hidden}
 .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--acc2),var(--acc));width:0;transition:width .3s}
 .bar.done i{background:linear-gradient(90deg,#2c7a3f,var(--ok))}
+/* 任务 / 下载队列：番号旁边的小封面（只给番号认不出是哪一部） */
+.tposter{position:relative;width:48px;height:64px;flex:none;border-radius:6px;overflow:hidden;background:#2a3442;border:1px solid var(--line)}
+.tposter img{width:100%;height:100%;object-fit:cover;display:block}
+.tposter .noimg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--fg3);font-size:11px}
+.thd{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid var(--line)}
+.thd .tno{font-weight:700;font-size:15px;letter-spacing:.2px}
+.qhd{display:flex;align-items:flex-start;gap:12px;margin-bottom:8px}
+.qhd .qn{font-weight:600;font-size:14px}
+.qhd .right{margin-left:auto;text-align:right;white-space:nowrap}
 
 /* 通知（Telegram 风格） */
 .tg{max-width:660px}
@@ -238,7 +252,214 @@ tr.bt td{background:#1a1a26}
 .mag .mg{min-width:0;flex:1}
 .loading{color:var(--fg3);text-align:center;padding:44px 20px;font-size:13px}
 .errbox{background:#2a1416;border:1px solid #7d2a24;border-radius:var(--r);padding:20px 18px;text-align:center;color:#ffb4ad;font-size:13px;line-height:1.9}
+
+/* ==========================================================================
+   玻璃主题（追加覆盖层，位于最后；整段删掉即回到上面的深色实底主题）
+   取值优先级：MoviePilot 真机 CSS 变量（页头脚本从同源父页拷进本文档）
+              → MP dark / glass / clear 档的实测兜底值
+   ========================================================================== */
+:root{
+  --g-primary:var(--v-theme-primary,141,81,249);
+  --g-on:var(--v-theme-on-surface,231,227,252);
+  --g-surface:var(--glass-surface,rgba(255,255,255,.10));
+  --g-surface-soft:var(--glass-surface-soft,rgba(255,255,255,.09));
+  --g-surface-raised:var(--glass-surface-raised,rgba(255,255,255,.12));
+  --g-control:var(--glass-control,rgba(255,255,255,.09));
+  --g-border:var(--glass-border,rgba(255,255,255,.14));
+  --g-border-raised:var(--glass-border-raised,rgba(255,255,255,.18));
+  --g-border-hover:var(--glass-border-hover,rgba(255,255,255,.28));
+  --g-highlight:var(--glass-highlight,rgba(255,255,255,.22));
+  --g-sheen:var(--glass-sheen,linear-gradient(135deg,rgba(255,255,255,7%),transparent 24%,rgba(255,255,255,2%) 72%,transparent));
+  --g-shadow:var(--glass-shadow,0 10px 28px rgba(3,7,18,.24));
+  --g-shadow-hover:var(--glass-shadow-hover,0 18px 44px rgba(3,7,18,.36));
+  --g-blur:var(--glass-surface-backdrop-filter,blur(16px) saturate(145%));
+  --g-blur-raised:var(--glass-raised-backdrop-filter,blur(32px) saturate(145%));
+  --g-overlay:var(--glass-overlay-surface,rgba(14,17,22,.38));
+  --g-overlay-blur:var(--glass-overlay-backdrop-filter,blur(32px) saturate(135%));
+  --g-pill:var(--glass-nav-active-background,linear-gradient(90deg,rgba(var(--g-primary),.24),rgba(var(--g-primary),.5)));
+  --g-nav-scrim:var(--glass-navbar-scrim,linear-gradient(rgba(7,14,25,.06),rgba(7,14,25,.14)));
+  --g-edge:inset 0 1px 0 var(--g-highlight);
+  --g-radius:var(--app-theme-surface-radius,14px);
+  --g-motion:var(--glass-motion,.18s cubic-bezier(.2,.8,.2,1));
+  --plate:rgba(var(--g-on),.07);
+  /* 覆盖原主题变量：撤掉实底，改玻璃 */
+  --bg:transparent; --bg2:var(--g-surface); --bg3:var(--g-control); --line:var(--g-border);
+  --fg:rgb(var(--g-on)); --fg2:rgba(var(--g-on),.68); --fg3:rgba(var(--g-on),.5);
+  --acc:rgb(var(--g-primary)); --acc2:rgb(var(--g-primary));
+  --r:var(--g-radius);
+}
+/* 宿主是浅色主题时：MP 的玻璃是「墨色高不透明填充 + 白描边」，兜底值跟着切 */
+html[data-mp-light]{
+  --g-surface:var(--glass-surface,rgba(11,19,34,.26));
+  --g-surface-soft:var(--glass-surface-soft,rgba(11,19,34,.28));
+  --g-surface-raised:var(--glass-surface-raised,rgba(11,19,34,.33));
+  --g-control:var(--glass-control,rgba(11,19,34,.52));
+  --g-border:var(--glass-border,rgba(255,255,255,.10));
+  --g-border-raised:var(--glass-border-raised,rgba(255,255,255,.14));
+  --g-border-hover:var(--glass-border-hover,rgba(255,255,255,.22));
+  --g-highlight:var(--glass-highlight,rgba(255,255,255,.18));
+  --g-overlay:var(--glass-overlay-surface,rgba(11,19,34,.60));
+  --plate:rgba(11,19,34,.10);
+}
+/* 嵌在 MoviePilot 里时完全透出宿主背景（壁纸/模糊层）；独立打开时自带等效底 */
+html[data-mp-embed] body{background:transparent}
+html:not([data-mp-embed]) body{
+  background:
+    radial-gradient(120% 90% at 8% -12%,rgba(141,81,249,.26),transparent 56%),
+    radial-gradient(110% 85% at 102% -6%,rgba(22,177,255,.18),transparent 58%),
+    #0e1116;
+}
+/* 顶栏 / 导航：玻璃条 */
+header,nav{background-color:var(--g-surface-raised);background-image:var(--g-nav-scrim),var(--g-sheen);
+  border-color:var(--g-border);box-shadow:var(--g-edge),0 6px 22px rgba(3,7,18,.16)}
+header{position:relative;z-index:31}
+nav{position:relative;z-index:30}
+nav{gap:6px;padding:8px 12px}
+nav button{padding:7px 14px;border-bottom:none;border-radius:10px}
+nav button:hover{background:rgba(var(--g-on),.07);color:var(--fg2)}
+nav button.on{color:#fff;background-image:var(--g-pill);box-shadow:var(--g-edge)}
+/* 卡片 / 面板：玻璃填充 + 高光内边 */
+.card,.actor,.film,.profile,.row,.q,.searchrow,.msg .bub,.actorchip,.meta-line{
+  background-color:var(--g-surface);background-image:var(--g-sheen);
+  border-color:var(--g-border);box-shadow:var(--g-edge);
+}
+.card:hover,.actor:hover,.film:hover,.searchrow:hover,.actorchip:hover{
+  border-color:rgba(var(--g-primary),.55);box-shadow:var(--g-shadow-hover),var(--g-edge);
+}
+.card,.actor,.film,.row,.searchrow,.ghost,.chip,.tabs button,.toggle button,nav button,
+.filmyears button,.primary,.actorchip{
+  transition:background-color var(--g-motion),border-color var(--g-motion),
+             box-shadow var(--g-motion),transform var(--g-motion),color var(--g-motion);
+}
+/* 图片占位底 */
+.thumb,.primary:disabled{background:var(--plate)}
+.actor .av,.profile .av,.film .pic,.hero .big img,.actorchip img,.shots img,.longwrap img,
+.row .mini,.searchrow .mini,.tposter{background:var(--plate)}
+.actor .av{border-color:var(--g-border-raised)}
+.bar{background:rgba(var(--g-on),.12)}
+/* 表格 / 列表 */
+th,td,.mag,.sw{border-bottom-color:var(--g-border)}
+tr.best td{background:rgba(86,202,0,.14)}
+tr.bt td{background:rgba(var(--g-on),.05)}
+/* 标签 / 徽标 */
+.tag{background:rgba(var(--g-on),.05);border-color:var(--g-border)}
+.tag.on{background:rgba(86,202,0,.18);border-color:rgba(86,202,0,.45);color:#d7ffe4}
+.tag.uc{background:rgba(219,97,162,.20);border-color:rgba(219,97,162,.5);color:#ffd9f4}
+.tag.free{background:rgba(227,179,65,.18);border-color:rgba(227,179,65,.5);color:#ffe9a8}
+.tag.pref,.tag.lib{background:rgba(var(--g-primary),.22);border-color:rgba(var(--g-primary),.5);color:#ece7ff}
+.badge.lib{background:rgba(var(--g-primary),.62);border-color:rgba(var(--g-primary),.9)}
+.librow{background:rgba(var(--g-primary),.16);border-color:rgba(var(--g-primary),.45);color:#ece7ff}
+.librow a{color:#c9bcff}
+/* 控件 */
+.ghost{background:var(--g-control);border-color:var(--g-border);color:var(--fg2)}
+.ghost:hover{background:var(--g-surface-raised);border-color:var(--g-border-hover);color:var(--fg)}
+.toggle,.tabs,.chip{background:var(--g-control);border-color:var(--g-border)}
+.toggle button.on{background-image:var(--g-pill);background-color:transparent;color:#fff}
+.chip.on{background:rgba(var(--g-primary),.24);border-color:rgba(var(--g-primary),.6);color:#fff}
+.filmyears button{background:var(--g-control);border-color:var(--g-border)}
+.filmyears button.on{background-image:var(--g-pill);border-color:transparent;color:#fff}
+.searchbox input,.fld input[type=text],.fld input[type=number],.fld select{
+  background:var(--g-control);border-color:var(--g-border);color:var(--fg)}
+.searchbox input:focus,.fld input[type=text]:focus,.fld input[type=number]:focus,.fld select:focus{
+  border-color:rgba(var(--g-primary),.7);box-shadow:0 0 0 3px rgba(var(--g-primary),.16);outline:none}
+.primary{background:rgb(var(--g-primary));color:#fff;box-shadow:0 6px 18px rgba(var(--g-primary),.3)}
+.primary:hover{background:rgb(var(--g-primary));filter:brightness(1.12)}
+:focus-visible{outline:2px solid rgba(var(--g-primary),.75);outline-offset:2px}
+/* 抽屉 / 弹窗 / 提示：磨砂玻璃 */
+.scrim{background:rgba(3,7,18,.45)}
+.drawer{background-color:var(--g-overlay);background-image:var(--g-sheen);
+  -webkit-backdrop-filter:var(--g-overlay-blur);backdrop-filter:var(--g-overlay-blur);
+  border-left:1px solid var(--g-border-raised);box-shadow:-30px 0 70px rgba(3,7,18,.45)}
+.drawer .dh,.modal .mh,.modal .mf{border-color:var(--g-border)}
+.modal{background-color:var(--g-overlay);background-image:var(--g-sheen);
+  -webkit-backdrop-filter:var(--g-overlay-blur);backdrop-filter:var(--g-overlay-blur);
+  border:1px solid var(--g-border-raised);border-radius:var(--g-radius);box-shadow:var(--g-shadow-hover)}
+.toast{background-color:var(--g-overlay);background-image:var(--g-sheen);
+  -webkit-backdrop-filter:var(--g-overlay-blur);backdrop-filter:var(--g-overlay-blur);
+  border:1px solid var(--g-border);box-shadow:var(--g-shadow)}
+/* 异常提示 */
+#authbar{background:rgba(244,67,54,.18);border-bottom:1px solid rgba(244,67,54,.42);color:#ffc8c2}
+#authbar button{border-color:rgba(255,180,173,.45);color:#ffd9d5}
+.errbox{background:rgba(244,67,54,.14);border:1px solid rgba(244,67,54,.38);color:#ffc8c2}
+::-webkit-scrollbar-thumb{background:rgba(var(--g-on),.18)}
+::-webkit-scrollbar-thumb:hover{background:rgba(var(--g-on),.28)}
 </style>
+<script>
+/* 取 MoviePilot 真机主题变量：同源 iframe 里把父文档的 --v-theme-* / --glass-* 拷进本文档，
+   主题色、玻璃透明度、模糊半径、圆角都跟着宿主走；拿不到（独立打开）时用 CSS 里的兜底值。 */
+(function () {
+  var R = document.documentElement;
+  var VARS = {
+    '--v-theme-primary': 'color', '--v-theme-on-surface': 'color',
+    '--glass-surface': 'color', '--glass-surface-soft': 'color', '--glass-surface-raised': 'color',
+    '--glass-control': 'color', '--glass-border': 'color', '--glass-border-raised': 'color',
+    '--glass-border-hover': 'color', '--glass-highlight': 'color', '--glass-overlay-surface': 'color',
+    '--glass-sheen': 'background-image', '--glass-shadow': 'box-shadow',
+    '--glass-shadow-hover': 'box-shadow',
+    '--glass-surface-backdrop-filter': 'backdrop-filter',
+    '--glass-raised-backdrop-filter': 'backdrop-filter',
+    '--glass-overlay-backdrop-filter': 'backdrop-filter',
+    '--glass-nav-active-background': 'background-image', '--glass-navbar-scrim': 'background-image',
+    '--app-theme-surface-radius': 'border-radius'
+  };
+  function hostDoc() {
+    try {
+      var p = window.parent;
+      if (p && p !== window && p.document && p.document.documentElement) return p.document;
+    } catch (e) { /* 跨源：按独立页面处理 */ }
+    return null;
+  }
+  function supported(prop, v) {
+    try { return !!(window.CSS && CSS.supports(prop, v)); } catch (e) { return false; }
+  }
+  function okValue(prop, v) {   /* Vuetify 的主题色是 RGB 三元组（"141,81,249"），要套 rgb() 才算合法颜色 */
+    if (supported(prop, v)) return true;
+    return prop === 'color' && supported('color', 'rgb(' + v + ')');
+  }
+  function luma(t) {   /* "231,227,252" → 亮度；判断宿主是深色还是浅色 */
+    var m = /^\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(t || '');
+    return m ? (0.2126 * m[1] + 0.7152 * m[2] + 0.0722 * m[3]) / 255 : null;
+  }
+  function adopt() {
+    var doc = hostDoc();
+    if (!doc) return;
+    var host = doc.querySelector('.v-application') || doc.body || doc.documentElement;
+    var win = doc.defaultView || window;
+    var cs = win.getComputedStyle(host), rs = win.getComputedStyle(doc.documentElement), n = 0;
+    Object.keys(VARS).forEach(function (k) {
+      var v = ((cs.getPropertyValue(k) || '').trim()) || ((rs.getPropertyValue(k) || '').trim());
+      if (!v || v.length > 400 || v.indexOf('var(') >= 0) return;
+      if (!okValue(VARS[k], v)) return;
+      R.style.setProperty(k, v);
+      n++;
+    });
+    var l = luma(R.style.getPropertyValue('--v-theme-on-surface'));
+    if (l !== null) R.toggleAttribute('data-mp-light', l < 0.5);
+    return n;
+  }
+  if (hostDoc()) {
+    R.setAttribute('data-mp-embed', '');
+    try {
+      var fe = window.frameElement;   /* 同源才能拿到；让宿主页的 iframe 底变透明，壁纸透出来 */
+      if (fe && fe.style) fe.style.background = 'transparent';
+    } catch (e) { }
+  }
+  adopt();
+  document.addEventListener('DOMContentLoaded', adopt);
+  window.addEventListener('load', function () { setTimeout(adopt, 300); });
+  try {
+    var doc = hostDoc();
+    if (doc && doc.documentElement && window.MutationObserver) {
+      var mo = new MutationObserver(adopt);
+      var opt = { attributes: true, attributeFilter: ['data-theme', 'data-glass-appearance', 'data-glass-quality',
+        'data-glass-ui-style', 'data-glass-renderer-state', 'data-glass-navbar-refraction',
+        'data-glass-background-visibility', 'class', 'style'] };
+      mo.observe(doc.documentElement, opt);
+      if (doc.body) mo.observe(doc.body, opt);
+    }
+  } catch (e) { }
+})();
+</script>
 </head>
 <body>
 
@@ -263,7 +484,8 @@ tr.bt td{background:#1a1a26}
   <button data-v="discover" class="on">🔍 发现榜单</button>
   <button data-v="actors">⭐ 我的演员<span class="pill" id="pillFavs">0</span></button>
   <button data-v="subs">📌 订阅<span class="pill" id="pillSubs">0</span></button>
-  <button data-v="tasks">⬇ 任务<span class="pill warn" id="pillTasks">0</span></button>
+  <button data-v="tasks">📋 任务<span class="pill warn" id="pillTasks">0</span></button>
+  <button data-v="downloads">⏬ 下载<span class="pill" id="pillQueue">0</span></button>
   <button data-v="sites">🧲 站点搜索</button>
 </nav>
 
@@ -446,6 +668,7 @@ function renderPills(){
   $('#pillFavs').textContent = S.favs.length;
   $('#pillSubs').textContent = S.subs.length;
   $('#pillTasks').textContent = pend;
+  $('#pillQueue').textContent = S.queue.filter(q => q.state !== 'done').length;
   const bc = $('#bellCount');
   bc.textContent = S.notices.length;
   bc.classList.toggle('zero', !S.notices.length);
@@ -464,7 +687,7 @@ function render(){
   if (S.actor && S.view === 'actors'){ renderActorDetail(m); return; }
   if (!S.booted && S.view === 'discover'){ m.innerHTML = loadingHtml('正在读取插件状态…'); return; }
   ({discover:renderDiscover, actors:renderActors, subs:renderSubs, tasks:renderTasks,
-    sites:renderSiteSearch}[S.view] || renderDiscover)(m);
+    downloads:renderQueue, sites:renderSiteSearch}[S.view] || renderDiscover)(m);
 }
 
 /* ---------- 1. 发现榜单 ---------- */
@@ -563,6 +786,7 @@ function card(mv){
     + (mv.cnsub ? '<span class="badge cn">中字</span>' : '')
     + (mv.uncensored ? '<span class="badge uc">破解</span>' : '')
     + (merged ? '<span class="badge new">⭐已收藏演员</span>' : '')
+    + (mv.lib ? '<span class="badge lib">✔已入库</span>' : '')
     + '</div></div>'
     + '<div class="meta">'
     + '<div class="num">' + esc(num) + '</div>'
@@ -685,6 +909,11 @@ function detailHtml(d, number){
     + '</div>'
     + '<div class="info">'
     + '<h2>' + esc(num) + '</h2>'
+    + (mv.lib
+        ? '<div class="librow">✅ 已在 Emby 库中'
+          + (mv.lib.url ? ' · <a href="' + esc(mv.lib.url) + '" target="_blank" rel="noopener">在 Emby 中打开 ↗</a>' : '')
+          + '</div>'
+        : '')
     + '<div style="color:var(--fg2);font-size:13px;line-height:1.7">' + esc(mv.title || '') + '</div>'
     + '<div class="actorchips">'
     + (actors.length
@@ -766,7 +995,7 @@ function bindDetail(number){
   const bs = db.querySelector('#btnPtSearch');
   if (bs) bs.onclick = () => {
     bs.disabled = true; bs.textContent = '⏳ 搜索中…';
-    ptSearch(number, mv.actor || '');
+    ptSearch(number, mv.actor || '', mv.thumb || '');
   };
   const bn = db.querySelector('#btnSubNum');
   if (bn) bn.onclick = () => subscribeNumber(number);
@@ -961,7 +1190,7 @@ function filmRow(mv, i){
     + '<div class="fd"><span>' + esc(mv.date || '') + '</span>'
     + (mv.cnsub ? '<span class="tag on">中字</span>' : '<span class="tag">无中字</span>')
     + '<span>🧲 ' + (mv.magnets || 0) + '</span>'
-    + (S.known.has(num) ? '<span class="tag">已在库</span>' : '')
+    + (mv.lib ? '<span class="tag lib">已入库</span>' : '')
     + '</div></div></div>';
 }
 const FILM_FOLD = 12;                      // 作品史默认只铺 12 部，多的折起来
@@ -1262,30 +1491,21 @@ function subscribeNumber(num){
   });
 }
 
-/* ---------- 4. 任务 ---------- */
+/* ---------- 4. 任务（只放待确认的候选；下载进度在「下载」页） ---------- */
 let taskTimer = null;
 function renderTasks(m){
   const pend = S.tasks.filter(t => t.state === 'await');
+  const dling = S.queue.filter(q => q.state !== 'done').length;
   m.innerHTML = '<div class="toolbar">'
+    + (dling ? '<span class="hint">⏬ ' + dling + ' 个已提交，进度看「下载」页</span>' : '')
     + '<div style="flex:1"></div>'
-    + '<button class="ghost" id="btnRefreshTasks">↻ 刷新队列</button></div>'
+    + '<button class="ghost" id="btnRefreshTasks">↻ 刷新任务</button></div>'
     + (pend.length
         ? '<div class="secttl">待确认（' + pend.length + '）</div>' + pend.map((t,i) => candTable(t, i)).join('')
-        : '<div class="empty">没有待确认的任务</div>')
-    + '<div class="secttl">下载队列</div>'
-    + (S.queue.length
-      ? S.queue.map(q => {
-          const pct = Math.max(0, Math.min(100, Number(q.progress) || 0));
-          return '<div class="q"><div class="top">'
-            + '<div><div style="font-weight:600">' + esc(q.number) + ' <span class="hint">' + esc(q.site || '') + ' · ' + esc(q.spec || '') + '</span></div>'
-            + '<div class="hint" style="margin-top:3px">' + esc(q.size || '') + ' · '
-            + (q.state === 'done' ? '✅ 已入库' : '下载中…') + '</div></div>'
-            + '<div class="hint">' + pct + '%</div></div>'
-            + '<div class="bar' + (q.state === 'done' ? ' done' : '') + '"><i style="width:' + pct + '%"></i></div></div>';
-        }).join('')
-      : '<div class="empty">队列为空</div>');
+        : '<div class="empty">没有待确认的任务</div>');
   m.querySelector('#btnRefreshTasks').onclick = () => { loadTasks(true); toast('任务', '正在刷新…'); };
   bindDownloadButtons(m);
+  queueMissingThumbs(pend);
 }
 function candTable(t, idx){
   const cands = t.cands || [];
@@ -1313,9 +1533,13 @@ function candTable(t, idx){
     ? ('来自订阅' + (t.actor ? '：' + esc(t.actor) : ''))
     : ('手动搜索' + (t.actor ? ' · 演员：' + esc(t.actor) : ''));
   return '<div class="q" style="padding:0;overflow:hidden">'
-    + '<div style="padding:12px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
-    + '<b>' + esc(t.number || '') + '</b>'
-    + '<span class="hint">' + origin + ' · 搜到 ' + cands.length + ' · 合格 ' + cands.filter(c => c.pass !== false).length + '</span>'
+    + '<div class="thd">'
+    + '<div class="tposter" data-num="' + esc(t.number || '') + '">' + imgWithPlaceholder(t.thumb, '无图') + '</div>'
+    + '<div>'
+    + '<div class="tno">' + esc(t.number || '') + '</div>'
+    + '<div class="hint" style="margin-top:3px">' + origin + ' · 搜到 ' + cands.length
+    + ' · 合格 ' + cands.filter(c => c.pass !== false).length + '</div>'
+    + '</div>'
     + '<div style="flex:1"></div>'
     + (t.auto && t.source === 'sub' ? '<span class="hint">订阅为自动下载，但无候选合格</span>' : '')
     + '</div>'
@@ -1327,8 +1551,74 @@ function candTable(t, idx){
     + (t.reason ? '<div style="padding:10px 14px;color:var(--fg3);font-size:11.5px;border-top:1px solid var(--line)">💡 ' + esc(t.reason) + '</div>' : '')
     + '</div>';
 }
-function ptSearch(number, actor){
-  apiPost('/tasks/search', actor ? {number:number, actor:actor} : {number:number}).then(r => {
+/* ---------- 5. 下载队列（从任务页拆出来的独立页） ---------- */
+function renderQueue(m){
+  m.innerHTML = '<div class="toolbar">'
+    + '<span class="hint">进度取自下载器，每 5 秒自动刷新</span>'
+    + '<div style="flex:1"></div>'
+    + '<button class="ghost" id="btnRefreshQueue">↻ 刷新进度</button></div>'
+    + (S.queue.length
+        ? S.queue.map(queueRow).join('')
+        : '<div class="empty">下载队列为空<br>在「任务」页挑好候选点「下载」，进度在这里看</div>');
+  m.querySelector('#btnRefreshQueue').onclick = () => { loadTasks(true); toast('下载队列', '正在刷新进度…'); };
+  queueMissingThumbs(S.queue);
+}
+function queueRow(q){
+  const pct = Math.max(0, Math.min(100, Number(q.progress) || 0));
+  const done = q.state === 'done';
+  const meta = [q.site, q.spec, q.size].filter(Boolean).map(esc).join(' · ');
+  return '<div class="q"><div class="qhd">'
+    + '<div class="tposter" data-num="' + esc(q.number || '') + '">' + imgWithPlaceholder(q.thumb, '无图') + '</div>'
+    + '<div style="flex:1;min-width:0">'
+    + '<div class="qn">' + esc(q.number || '') + '</div>'
+    + '<div class="hint" style="margin-top:3px">' + (meta || '—') + '</div>'
+    + '<div class="hint" style="margin-top:2px">' + esc(q.savePath || '')
+    + (q.added ? ' · ' + esc(q.added) : '') + '</div>'
+    + '</div>'
+    + '<div class="right"><div class="qn">' + pct + '%</div>'
+    + '<div class="hint">' + (done ? '已下载' : '下载中…') + '</div></div>'
+    + '</div>'
+    + '<div class="bar' + (done ? ' done' : '') + '"><i style="width:' + pct + '%"></i></div></div>';
+}
+/* 缺封面的番号：串行、限量地补一次详情（结果缓存 7 天），补到就地换上。
+   串行 = 同一时间只起一个 javdb 子进程（与详情预热同一条纪律）；限量 = 打开列表页不会打爆站点。
+   只换图不重绘整块——用户可能正点着「下载」，重绘会把按钮状态打回去。 */
+const TFILL = { queue:[], busy:false, tried:{} };
+function queueThumb(number){
+  const num = String(number || '');
+  if (!num || TFILL.tried[num]) return;
+  TFILL.tried[num] = true;
+  TFILL.queue.push(num);
+  pumpThumbFill();
+}
+function pumpThumbFill(){
+  if (TFILL.busy) return;
+  const num = TFILL.queue.shift();
+  if (!num) return;
+  TFILL.busy = true;
+  apiGet('/detail', {number:num}).then(r => {
+    const mv = (r.ok && r.data && r.data.movie) || null;
+    if (mv && mv.thumb) applyThumb(num, mv.thumb);
+  }).catch(() => {}).then(() => { TFILL.busy = false; pumpThumbFill(); });
+}
+function applyThumb(number, thumb){
+  const same = x => x && String(x.number) === String(number);
+  [].slice.call(document.querySelectorAll('.tposter[data-num]')).forEach(el => {
+    if (el.dataset.num === String(number)) el.innerHTML = imgWithPlaceholder(thumb, '无图');
+  });
+  S.tasks.filter(same).forEach(t => { if (!t.thumb) t.thumb = thumb; });
+  S.queue.filter(same).forEach(q => { if (!q.thumb) q.thumb = thumb; });
+  if (same(S.siteTask) && !S.siteTask.thumb) S.siteTask.thumb = thumb;
+}
+/* 列表里凡是没图的番号，每轮最多补 3 个（补上的下一轮就不再排队） */
+function queueMissingThumbs(items){
+  (items || []).filter(x => x && x.number && !x.thumb).map(x => x.number).slice(0, 3).forEach(queueThumb);
+}
+function ptSearch(number, actor, thumb){
+  const body = {number:number};
+  if (actor) body.actor = actor;
+  if (thumb) body.thumb = thumb;      // 详情页顺手把封面带过去，任务列表里就有图了
+  apiPost('/tasks/search', body).then(r => {
     if (!r.ok){ toast('搜种失败', r.message || '抓取失败，请稍后重试', 'warn'); return; }
     const task = r.data && r.data.task ? r.data.task : r.data;
     if (task && task.id != null){
@@ -1353,7 +1643,7 @@ function startDownload(taskId, site, btn, force){
     }
     const notice = r.data && r.data.notice ? r.data.notice : (r.data && r.data.id ? r.data : null);
     if (notice && (notice.body || notice.title)){ S.notices.unshift(notice); renderPills(); }
-    toast('已提交下载', site + ' · 进度见下载队列', 'ok');
+    toast('已提交下载', site + ' · 进度见「下载」页', 'ok');
     loadTasks(true);
   });
 }
@@ -1364,13 +1654,15 @@ function loadTasks(force){
     if (Array.isArray(d.tasks)) S.tasks = d.tasks;
     if (Array.isArray(d.queue)) S.queue = d.queue;
     renderPills();
-    if (S.view === 'tasks') render();
+    if (S.view === 'tasks' || S.view === 'downloads') render();
     return true;
   });
 }
 function startTaskPolling(){
   if (taskTimer) return;
-  taskTimer = setInterval(() => { if (S.view === 'tasks') loadTasks(false); }, 5000);
+  taskTimer = setInterval(() => {
+    if (S.view === 'tasks' || S.view === 'downloads') loadTasks(false);
+  }, 5000);
 }
 
 /* ---------- 6. 站点搜索（不经 javdb，直接查 PT 站索引） ---------- */
@@ -1406,6 +1698,7 @@ function doSiteSearch(){
     const box = $('#ssResult');
     if (box && task){ box.innerHTML = candTable(task, 0); bindDownloadButtons(box); }
     renderPills();
+    queueThumb(task && task.number);   // 后端没有这个番号的封面时，后台补一次（补到就换上）
     const n = task && task.cands ? task.cands.length : 0;
     toast(n ? '搜到 ' + n + ' 个候选' : '没有候选',
       n ? kw + ' · 选一个点「下载」' : ((task && task.reason) || '换个关键词或站点再试'),
@@ -1463,7 +1756,7 @@ function renderSiteSearch(m){
   bindDownloadButtons(m);
 }
 
-/* ---------- 5. 通知（顶栏铃铛 → 右侧抽屉） ---------- */
+/* ---------- 7. 通知（顶栏铃铛 → 右侧抽屉） ---------- */
 function notifyBodyHtml(){
   return '<div class="tg">'
     + (S.notices.length
@@ -1533,7 +1826,8 @@ function doSearch(kw){
               + '<div style="flex:1;min-width:0">'
               + '<div style="font-weight:700">' + esc(mv.number) + '</div>'
               + '<div class="hint" style="margin-top:3px">' + esc(mv.actor || '—') + ' · ' + esc(mv.date || '') + ' · 🧲 ' + (mv.magnets || 0)
-              + (mv.cnsub ? '<span class="tag on">中字</span>' : '') + (mv.uncensored ? '<span class="tag uc">破解</span>' : '') + '</div>'
+              + (mv.cnsub ? '<span class="tag on">中字</span>' : '') + (mv.uncensored ? '<span class="tag uc">破解</span>' : '')
+              + (mv.lib ? '<span class="tag lib">已入库</span>' : '') + '</div>'
               + '<div class="hint" style="margin-top:2px">' + esc((mv.title || '').slice(0, 60)) + '</div>'
               + '</div><span class="hint">查看 ›</span></div>').join('')
         : '<div class="hint">没有匹配的影片</div>');
@@ -1677,7 +1971,7 @@ function bindUi(){
     const b = e.target.closest('button[data-v]'); if (!b) return;
     S.view = b.dataset.v; S.actor = null;
     closeAll(); render();
-    if (S.view === 'tasks') loadTasks(false);
+    if (S.view === 'tasks' || S.view === 'downloads') loadTasks(false);
     if (S.view === 'subs') loadSubs(false);
   });
   $('#bellBtn').onclick = openNotify;
