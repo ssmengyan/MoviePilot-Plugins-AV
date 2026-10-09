@@ -278,6 +278,7 @@ tr.candsub .ttl{color:var(--fg3);font-size:11.5px;overflow:hidden;text-overflow:
 :root{
   --g-primary:var(--v-theme-primary,141,81,249);
   --g-on:var(--v-theme-on-surface,231,227,252);
+  --g-bg:var(--v-theme-background,11,19,34);
   --g-surface:var(--glass-surface,rgba(255,255,255,.10));
   --g-surface-soft:var(--glass-surface-soft,rgba(255,255,255,.09));
   --g-surface-raised:var(--glass-surface-raised,rgba(255,255,255,.12));
@@ -318,8 +319,13 @@ html[data-mp-light]{
   --g-overlay:var(--glass-overlay-surface,rgba(11,19,34,.60));
   --plate:rgba(11,19,34,.10);
 }
-/* 嵌在 MoviePilot 里时完全透出宿主背景（壁纸/模糊层）；独立打开时自带等效底 */
-html[data-mp-embed] body{background:transparent}
+/* 嵌在 MoviePilot 里时：自己铺一层宿主主题色的底。MP 的插件页容器常常垫一块白板
+   （或一张亮壁纸），页面若全透明，浅色文字会被冲没 —— 所以留 12% 透出，其余压成主题底色。
+   独立打开（非 iframe）时自带等效底。 */
+html[data-mp-embed] body{
+  background:rgba(11,19,34,.88);
+  background:color-mix(in srgb,rgb(var(--g-bg)) 88%,transparent);
+}
 html:not([data-mp-embed]) body{
   background:
     radial-gradient(120% 90% at 8% -12%,rgba(141,81,249,.26),transparent 56%),
