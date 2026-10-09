@@ -24,7 +24,7 @@ from app.sdk.network import RequestUtils
 from app.sdk.plugin import _PluginBase
 from app.sdk.scheduler import add_plugin_once_job, remove_plugin_once_job
 
-from . import imgproxy, longshot
+from . import imgproxy, longshot, scoring
 from .client import JavdbClient
 from .notify import Notifier
 from .ratelimit import RateLimiter
@@ -35,6 +35,7 @@ PLUGIN_ID = "AVHelper"
 CACHE_ROOT = Path("/avhelper/cache")
 META_DIR = CACHE_ROOT / "meta"
 DEFAULT_PROXY = "http://192.0.2.11:7890"
+GLOBAL_RULE_KEY = "global_rule"
 # 缓存 TTL（执行方案 §8.1，不得放宽）
 TTL_RANK = 6 * 3600        # 榜单 6 小时
 TTL_DETAIL = 7 * 86400     # 番号详情 7 天
@@ -51,7 +52,7 @@ class AVHelper(_PluginBase):
     plugin_name = "AV 资源助手"
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
     plugin_icon = "Moviepilot_A.png"
-    plugin_version = "0.2.1"
+    plugin_version = "0.2.2"
     plugin_label = "发现"
     plugin_author = "local"
     plugin_config_prefix = "avhelper_"
@@ -244,6 +245,8 @@ class AVHelper(_PluginBase):
              "auth": "bear", "summary": "收藏演员"},
             {"path": "/subs", "endpoint": self.api_subs, "methods": ["GET", "POST", "DELETE"],
              "auth": "bear", "summary": "订阅管理"},
+            {"path": "/rule", "endpoint": self.api_rule, "methods": ["GET", "POST"],
+             "auth": "bear", "summary": "全局默认规则"},
             {"path": "/tasks", "endpoint": self.api_tasks, "methods": ["GET"], "auth": "bear",
              "summary": "任务与下载队列"},
             {"path": "/tasks/search", "endpoint": self.api_task_search, "methods": ["POST"],
@@ -300,6 +303,26 @@ class AVHelper(_PluginBase):
         if not url:
             return ""
         return f"/api/v1/plugin/{PLUGIN_ID}/img?url={quote(str(url), safe='')}"
+
+    def global_rule(self) -> Dict[str, Any]:
+        """全局默认规则：用户在界面编辑、存 kv 表；手动搜种与新建订阅都以它为基准。"""
+        rule = self.store.kv_get(GLOBAL_RULE_KEY) or {}
+        return merge_rule(rule)
+
+    def magnets_cached(self, number: str) -> Optional[List[Dict[str, Any]]]:
+        """磁力列表：优先读 7 天文件缓存（与详情页共用同一个 key），未命中才起子进程。
+
+        返回 None 表示抓取失败；空列表表示 javdb 上确实没有磁力。
+        """
+        data = self._cached(f"magnets:{number}", TTL_DETAIL,
+                            lambda: self.cli().magnets(number, cnsub=False))
+        if not isinstance(data, dict):
+            return None
+        return list(data.get("magnets") or [])
+
+    def magnets_failed_recently(self, number: str) -> bool:
+        """磁力抓取是否处于失败负缓存期内（该期间内不再重试）。"""
+        return self._cache_read(f"fail:magnets:{number}", FAIL_TTL) is not None
 
     def remember_actor(self, numbers: List[str], actor: str) -> None:
         """记录“番号 → 演员”映射，让榜单卡片能显示演员与收藏徽标。"""
@@ -461,7 +484,7 @@ class AVHelper(_PluginBase):
             "notices": self.store.notice_list(),
             "tasks": self.store.task_list(),
             "queue": queue,
-            "defaultRule": DEFAULT_RULE,
+            "defaultRule": self.global_rule(),
         }
 
     def api_rankings(self, period: str = "week", kind: str = "censored") -> Dict[str, Any]:
@@ -635,7 +658,7 @@ class AVHelper(_PluginBase):
             name = str(payload.get("name") or "").strip()
             if sub_type not in ("actor", "number") or not name:
                 return {"success": False, "message": "订阅参数不完整"}
-            rule = merge_rule(payload.get("rule"))
+            rule = merge_rule({**self.global_rule(), **(payload.get("rule") or {})})
             await asyncio.to_thread(self.store.sub_add, sub_type, name, rule)
             if sub_type == "actor":
                 await asyncio.to_thread(self.store.fav_add, name, "", "")
@@ -653,6 +676,15 @@ class AVHelper(_PluginBase):
         """任务列表 + 下载队列（队列进度取自下载器真实状态）。"""
         return {"success": True, "tasks": self.store.task_list(), "queue": self.engine.queue()}
 
+    async def api_rule(self, request: Request) -> Dict[str, Any]:
+        """全局默认规则：GET 读取、POST 保存（以已存规则为基准合并）。"""
+        if request.method == "POST":
+            payload = await self._json_body(request)
+            rule = merge_rule({**self.global_rule(), **(payload.get("rule") or {})})
+            await asyncio.to_thread(self.store.kv_set, GLOBAL_RULE_KEY, rule)
+            return {"success": True, "rule": self.global_rule(), "message": "默认规则已保存"}
+        return {"success": True, "rule": self.global_rule()}
+
     async def api_task_search(self, request: Request) -> Dict[str, Any]:
         """按番号/关键词搜索站点并打分（真实站点搜索，受 §8.2 限流约束）。
 
@@ -664,7 +696,7 @@ class AVHelper(_PluginBase):
         if not keyword:
             return {"success": False, "message": "缺少搜索词"}
         actor = str(payload.get("actor") or "")
-        rule = merge_rule(payload.get("rule"))
+        rule = merge_rule({**self.global_rule(), **(payload.get("rule") or {})})
         thumb = str(payload.get("thumb") or "")
         sites = payload.get("sites")
         only_sites = [str(x) for x in sites] if isinstance(sites, list) and sites else None

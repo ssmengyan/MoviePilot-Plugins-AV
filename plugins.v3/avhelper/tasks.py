@@ -172,22 +172,34 @@ class TaskEngine:
             notes.append("没有可搜索的站点：请先在 MoviePilot 里配置站点，或在订阅规则里勾选站点")
 
         if not any(c.get("pass") for c in cands) and rule.get("btFallback"):
-            magnets = self.plugin.cli().magnets(keyword, cnsub=False) or {}
-            for item in (magnets.get("magnets") or [])[:5]:
-                if isinstance(item, dict) and item.get("hash"):
-                    cand = scoring.candidate_from_magnet(item, pref_names)
-                    scoring.score_candidate(cand, rule)
-                    cands.append(cand)
-            if cands and any(c.get("src") == "BT" for c in cands):
-                notes.append("PT 段没有合格候选，已启用 BT 磁力兜底")
+            # 兜底磁力优先读详情页已写好的 7 天文件缓存（详情与兜底用同一个 key），
+            # 未命中才起子进程；抓取失败/无磁力都要写明，不能静默吞掉。
+            magnets = self.plugin.magnets_cached(number=keyword)
+            if not magnets:
+                if magnets is None and self.plugin.magnets_failed_recently(keyword):
+                    notes.append("BT 兜底未启用：javdb 磁力抓取失败（短时内不再重试）")
+                else:
+                    notes.append("BT 兜底未启用：该片在 javdb 没有可用磁力")
+            else:
+                for item in magnets[:5]:
+                    if isinstance(item, dict) and item.get("hash"):
+                        cand = scoring.candidate_from_magnet(item, pref_names)
+                        scoring.score_candidate(cand, rule)
+                        cands.append(cand)
+                notes.append(f"PT 段没有合格候选，BT 兜底注入 {len([c for c in cands if c.get('src') == 'BT'])} 条磁力")
 
         scoring.rank_candidates(cands, rule)
         return cands, notes
 
     def build_task(self, number: str, actor: str = "", rule: Optional[Dict[str, Any]] = None,
                    auto: bool = False, thumb: str = "",
-                   only_sites: Optional[List[str]] = None) -> Dict[str, Any]:
-        """搜种并落库一条任务（含打分明细），返回任务体。"""
+                   only_sites: Optional[List[str]] = None,
+                   source: str = "manual") -> Dict[str, Any]:
+        """搜种并落库一条任务（含打分明细），返回任务体。
+
+        :param source: 任务来源标记，manual=界面手动搜索，sub=订阅检查产生。
+            actor 只是元数据（番号对应的演员），不能拿它推断来源。
+        """
         rule = merge_rule(rule)
         cands, notes = self.search_candidates(number, rule, only_sites)
         reason = scoring.explain(cands, rule)
@@ -203,6 +215,7 @@ class TaskEngine:
             "thumb": thumb or "",
             "auto": bool(auto),
             "rule": rule,
+            "source": str(source or "manual"),
         }
         self.store.task_add(task)
         return task
@@ -371,7 +384,8 @@ class TaskEngine:
             rule = merge_rule(sub.get("rule"))
             if sub.get("type") == "number":
                 notices.append(self.notifier.sub_hit_number(sub["name"]))
-                task = self.build_task(sub["name"], "", rule, bool(rule.get("trigger") == "auto"))
+                task = self.build_task(sub["name"], "", rule,
+                                        bool(rule.get("trigger") == "auto"), source="sub")
                 notices.extend(self._after_task(task, sub, rule))
             else:
                 notices.extend(self._check_actor(sub, rule))
@@ -396,7 +410,8 @@ class TaskEngine:
             thumb = self.plugin.image_url(movie.get("cover_url") or movie.get("thumb_url"))
             self.store.known_add(number, name)
             notices.append(self.notifier.sub_new_actor(name, number))
-            task = self.build_task(number, name, rule, bool(rule.get("trigger") == "auto"), thumb)
+            task = self.build_task(number, name, rule,
+                                   bool(rule.get("trigger") == "auto"), thumb, source="sub")
             notices.extend(self._after_task(task, sub, rule))
         return notices
 

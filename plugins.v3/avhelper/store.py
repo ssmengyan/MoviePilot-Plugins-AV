@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS known(
 CREATE TABLE IF NOT EXISTS task(
   id TEXT PRIMARY KEY, number TEXT, actor TEXT,
   cands TEXT, reason TEXT, state TEXT,
-  thumb TEXT, auto INTEGER DEFAULT 0, created_at TEXT, rule TEXT);
+  thumb TEXT, auto INTEGER DEFAULT 0, created_at TEXT, rule TEXT,
+  source TEXT DEFAULT 'manual');
 CREATE TABLE IF NOT EXISTS notice(
   id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, title TEXT, type TEXT,
   body TEXT, meta TEXT, image TEXT, created_at TEXT);
@@ -57,9 +58,13 @@ class Store:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock, sqlite3.connect(self.db_path) as conn:
             conn.executescript(_SCHEMA)
-            # 兼容旧库：task.rule 是后加的列，缺失时补上（SQLite 无 IF NOT EXISTS 语法）
+            # 兼容旧库：rule/source 是后加的列，缺失时补上（SQLite 无 IF NOT EXISTS 语法）
             try:
                 conn.execute("ALTER TABLE task ADD COLUMN rule TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE task ADD COLUMN source TEXT DEFAULT 'manual'")
             except sqlite3.OperationalError:
                 pass
 
@@ -150,7 +155,7 @@ class Store:
     def task_list(self, limit: int = 50) -> List[Dict[str, Any]]:
         """返回最近的任务（含候选与打分）。"""
         rows = self._exec(
-            "SELECT id, number, actor, cands, reason, state, thumb, auto, created_at, rule "
+            "SELECT id, number, actor, cands, reason, state, thumb, auto, created_at, rule, source "
             "FROM task ORDER BY created_at DESC LIMIT ?", (limit,), fetch=True,
         ) or []
         out = []
@@ -167,6 +172,7 @@ class Store:
                 "id": r[0], "number": r[1], "actor": r[2] or "", "cands": cands,
                 "reason": r[4] or "", "state": r[5] or "await", "thumb": r[6] or "",
                 "auto": bool(r[7]), "created": r[8] or "", "rule": rule,
+                "source": r[10] or "manual",
             })
         return out
 
@@ -178,15 +184,16 @@ class Store:
         return None
 
     def task_add(self, task: Dict[str, Any]) -> None:
-        """写入一条搜索任务（含生成它的订阅规则，供后续下载沿用）。"""
+        """写入一条搜索任务（含生成它的订阅规则与任务来源，供后续下载沿用）。"""
         self._exec(
-            "INSERT OR REPLACE INTO task(id, number, actor, cands, reason, state, thumb, auto, created_at, rule) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO task(id, number, actor, cands, reason, state, thumb, auto, created_at, rule, source) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             (task["id"], task["number"], task.get("actor", ""),
              json.dumps(task.get("cands", []), ensure_ascii=False),
              task.get("reason", ""), task.get("state", "await"),
              task.get("thumb", ""), 1 if task.get("auto") else 0, _now(),
-             json.dumps(task.get("rule") or {}, ensure_ascii=False)),
+             json.dumps(task.get("rule") or {}, ensure_ascii=False),
+             str(task.get("source") or "manual")),
         )
 
     def task_set_state(self, tid: str, state: str) -> None:
