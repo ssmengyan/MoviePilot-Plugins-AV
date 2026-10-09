@@ -13,8 +13,8 @@ import hashlib
 import json
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import quote
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import quote, unquote
 
 from fastapi import Request, Response
 from fastapi.responses import HTMLResponse
@@ -36,6 +36,7 @@ CACHE_ROOT = Path("/avhelper/cache")
 META_DIR = CACHE_ROOT / "meta"
 DEFAULT_PROXY = "http://192.0.2.11:7890"
 GLOBAL_RULE_KEY = "global_rule"
+THUMB_KEY = "num2thumb"      # 番号 → 封面原图的本地索引（任务/下载队列补图用）
 # 缓存 TTL（执行方案 §8.1，不得放宽）
 TTL_RANK = 6 * 3600        # 榜单 6 小时
 TTL_DETAIL = 7 * 86400     # 番号详情 7 天
@@ -46,13 +47,18 @@ CACHE_MAX_GB = 60          # 缓存总量上限（超出按最旧淘汰）
 ONCE_JOB_ID = "subcheck_now"
 
 
+def num_key(number: Any) -> str:
+    """番号索引键：去空白 + 统一大写（只用于本地索引，不改显示用的原值）。"""
+    return str(number or "").strip().upper()
+
+
 class AVHelper(_PluginBase):
     """AV 资源助手：JAV 番号订阅、榜单浏览、PT 自动选种下载。"""
 
     plugin_name = "AV 资源助手"
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
     plugin_icon = "Moviepilot_A.png"
-    plugin_version = "0.2.2"
+    plugin_version = "0.2.4"
     plugin_label = "发现"
     plugin_author = "local"
     plugin_config_prefix = "avhelper_"
@@ -304,6 +310,85 @@ class AVHelper(_PluginBase):
             return ""
         return f"/api/v1/plugin/{PLUGIN_ID}/img?url={quote(str(url), safe='')}"
 
+    def _raw_image(self, url: Any) -> str:
+        """把插件图片代理地址还原成图床原地址（本来就是原地址时原样返回）。"""
+        text = str(url or "")
+        marker = f"/api/v1/plugin/{PLUGIN_ID}/img?url="
+        return unquote(text.split(marker, 1)[1]) if marker in text else text
+
+    def remember_thumbs(self, movies: Any) -> None:
+        """登记「番号 → 封面原图」，供任务与下载队列补图（一次调用只写一次库）。
+
+        来源是各类 javdb 列表与详情（都带 cover_url/thumb_url）。只存原地址，
+        读的时候再转代理地址，免得出现「代理套代理」。
+        """
+        rows = movies if isinstance(movies, list) else [movies]
+        index = self.store.kv_get(THUMB_KEY, {}) or {}
+        changed = False
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            key = num_key(row.get("number"))
+            # 优先小竖图（thumb_url 147x200）：正好塞进任务行 3:4 的方框，不用裁也不费流量
+            raw = self._raw_image(row.get("thumb_url") or row.get("cover_url"))
+            if key and raw and index.get(key) != raw:
+                index[key] = raw
+                changed = True
+        if not changed:
+            return
+        if len(index) > 5000:      # 控制体量：超出后只留最近写入的一段
+            index = dict(list(index.items())[-5000:])
+        self.store.kv_set(THUMB_KEY, index)
+
+    def thumbs_of(self, numbers: Iterable[str]) -> Dict[str, str]:
+        """批量取番号封面（插件代理地址）。
+
+        只读本地索引与 7 天详情缓存，**不发网络请求**（列表页首屏不能为了一张图去起子进程）；
+        详情缓存命中的顺带补进索引。返回的 key 是调用方传进来的原字符串。
+        """
+        index = self.store.kv_get(THUMB_KEY, {}) or {}
+        found: Dict[str, str] = {}
+        fresh: List[Dict[str, str]] = []
+        for number in (numbers or []):
+            text = str(number or "")
+            key = num_key(text)
+            if not key or text in found:
+                continue
+            raw = str(index.get(key) or "")
+            if not raw:
+                detail = self._cache_read(f"detail:{text}", TTL_DETAIL)
+                if isinstance(detail, dict):
+                    raw = str(detail.get("thumb_url") or detail.get("cover_url") or "")
+                    if raw:
+                        fresh.append({"number": key, "cover_url": raw})
+            if raw:
+                found[text] = self.image_url(raw)
+        if fresh:
+            self.remember_thumbs(fresh)
+        return found
+
+    def fill_thumbs(self, *groups: Any) -> bool:
+        """给任务 / 队列项就地补封面。
+
+        索引里有这个番号就以索引为准（历史数据里存的老图会被顺带换成当前口径的小竖图）；
+        索引里没有、自己又没图的，才去翻详情缓存。全程不发网络请求。
+
+        :return: 是否有条目被改（下载队列据此决定要不要落库）
+        """
+        items = [x for group in groups for x in (group or []) if isinstance(x, dict)]
+        missing = [str(x.get("number") or "") for x in items if x.get("number")]
+        if not missing:
+            return False
+        thumbs = self.thumbs_of(missing)
+        changed = False
+        for item in items:
+            hit = thumbs.get(str(item.get("number") or ""))
+            if hit and item.get("thumb") != hit:
+                item["thumb"] = hit
+                changed = True
+        return changed
+
+
     def global_rule(self) -> Dict[str, Any]:
         """全局默认规则：用户在界面编辑、存 kv 表；手动搜种与新建订阅都以它为基准。"""
         rule = self.store.kv_get(GLOBAL_RULE_KEY) or {}
@@ -482,7 +567,7 @@ class AVHelper(_PluginBase):
             "subs": self.store.sub_list(),
             "known": self.store.known_all(),
             "notices": self.store.notice_list(),
-            "tasks": self.store.task_list(),
+            "tasks": self.engine.task_list(),
             "queue": queue,
             "defaultRule": self.global_rule(),
         }
@@ -495,7 +580,9 @@ class AVHelper(_PluginBase):
         )
         if data is None:
             return {"success": False, "message": "榜单抓取失败（站点超时或代理不可达）", "movies": []}
-        movies = [self._movie(m, kind) for m in (data.get("movies") or [])]
+        raw_movies = [m for m in (data.get("movies") or []) if isinstance(m, dict)]
+        self.remember_thumbs(raw_movies)
+        movies = [self._movie(m, kind) for m in raw_movies]
         return {"success": True, "movies": movies, "period": period, "kind": kind}
 
     def api_actors(self) -> Dict[str, Any]:
@@ -521,7 +608,9 @@ class AVHelper(_PluginBase):
         if data is None:
             return {"success": False, "message": "演员数据抓取失败", "movies": []}
         raw_entity = data.get("entity") or {}
-        movies = [self._movie(m, actor=name) for m in (data.get("movies") or [])]
+        raw_movies = [m for m in (data.get("movies") or []) if isinstance(m, dict)]
+        self.remember_thumbs(raw_movies)
+        movies = [self._movie(m, actor=name) for m in raw_movies]
         self.remember_actor([m["number"] for m in movies], name)
         entity = {
             "name": raw_entity.get("name") or name,
@@ -544,7 +633,9 @@ class AVHelper(_PluginBase):
         data = self.cli().search(keyword)
         if data is None:
             return {"success": False, "message": "搜索失败", "movies": [], "actors": []}
-        movies = [self._movie(m) for m in (data.get("movies") or [])]
+        raw_movies = [m for m in (data.get("movies") or []) if isinstance(m, dict)]
+        self.remember_thumbs(raw_movies)
+        movies = [self._movie(m) for m in raw_movies]
         actors = [
             {"name": a.get("name") or "", "zh": a.get("name_zht") or "",
              "avatar": self.image_url(a.get("avatar_url")), "id": a.get("id") or ""}
@@ -564,6 +655,7 @@ class AVHelper(_PluginBase):
         data, magnets_raw = self._detail_pair(number, str(id or ""))
         if data is None:
             return {"success": False, "message": "详情抓取失败，请稍后重试"}
+        self.remember_thumbs(data)     # 打开过的番号都进封面索引，任务/队列补图就有源了
         actors = [
             {"name": a.get("name") or "", "zh": "", "avatar": self.image_url(a.get("avatar_url")),
              "id": a.get("id") or ""}
@@ -676,8 +768,12 @@ class AVHelper(_PluginBase):
         return {"success": True, "subs": self.store.sub_list()}
 
     def api_tasks(self) -> Dict[str, Any]:
-        """任务列表 + 下载队列（队列进度取自下载器真实状态）。"""
-        return {"success": True, "tasks": self.store.task_list(), "queue": self.engine.queue()}
+        """任务列表 + 下载队列（队列进度取自下载器真实状态；两者都补上番号封面）。
+
+        界面上这是两个页面，但一次请求同时给两份数据：任务页的「待确认」角标与
+        下载页的「下载中」角标用的都是同一份快照，前端一次轮询两边都刷新。
+        """
+        return {"success": True, "tasks": self.engine.task_list(), "queue": self.engine.queue()}
 
     async def api_rule(self, request: Request) -> Dict[str, Any]:
         """全局默认规则：GET 读取、POST 保存（以已存规则为基准合并）。"""
@@ -732,7 +828,7 @@ class AVHelper(_PluginBase):
         result = await asyncio.to_thread(self.engine.check, name)
         return {"success": True, "limited": bool(result.get("limited")),
                 "notices": result.get("notices") or [], "message": result.get("message") or "",
-                "subs": self.store.sub_list(), "tasks": self.store.task_list(),
+                "subs": self.store.sub_list(), "tasks": self.engine.task_list(),
                 "queue": self.engine.queue()}
 
     async def api_notices(self, request: Request) -> Dict[str, Any]:

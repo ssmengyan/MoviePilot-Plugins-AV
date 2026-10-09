@@ -203,6 +203,10 @@ class TaskEngine:
             actor 只是元数据（番号对应的演员），不能拿它推断来源。
         """
         rule = merge_rule(rule)
+        # 封面：调用方没给（番号订阅、站点搜索）时用本地索引 / 详情缓存补，补不到就留空
+        thumb = str(thumb or "") or self.plugin.thumbs_of([number]).get(number, "")
+        if thumb:
+            self.plugin.remember_thumbs({"number": number, "cover_url": thumb})
         cands, notes = self.search_candidates(number, rule, only_sites)
         reason = scoring.explain(cands, rule)
         if notes:
@@ -294,6 +298,7 @@ class TaskEngine:
         queue.insert(0, {
             "id": "q" + uuid.uuid4().hex[:8],
             "number": task["number"],
+            "thumb": task.get("thumb") or self.plugin.thumbs_of([task["number"]]).get(task["number"], ""),
             "site": cand.get("site") or "",
             "spec": cand.get("spec") or "",
             "size": cand.get("size") or "",
@@ -334,9 +339,17 @@ class TaskEngine:
             pass
         return ""
 
+    def task_list(self) -> List[Dict[str, Any]]:
+        """任务列表：缺封面的任务用本地索引 / 详情缓存补上（不发网络请求）。"""
+        tasks = self.store.task_list()
+        self.plugin.fill_thumbs(tasks)
+        return tasks
+
     def queue(self) -> List[Dict[str, Any]]:
-        """返回下载队列，并尽力从下载器刷新真实进度。"""
+        """返回下载队列（顺带补番号封面），并尽力从下载器刷新真实进度。"""
         queue = self.store.kv_get(QUEUE_KEY, []) or []
+        if self.plugin.fill_thumbs(queue):     # 旧队列项没封面：补到就落库，省得每次重算
+            self.store.kv_set(QUEUE_KEY, queue[:50])
         hashes = [q.get("hash") for q in queue if q.get("hash")]
         if not hashes:
             return queue
