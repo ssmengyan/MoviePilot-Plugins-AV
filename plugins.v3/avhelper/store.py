@@ -5,6 +5,7 @@
 """
 
 import json
+import re
 import sqlite3
 import threading
 import time
@@ -42,6 +43,31 @@ CREATE TABLE IF NOT EXISTS kv(
 def _now() -> str:
     """当前时间字符串，统一写库格式。"""
     return time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+# 通知元信息里「发布源」永远是最后一段：「发布源：<站点> / <发布组> 发布」
+_PUBLISHER_TAIL_RE = re.compile(r"发布源：\s*(?P<site>[^/·]+?)\s*/\s*(?P<group>[^·]+?)\s*$")
+
+
+def _fix_publisher_meta(meta: str) -> str:
+    """读通知时顺手纠正「发布源」的重复文案（旧版把站点兜底成了发布组）。
+
+    「… ·  发布源：馒头 / 馒头 发布 发布」→「… ·  发布源：馒头」；其余元信息原样保留，
+    认不出来就原样返回（幂等，所以不必改库）。
+    """
+    text = str(meta or "")
+    hit = _PUBLISHER_TAIL_RE.search(text)
+    if not hit:
+        return text
+    site = hit.group("site").strip()
+    group = re.sub(r"(\s*发布)+$", "", hit.group("group").strip()).strip()
+    if not site or group.replace(" ", "") in ("", site):
+        label = site or group
+    elif group.endswith("发布"):
+        label = f"{site} / {group}"
+    else:
+        label = f"{site} / {group} 发布"
+    return text[:hit.start()] + "发布源：" + label
 
 
 class Store:
@@ -214,13 +240,13 @@ class Store:
         )
 
     def notice_list(self) -> List[Dict[str, Any]]:
-        """返回通知（新到旧）。"""
+        """返回通知（新到旧）；老记录的「发布源」重复文案在这里顺手纠正。"""
         rows = self._exec(
             "SELECT kind, title, type, body, meta, image, created_at FROM notice ORDER BY id DESC",
             fetch=True,
         ) or []
         return [{"kind": r[0], "title": r[1], "type": r[2], "body": r[3],
-                 "meta": r[4], "image": r[5], "time": r[6]} for r in rows]
+                 "meta": _fix_publisher_meta(r[4]), "image": r[5], "time": r[6]} for r in rows]
 
     def notice_clear(self) -> None:
         """清空通知。"""

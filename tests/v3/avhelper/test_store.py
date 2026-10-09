@@ -104,6 +104,16 @@ class TestNotices:
         store.notice_clear()
         assert store.notice_list() == []
 
+    def test_legacy_publisher_meta_is_repaired_on_read(self, store_mod, tmp_path):
+        """老通知的「发布源：馒头 / 馒头 发布 发布」读出来应还原成「发布源：馒头」（不改库）。"""
+        store = make_store(store_mod, tmp_path)
+        store.notice_add({"title": "开始下载", "body": "ABP-557 正在下载",
+                          "meta": "分辨率：1080P  ·  大小：5.3 GB  ·  发布源：馒头 / 馒头 发布 发布"})
+        store.notice_add({"title": "已入库", "body": "x", "meta": "发布源：观众 / CMCT 发布"})
+        notices = store.notice_list()
+        assert notices[0]["meta"] == "发布源：观众 / CMCT 发布"        # 正常文案原样通过
+        assert notices[1]["meta"] == "分辨率：1080P  ·  大小：5.3 GB  ·  发布源：馒头"
+
     def test_keeps_only_latest_200(self, store_mod, tmp_path):
         store = make_store(store_mod, tmp_path)
         for i in range(205):

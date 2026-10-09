@@ -57,6 +57,23 @@ def detect_group(title: str) -> str:
     return match.group(1) if match else ""
 
 
+def publisher_label(cand: Dict[str, Any]) -> str:
+    """拼「发布源」文案：站点（+ 发布组）。
+
+    种名里解析不出发布组时旧版会兜底成「<站点> 发布」，再叠上模板自带的「 发布」就变成
+    「馒头 / 馒头 发布 发布」；这里把与站点同名的兜底组去掉，只留站点，历史数据也一并纠正。
+    """
+    site = str(cand.get("site") or "").strip()
+    group = str(cand.get("group") or "").strip()
+    if group and group.replace(" ", "") in (site, site + "发布"):
+        group = ""
+    if not group:
+        return site or "未知来源"
+    if group.endswith("发布"):            # 「BT 匿名发布」这类整句，别再补一个「发布」
+        return f"{site} / {group}" if site else group
+    return f"{site} / {group} 发布" if site else f"{group} 发布"
+
+
 def human_size(size_bytes: Any) -> str:
     """字节数转人类可读大小。"""
     try:
@@ -107,7 +124,7 @@ def candidate_from_torrent(torrent: Any, pref_sites: Optional[List[str]] = None)
         "free": free,
         "res": res,
         "pref": bool(pref_sites) and site in (pref_sites or []),
-        "group": detect_group(title) or (site + " 发布"),
+        "group": detect_group(title),
         "title": title,
         "score": 0,
         "pass": True,

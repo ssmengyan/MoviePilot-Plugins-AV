@@ -849,6 +849,7 @@ function openMovie(number, id){
   if (curDetail !== number) curDetailId = '';
   if (id) curDetailId = id;
   curDetail = number;
+  detailFresh = number;                 // 标记「刚打开」：首帧画完滚回顶部
   openDrawer('影片详情 · ' + number, '');
   $('#drawerReload').style.display = '';
   $('#drawerReload').onclick = () => { delete CACHE[key]; paintDetail(number); };
@@ -858,14 +859,22 @@ function paintDetail(number){
   const key = 'detail:' + number;
   const entry = cached(key);
   const db = $('#drawerBody');
-  if (entry && !entry.error){ db.innerHTML = detailHtml(entry.data, number); bindDetail(number); return; }
-  if (entry && entry.error){ db.innerHTML = errHtml(entry.error, 'data-act="detail-retry"'); return; }
+  if (entry && !entry.error){ db.innerHTML = detailHtml(entry.data, number); bindDetail(number); detailTopIfFresh(number); return; }
+  if (entry && entry.error){ db.innerHTML = errHtml(entry.error, 'data-act="detail-retry"'); detailTopIfFresh(number); return; }
   db.innerHTML = skeletonHtml(number);   // 先用列表卡片数据把壳画出来，别让用户对着空白等
   apiGet('/detail', {number:number, id:(curDetail === number ? curDetailId : '')}).then(r => {
     if (!r.ok){ put(key, {error: r.message || '抓取失败，请稍后重试'}); toast('详情抓取失败', r.message || '抓取失败，请稍后重试', 'warn'); }
     else put(key, {data:r.data || {}, t:Date.now()});
     if ($('#drawer').classList.contains('on') && curDetail === number) paintDetail(number);
   });
+}
+/* 刚打开的那一部：首帧画完把抽屉滚回顶部。浏览器有「滚动锚定」，光换 innerHTML 它可能
+   又把上一部的偏移找回来；而同一个番号的重绘（长图回填 / 重新抓取）不该动用户的滚动位置。 */
+let detailFresh = '';
+function detailTopIfFresh(number){
+  if (detailFresh !== number) return;
+  detailFresh = '';
+  $('#drawerBody').scrollTop = 0;
 }
 /* 详情还没回来时，用列表里已有的卡片数据先渲染封面/番号/日期/演员 */
 function findMovie(num){

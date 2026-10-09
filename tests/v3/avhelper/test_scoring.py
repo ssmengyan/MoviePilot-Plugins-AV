@@ -101,6 +101,31 @@ class TestCandidateConversion:
         assert cand["hash"] == "a" * 40
 
 
+class TestPublisherLabel:
+    """「发布源」文案：站点与发布组不能重复（旧版会拼出「馒头 / 馒头 发布 发布」）。"""
+
+    def test_site_only(self):
+        assert scoring.publisher_label({"site": "馒头", "group": ""}) == "馒头"
+
+    def test_legacy_site_as_group(self):
+        """历史数据里发布组被兜底成「馒头 发布」：只留站点，不再叠模板自带的「 发布」。"""
+        assert scoring.publisher_label({"site": "馒头", "group": "馒头 发布"}) == "馒头"
+        assert scoring.publisher_label({"site": "馒头", "group": "馒头"}) == "馒头"
+
+    def test_real_group(self):
+        assert scoring.publisher_label({"site": "馒头", "group": "CMCT"}) == "馒头 / CMCT 发布"
+
+    def test_group_carrying_suffix(self):
+        assert scoring.publisher_label({"site": "BT 公网", "group": "BT 匿名发布"}) == "BT 公网 / BT 匿名发布"
+
+    def test_torrent_without_group_marker(self):
+        """馒头成人区这类种名解析不出发布组：候选里 group 留空，文案只写站点。"""
+        torrent = SimpleNamespace(title="ABP-557 無碼流出 4K 中字", site_name="馒头", seeders=5, size=0)
+        cand = scoring.candidate_from_torrent(torrent, [])
+        assert cand["group"] == ""
+        assert scoring.publisher_label(cand) == "馒头"
+
+
 class TestScoring:
     """打分规则（数值取交互演示原型口径）。"""
 

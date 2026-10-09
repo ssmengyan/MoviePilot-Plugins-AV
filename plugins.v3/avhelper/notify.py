@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 
 from app.schemas.types import MessageType
 
+from .scoring import publisher_label
 from .store import Store
 
 KIND_OK = "ok"
@@ -30,7 +31,7 @@ def meta_line(cand: Dict[str, Any]) -> str:
         f"大小：{cand.get('size') or '—'}",
         f"字幕：{'中文简体' if cand.get('cnsub') else '无中字'}",
         f"副标题：{'无码破解' if cand.get('uncensored') else '有码原版'}",
-        f"发布源：{cand.get('site') or '—'} / {cand.get('group') or '未知'} 发布",
+        f"发布源：{publisher_label(cand)}",
     ])
 
 
