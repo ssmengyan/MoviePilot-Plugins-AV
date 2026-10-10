@@ -24,7 +24,9 @@ import SiteSearchView from './views/SiteSearchView.vue'
 import DownloadsView from './views/DownloadsView.vue'
 import TasksView from './views/TasksView.vue'
 import SubsView from './views/SubsView.vue'
+import ActorsView from './views/ActorsView.vue'
 import { usePluginStore } from '../composables/usePluginStore'
+import { takePendingSettingsSection } from '../composables/settingsJump'
 
 /** 壳只有两种模式：`data` = 数据台（iframe），`settings` = 设置台（七个栏目）。 */
 type ConsoleMode = 'data' | 'settings'
@@ -64,7 +66,7 @@ const pluginId = computed(() => props.pluginId || props.sourcePluginId || '')
  *
  * 不在这张表里的栏目仍由 `AppFrame` 承载被嵌应用（`ui/`）：一次只迁一个视图，
  * 出问题就把该栏目从这里删掉回退成 iframe，不需要回滚整包。
- * **后续把 actors / discover 搬过来时，往这里加一行即可。**
+ * **后续把 discover 搬过来时，往这里加一行即可（六栏里只剩它还是 iframe）。**
  *
  * 所有原生视图共用同一组 props（`store` / `pluginId` / `api` / `toast`）；
  * `@switch` 与 `@refresh-side` 也统一绑在 `<component>` 上——没有声明这两个事件的
@@ -75,6 +77,7 @@ const NATIVE_VIEWS: Record<string, Component> = {
   downloads: DownloadsView,
   tasks: TasksView,
   subs: SubsView,
+  actors: ActorsView,
 }
 
 /** iframe 必须用实例 id（普通插件 = pluginId；分身共享同一份联邦产物）。 */
@@ -285,12 +288,30 @@ watch(
   },
 )
 
+/**
+ * 设置台落点：数据台里点「改范围 / 改规则」时，先写一张一次性便签（`settingsJump.ts`），
+ * 再 `emit('switch')`。宿主只互换 Page/Config 两个弹窗、**不带载荷**，两个 Console 实例
+ * 又不共享 `section`，所以只能靠这张同源便签把设置台定位到对应栏目。
+ *
+ * 读后即删（一次有效）；便签为空或栏目名不认识时保持默认第一栏。
+ */
+function applyPendingSection(): void {
+  if (props.mode !== 'settings') return
+  const pending = takePendingSettingsSection()
+  if (pending && SETTINGS_SECTIONS.some(item => item.key === pending)) section.value = pending
+}
+applyPendingSection()
+
 onMounted(() => {
   // 设计文档 §3：弹窗宽度由 `layout` 事件声明（宿主默认 80rem）。
   emit('layout', { maxWidth: DEFAULT_MAX_WIDTH })
   runtime.start()
   void loadVersion()
-  if (props.mode === 'settings') void loadDraft()
+  if (props.mode === 'settings') {
+    // 再取一次：便签可能在 setup 之后才写入（同一实例被复用的情况）。
+    applyPendingSection()
+    void loadDraft()
+  }
 })
 
 onBeforeUnmount(() => {

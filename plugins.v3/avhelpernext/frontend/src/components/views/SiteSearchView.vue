@@ -25,6 +25,7 @@ import EmptyState from '../common/EmptyState.vue'
 import ErrorState from '../common/ErrorState.vue'
 import { queueThumb } from '../common/common'
 import { hostToast, type PluginApi } from '../../composables/usePluginApi'
+import { requestSettingsSection } from '../../composables/settingsJump'
 import { nowStr } from '../../composables/storeTypes'
 import type { PluginStore } from '../../composables/usePluginStore'
 import type { SearchTask, SiteOption } from '../../composables/storeTypes'
@@ -191,6 +192,8 @@ async function onDownload(payload: { taskId: string; site: string; force: boolea
 /** 「改范围」：本视图不改规则，去设置台改（先告诉用户去哪儿改，避免"点了没反应"）。 */
 function changeScope(): void {
   t.info('搜索范围在「设置台 → 搜索站点」栏里改，保存后本页立即生效')
+  // `switch` 只互换两个弹窗、不带载荷：用一次性便签让设置台实例直接落在「搜索站点」栏。
+  requestSettingsSection('sites')
   emit('switch')
 }
 

@@ -40,6 +40,7 @@ import { computed, ref } from 'vue'
 import EmptyState from '../common/EmptyState.vue'
 import { hostToast, type PluginApi } from '../../composables/usePluginApi'
 import { useHostConfirm } from '../../composables/useHostDialogs'
+import { requestSettingsSection } from '../../composables/settingsJump'
 import type { PluginStore } from '../../composables/usePluginStore'
 import { shortTime, toRule, type RuleValue, type Subscription } from '../../composables/storeTypes'
 
@@ -245,6 +246,8 @@ async function onUnsubscribe(sub: Subscription): Promise<void> {
 /** 「去设置台改规则」：本视图不做编辑器，改规则只有设置台「下载规则」一栏（先说明去处再跳）。 */
 function goRuleSettings(): void {
   t.info('规则在「设置台 → 下载规则」里改')
+  // `switch` 只互换两个弹窗、不带载荷：用一次性便签让设置台实例直接落在「下载规则」栏。
+  requestSettingsSection('rule')
   emit('switch')
 }
 </script>

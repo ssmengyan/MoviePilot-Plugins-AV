@@ -330,6 +330,59 @@ export function usePluginStore(api: PluginApi) {
   }
 
   /**
+   * `POST plugin/favs`：收藏一个演员（老 `views/actors.js` 的 `addFav`）。
+   *
+   * 与老实现逐条对齐：
+   * - **已收藏就不发请求**（老实现 `if (findFav(name)){ toast('已收藏', name); return true; }`）；
+   * - 成功后**就地 push**，不拿响应里的 `favs` 覆盖整表（老实现 `S.favs.push(f)`：后端那份快照
+   *   要等下一次 `/bootstrap` 才生效，`hydrate` 会接手）；
+   * - 演员名缺失 → `缺少演员名`（与后端 `api_favs` 同一句）。
+   */
+  function addFav(name: string, zh = '', avatar = ''): Promise<ActionResult<FavActor>> {
+    return guarded('fav', async () => {
+      const target = String(name ?? '').trim()
+      if (!target) return { ok: false, kind: 'error' as ActionResultKind, message: '缺少演员名' }
+      const hit = favs.value.find(item => item.name === target)
+      if (hit) return { ok: true, kind: 'ok' as ActionResultKind, message: '已收藏', data: hit }
+      const outcome = await send('post', 'favs', { name: target, zh: zh || '', avatar: avatar || '' })
+      if (!outcome.ok) return { ok: false, kind: 'error' as ActionResultKind, message: outcome.message }
+      if (outcome.res.success !== true) {
+        return { ok: false, kind: 'error' as ActionResultKind, message: textOf(outcome.res) || '请稍后重试' }
+      }
+      const entry: FavActor = { name: target, zh: zh || '', avatar: avatar || '' }
+      if (!favs.value.some(item => item.name === target)) favs.value = [...favs.value, entry]
+      return {
+        ok: true,
+        kind: 'ok' as ActionResultKind,
+        message: textOf(outcome.res) || `已收藏 ${target}`,
+        data: entry,
+      }
+    })
+  }
+
+  /**
+   * `DELETE plugin/favs?name=`：取消收藏（老 `views/actors.js` 的 `delFav`）。
+   * 成功后**就地**从 `favs` 里摘掉（老实现 `S.favs = S.favs.filter(...)`）。
+   */
+  function delFav(name: string): Promise<ActionResult> {
+    return guarded('fav', async () => {
+      const target = String(name ?? '').trim()
+      if (!target) return { ok: false, kind: 'error' as ActionResultKind, message: '缺少演员名' }
+      const outcome = await send('delete', 'favs', undefined, { name: target })
+      if (!outcome.ok) return { ok: false, kind: 'error' as ActionResultKind, message: outcome.message }
+      if (outcome.res.success !== true) {
+        return { ok: false, kind: 'error' as ActionResultKind, message: textOf(outcome.res) || '请稍后重试' }
+      }
+      favs.value = favs.value.filter(item => item.name !== target)
+      return {
+        ok: true,
+        kind: 'ok' as ActionResultKind,
+        message: textOf(outcome.res) || `已取消收藏 ${target}`,
+      }
+    })
+  }
+
+  /**
    * `POST plugin/subs`：新建订阅。
    *
    * 老实现两处调用点：
@@ -552,6 +605,8 @@ export function usePluginStore(api: PluginApi) {
     ensureSites,
     runCheck,
     unsubscribe,
+    addFav,
+    delFav,
     subscribeNumber,
     searchKeyword,
     startDownload,
