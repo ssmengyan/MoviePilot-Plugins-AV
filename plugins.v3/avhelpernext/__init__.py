@@ -71,6 +71,7 @@ TTL_ACTOR = 24 * 3600      # 演员作品史 24 小时
 TTL_LONG = 7 * 86400       # 长图 URL 7 天
 FAIL_TTL = 120             # 抓取失败后的负缓存：这段时间内不再重试（避免每次打开都重付等待）
 CACHE_MAX_GB = 60          # 缓存总量上限（超出按最旧淘汰）
+CACHE_SIZE_TTL = 60        # 缓存体积的内存缓存时长（秒）：前端 15 秒轮询一次，不能每次 rglob 整个目录
 ONCE_JOB_ID = "subcheck_now"
 
 
@@ -104,6 +105,30 @@ def ui_media_type(path: Path) -> str:
     return UI_EXT_MIME.get(path.suffix.lower()) or guessed or "application/octet-stream"
 
 
+def size_text(size: Any) -> str:
+    """字节数 → 人类可读文本（B 取整，KB/MB/GB 保留 1 位小数，「4.2 GB」这种）。"""
+    try:
+        value = max(float(size or 0), 0.0)
+    except (TypeError, ValueError):
+        value = 0.0
+    if value < 1024:
+        return f"{value:.0f} B"
+    for unit in ("KB", "MB"):
+        value /= 1024
+        if value < 1024:
+            return f"{value:.1f} {unit}"
+    return f"{value / 1024:.1f} GB"
+
+
+def is_keep_file(path: Path) -> bool:
+    """缓存清理必须保留的文件：插件自管的 SQLite 库与它的事务副产物。
+
+    数据库就落在 `META_DIR`（`/avhelper/next/cache/meta/avhelper.db`），与 JSON 缓存同目录；
+    而孤儿扫描按「不在 cache_idx 里就删」判定，不排除它会把订阅/收藏/任务一起删掉。
+    """
+    return path.name.startswith("avhelper.db")
+
+
 class AVHelperNext(_PluginBase):
     """AV 资源助手（重构版）：JAV 番号订阅、榜单浏览、PT 自动选种下载。"""
 
@@ -128,6 +153,7 @@ class AVHelperNext(_PluginBase):
     _emby_apikey = ""
     _emby_lib: Optional[emby.EmbyLibrary] = None
     _emby_sig: Optional[Tuple[str, str]] = None
+    _cache_size_cache: Tuple[float, int] = (0.0, 0)   # (取样时间, 字节数)：缓存体积的内存缓存
 
     # ---------- 生命周期 ----------
 
@@ -371,6 +397,8 @@ class AVHelperNext(_PluginBase):
              "auth": "bear", "summary": "通知列表/清空"},
             {"path": "/sites", "endpoint": self.api_sites, "methods": ["GET"], "auth": "bear",
              "summary": "已配置站点"},
+            {"path": "/cache/clean", "endpoint": self.api_cache_clean, "methods": ["POST"],
+             "auth": "bear", "summary": "清理缓存"},
         ]
 
     # ---------- 基础设施 ----------
@@ -724,11 +752,78 @@ class AVHelperNext(_PluginBase):
         return Response(content=blob, media_type=imgproxy.media_type(blob),
                         headers={"Cache-Control": "public, max-age=2592000"})
 
+    # ---------- 运行概况（bootstrap 用） ----------
+
+    def cache_size(self, force: bool = False) -> int:
+        """缓存目录当前占用（字节）。
+
+        结果带 `CACHE_SIZE_TTL` 秒的内存缓存：前端每 15 秒轮询一次 `/bootstrap`，
+        每次都对上万文件 rglob 会把请求拖慢。清理后要立刻拿到新值就传 `force=True`。
+
+        :param force: 忽略内存缓存，重新统计
+        :return: 缓存目录下所有文件的字节数之和（统计失败按已累计的部分返回）
+        """
+        now = time.time()
+        stamp, cached = self._cache_size_cache
+        if not force and stamp and now - stamp < CACHE_SIZE_TTL:
+            return int(cached)
+        total = 0
+        try:
+            for path in CACHE_ROOT.rglob("*"):
+                if not path.is_file():
+                    continue
+                try:
+                    total += path.stat().st_size
+                except OSError:
+                    continue
+        except OSError as error:      # 目录不存在/权限异常都不要把 /bootstrap 打挂
+            logger.error(f"AVHelperNext 统计缓存体积失败：{error}")
+        self._cache_size_cache = (now, total)
+        return int(total)
+
+    def cache_size_forget(self) -> None:
+        """让缓存体积的内存缓存失效（清理后调用，界面立刻拿到新值而不是 60 秒前的）。"""
+        self._cache_size_cache = (0.0, 0)
+
+    def check_state(self, rule: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """订阅检查的限流状态（只读展示，判定仍由 `RateLimiter.check_allowed` 负责）。
+
+        界面要显示「现在能不能检查、下次什么时候能检查」，所以把判定结果翻译成一个时间点：
+        现在允许 → `nextAt=0`；因每日上限被拒 → 今天 24:00；因间隔不足被拒 → 上次检查 + 最小间隔。
+
+        :param rule: 已取到的全局默认规则；不传就现取一份
+        """
+        rule = rule if isinstance(rule, dict) else self.global_rule()
+        max_per_day = int(rule.get("maxPerDay") or 6)
+        min_interval = int(rule.get("minIntervalMin") or 240)
+        allowed, reason = self.limiter.check_allowed(max_per_day, min_interval)
+        state = self.limiter.state()
+        checked_today = int(state.get("checked_today") or 0)
+        last_check = float(state.get("last_check") or 0)
+        next_at = 0
+        if not allowed:
+            if checked_today >= max_per_day:
+                # 计数键按本地日期分桶（rate_limit 里用 strftime），所以这里也按本地时间取今天 24:00
+                next_at = time.mktime(time.strptime(time.strftime("%Y-%m-%d"), "%Y-%m-%d")) + 86400
+            elif last_check:
+                next_at = last_check + min_interval * 60
+        return {
+            "allowed": bool(allowed),
+            "reason": "" if allowed else str(reason),
+            "nextAt": int(next_at),
+            "checkedToday": checked_today,
+            "lastCheck": int(last_check),
+            "maxPerDay": max_per_day,
+            "minIntervalMin": min_interval,
+        }
+
     # ---------- API：只读数据 ----------
 
     def api_bootstrap(self) -> Dict[str, Any]:
-        """首屏状态聚合：收藏、订阅、任务、队列、通知、站点与默认规则。"""
+        """首屏状态聚合：收藏、订阅、任务、队列、通知、站点、默认规则与运行概况。"""
         queue = self.engine.queue()
+        rule = self.global_rule()
+        size = self.cache_size()
         return {
             "success": True,
             "enabled": self._enabled,
@@ -739,7 +834,11 @@ class AVHelperNext(_PluginBase):
             "notices": self.store.notice_list(),
             "tasks": self.engine.task_list(),
             "queue": queue,
-            "defaultRule": self.global_rule(),
+            "defaultRule": rule,
+            # 运行概况（设置台「运行与缓存」/ 右栏）：体积带 60 秒内存缓存，检查状态是只读快照
+            "cacheSize": size,
+            "cacheSizeText": size_text(size),
+            "check": self.check_state(rule),
         }
 
     def api_rankings(self, period: str = "week", kind: str = "censored") -> Dict[str, Any]:
@@ -1038,6 +1137,25 @@ class AVHelperNext(_PluginBase):
         except Exception:
             return {}
 
+    # ---------- API：缓存维护 ----------
+
+    def api_cache_clean(self) -> Dict[str, Any]:
+        """手动清理缓存：过期项 → 孤儿文件 → 容量上限淘汰，与定时任务共用同一套逻辑。
+
+        同步磁盘 IO（缓存里可能上万文件）由宿主线程池执行；返回本次释放量、清理后的占用，
+        并顺手让体积内存缓存失效，免得界面最长 60 秒还显示旧值。
+        """
+        freed = self.job_cacheclean()
+        size = self.cache_size(force=True)
+        return {
+            "success": True,
+            "message": f"已清理，释放 {size_text(freed)}",
+            "freed": int(freed),
+            "freedText": size_text(freed),
+            "cacheSize": int(size),
+            "cacheSizeText": size_text(size),
+        }
+
     # ---------- 定时任务 ----------
 
     def job_subcheck(self) -> None:
@@ -1049,8 +1167,14 @@ class AVHelperNext(_PluginBase):
         if result.get("limited"):
             logger.info(f"AVHelper 订阅检查被限流：{result.get('message')}")
 
-    def job_cacheclean(self) -> None:
-        """缓存清理：过期文件 → 孤儿文件 → 容量上限淘汰（§8.1）。"""
+    def job_cacheclean(self) -> int:
+        """缓存清理：过期文件 → 孤儿文件 → 容量上限淘汰（§8.1）。
+
+        定时任务与界面上的「清理缓存」共用本方法；SQLite 库与它的事务副产物（同目录下的
+        `avhelper.db*`）永远跳过——它们不在缓存索引里，按孤儿删会连订阅/收藏/任务一起丢。
+
+        :return: 本次释放的字节数（cron 调用方忽略该值）
+        """
         removed_bytes = 0
         # 1. 过期项
         expired = self.store.cache_expired()
@@ -1067,22 +1191,22 @@ class AVHelperNext(_PluginBase):
         self.store.cache_drop(keys)
         removed_bytes += freed
 
-        # 2. 孤儿文件（在缓存目录里但不在索引里）
+        # 2. 孤儿文件（在缓存目录里但不在索引里；数据库文件除外）
         indexed = {item["path"] for item in self.store.cache_all()}
         for folder in (META_DIR, CACHE_ROOT / "images"):
             if not folder.exists():
                 continue
             for path in folder.glob("*"):
-                if path.is_file() and str(path) not in indexed:
+                if path.is_file() and not is_keep_file(path) and str(path) not in indexed:
                     try:
                         removed_bytes += path.stat().st_size
                         path.unlink()
                     except Exception:
                         pass
 
-        # 3. 容量上限：按 mtime 由旧到新淘汰
+        # 3. 容量上限：按 mtime 由旧到新淘汰（同样不碰数据库文件）
         limit = CACHE_MAX_GB * 1024 ** 3
-        files = [p for p in CACHE_ROOT.rglob("*") if p.is_file()]
+        files = [p for p in CACHE_ROOT.rglob("*") if p.is_file() and not is_keep_file(p)]
         total = sum(p.stat().st_size for p in files)
         if total > limit:
             for path in sorted(files, key=lambda p: p.stat().st_mtime):
@@ -1096,9 +1220,11 @@ class AVHelperNext(_PluginBase):
                 except Exception:
                     pass
 
+        self.cache_size_forget()      # 体积变了，让 /bootstrap 的 60 秒缓存失效
         if removed_bytes > 5 * 1024 ** 3:
             self.notifier.info("缓存清理", f"本次清理释放 {removed_bytes / 1024 ** 3:.1f} GB")
         logger.info(f"AVHelper 缓存清理完成，释放 {removed_bytes / 1024 ** 2:.1f} MB")
+        return int(removed_bytes)
 
     def trigger_check_now(self) -> None:
         """界面“立即检查”入口：挂一次性任务，避免阻塞请求线程。"""
