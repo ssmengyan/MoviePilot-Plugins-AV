@@ -352,6 +352,22 @@ function closePanel(): void {
   emit('close')
 }
 
+/**
+ * 左栏底部那颗「打开数据台 / 打开设置台」。
+ *
+ * 宿主的 `switch` 是**叠加**而不是替换：数据台里 `switch` 会开一个设置弹窗盖在主界面之上
+ * （关掉它就回到主界面，这是期望行为）；但设置台里再 `switch` 会再叠一层主界面 ——
+ * 用户实测的"主界面 + 设置 + 主界面"三层就是这么来的。
+ * 所以设置台这一侧改成 `close`：关掉设置弹窗，自然露出下面那层数据台，层数封顶 2。
+ */
+function switchConsole(): void {
+  if (isSettings.value) {
+    emit('close')
+    return
+  }
+  emit('switch')
+}
+
 watch(
   () => props.mode,
   (mode) => {
@@ -486,14 +502,18 @@ onBeforeUnmount(() => {
           </template>
         </v-list>
 
-        <!-- 数据台 ⇄ 设置台：宿主合同里的 `switch`（两个弹窗互换）。 -->
+        <!-- 数据台 ⇄ 设置台。
+             宿主的 `switch` **不是替换而是再叠一层**弹窗：数据台点「打开设置台」= 设置叠在主界面之上
+             （关掉设置就回到主界面，符合预期）；但在设置台里再 `switch` 会叠出第三层主界面
+             （用户实测：主界面 + 设置 + 主界面）。所以设置台这一侧改用 `close`，
+             直接关掉设置弹窗、露出下面那层数据台 —— 层数永远不超过 2。 -->
         <v-btn
           block
           size="small"
           variant="text"
           :prepend-icon="isSettings ? 'mdi-view-dashboard-outline' : 'mdi-cog-outline'"
           class="mt-2"
-          @click="emit('switch')"
+          @click="switchConsole"
         >{{ isSettings ? '打开数据台' : '打开设置台' }}</v-btn>
       </nav>
 

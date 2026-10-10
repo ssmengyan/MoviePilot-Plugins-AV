@@ -6252,6 +6252,13 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
     function closePanel() {
       emit("close");
     }
+    function switchConsole() {
+      if (isSettings.value) {
+        emit("close");
+        return;
+      }
+      emit("switch");
+    }
     watch(
       () => props.mode,
       (mode) => {
@@ -6310,7 +6317,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
             }),
             _createVNode(_component_v_toolbar_title, { class: "avh-title" }, {
               default: _withCtx(() => [
-                _cache[14] || (_cache[14] = _createElementVNode("span", { class: "text-h6" }, "AV 资源助手", -1)),
+                _cache[13] || (_cache[13] = _createElementVNode("span", { class: "text-h6" }, "AV 资源助手", -1)),
                 version.value ? (_openBlock(), _createElementBlock("span", _hoisted_2, "v" + _toDisplayString(version.value), 1)) : _createCommentVNode("", true),
                 _unref(overview).enabled === false ? (_openBlock(), _createBlock(_component_v_chip, {
                   key: 1,
@@ -6318,7 +6325,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                   color: "warning",
                   variant: "tonal"
                 }, {
-                  default: _withCtx(() => _cache[13] || (_cache[13] = [
+                  default: _withCtx(() => _cache[12] || (_cache[12] = [
                     _createTextVNode("已停用")
                   ])),
                   _: 1
@@ -6346,7 +6353,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                 size: "small",
                 onClick: runSearch
               }, {
-                default: _withCtx(() => _cache[15] || (_cache[15] = [
+                default: _withCtx(() => _cache[14] || (_cache[14] = [
                   _createTextVNode("搜索")
                 ])),
                 _: 1
@@ -6360,7 +6367,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
               class: "me-2",
               onClick: runCheck
             }, {
-              default: _withCtx(() => _cache[16] || (_cache[16] = [
+              default: _withCtx(() => _cache[15] || (_cache[15] = [
                 _createTextVNode("运行一次")
               ])),
               _: 1
@@ -6385,7 +6392,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
               class: "me-2",
               onClick: closePanel
             }, {
-              default: _withCtx(() => _cache[17] || (_cache[17] = [
+              default: _withCtx(() => _cache[16] || (_cache[16] = [
                 _createTextVNode("关闭")
               ])),
               _: 1
@@ -6405,7 +6412,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
               default: _withCtx(() => [
                 !isSettings.value ? (_openBlock(), _createElementBlock(_Fragment, { key: 0 }, [
                   _createVNode(_component_v_list_subheader, null, {
-                    default: _withCtx(() => _cache[18] || (_cache[18] = [
+                    default: _withCtx(() => _cache[17] || (_cache[17] = [
                       _createTextVNode("数据台")
                     ])),
                     _: 1
@@ -6421,7 +6428,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                   }), 64))
                 ], 64)) : (_openBlock(), _createElementBlock(_Fragment, { key: 1 }, [
                   _createVNode(_component_v_list_subheader, null, {
-                    default: _withCtx(() => _cache[19] || (_cache[19] = [
+                    default: _withCtx(() => _cache[18] || (_cache[18] = [
                       _createTextVNode("设置台")
                     ])),
                     _: 1
@@ -6456,7 +6463,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
               variant: "text",
               "prepend-icon": isSettings.value ? "mdi-view-dashboard-outline" : "mdi-cog-outline",
               class: "mt-2",
-              onClick: _cache[1] || (_cache[1] = ($event) => emit("switch"))
+              onClick: switchConsole
             }, {
               default: _withCtx(() => [
                 _createTextVNode(_toDisplayString(isSettings.value ? "打开数据台" : "打开设置台"), 1)
@@ -6474,8 +6481,8 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                 api: currentApi(),
                 toast: _unref(injectedToast),
                 "focus-actor": section.value === "actors" ? actorFocus.value : "",
-                onSwitch: _cache[2] || (_cache[2] = ($event) => emit("switch")),
-                onRefreshSide: _cache[3] || (_cache[3] = ($event) => _unref(refreshRuntime)()),
+                onSwitch: _cache[1] || (_cache[1] = ($event) => emit("switch")),
+                onRefreshSide: _cache[2] || (_cache[2] = ($event) => _unref(refreshRuntime)()),
                 onOpenMovie,
                 onOpenActor: openActorFromOverlay
               }, null, 40, ["store", "plugin-id", "api", "toast", "focus-actor"])) : framePluginId.value ? (_openBlock(), _createBlock(AppFrame, {
@@ -6488,7 +6495,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                 type: "warning",
                 variant: "tonal"
               }, {
-                default: _withCtx(() => _cache[20] || (_cache[20] = [
+                default: _withCtx(() => _cache[19] || (_cache[19] = [
                   _createTextVNode(" 宿主没有传入 pluginId，无法定位内嵌应用。 ")
                 ])),
                 _: 1
@@ -6515,15 +6522,15 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                 key: 2,
                 config: _unref(hostConfig),
                 "enabled-known": _unref(enabledKnown),
-                onPatch: _cache[4] || (_cache[4] = (patch) => Object.assign(_unref(hostConfig), patch))
+                onPatch: _cache[3] || (_cache[3] = (patch) => Object.assign(_unref(hostConfig), patch))
               }, null, 8, ["config", "enabled-known"])) : section.value === "sites" ? (_openBlock(), _createBlock(SitesPanel, {
                 key: 3,
                 sites: ruleView.value?.sites || [],
                 "pref-sites": ruleView.value?.prefSites || [],
                 options: _unref(sites),
                 loaded: _unref(sitesLoaded),
-                "onUpdate:sites": _cache[5] || (_cache[5] = (value) => patchRule({ sites: value })),
-                "onUpdate:prefSites": _cache[6] || (_cache[6] = (value) => patchRule({ prefSites: value }))
+                "onUpdate:sites": _cache[4] || (_cache[4] = (value) => patchRule({ sites: value })),
+                "onUpdate:prefSites": _cache[5] || (_cache[5] = (value) => patchRule({ prefSites: value }))
               }, null, 8, ["sites", "pref-sites", "options", "loaded"])) : section.value === "rule" && ruleView.value ? (_openBlock(), _createBlock(RulePanel, {
                 key: 4,
                 rule: ruleView.value,
@@ -6541,7 +6548,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                 key: 6,
                 config: _unref(hostConfig),
                 validation: _unref(validation),
-                onPatch: _cache[7] || (_cache[7] = (patch) => Object.assign(_unref(hostConfig), patch))
+                onPatch: _cache[6] || (_cache[6] = (patch) => Object.assign(_unref(hostConfig), patch))
               }, null, 8, ["config", "validation"])) : section.value === "runtime" ? (_openBlock(), _createBlock(RuntimePanel, {
                 key: 7,
                 "cache-text": _unref(cacheText),
@@ -6549,7 +6556,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                 cleaning: _unref(cacheCleaning),
                 loading: _unref(runtimeLoading),
                 onClean: cleanCache,
-                onRefresh: _cache[8] || (_cache[8] = ($event) => _unref(refreshRuntime)())
+                onRefresh: _cache[7] || (_cache[7] = ($event) => _unref(refreshRuntime)())
               }, null, 8, ["cache-text", "check", "cleaning", "loading"])) : section.value === "about" ? (_openBlock(), _createBlock(AboutPanel, {
                 key: 8,
                 version: version.value,
@@ -6583,7 +6590,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                   ]),
                   default: _withCtx(() => [
                     _createVNode(_component_v_card_title, { class: "text-subtitle-1" }, {
-                      default: _withCtx(() => _cache[21] || (_cache[21] = [
+                      default: _withCtx(() => _cache[20] || (_cache[20] = [
                         _createTextVNode("运行概况")
                       ])),
                       _: 1
@@ -6610,7 +6617,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                           ]),
                           default: _withCtx(() => [
                             _createVNode(_component_v_list_item_title, { class: "text-body-2" }, {
-                              default: _withCtx(() => _cache[22] || (_cache[22] = [
+                              default: _withCtx(() => _cache[21] || (_cache[21] = [
                                 _createTextVNode("订阅")
                               ])),
                               _: 1
@@ -6624,7 +6631,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                           ]),
                           default: _withCtx(() => [
                             _createVNode(_component_v_list_item_title, { class: "text-body-2" }, {
-                              default: _withCtx(() => _cache[23] || (_cache[23] = [
+                              default: _withCtx(() => _cache[22] || (_cache[22] = [
                                 _createTextVNode("待确认任务")
                               ])),
                               _: 1
@@ -6638,7 +6645,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                           ]),
                           default: _withCtx(() => [
                             _createVNode(_component_v_list_item_title, { class: "text-body-2" }, {
-                              default: _withCtx(() => _cache[24] || (_cache[24] = [
+                              default: _withCtx(() => _cache[23] || (_cache[23] = [
                                 _createTextVNode("下载中")
                               ])),
                               _: 1
@@ -6652,7 +6659,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                           ]),
                           default: _withCtx(() => [
                             _createVNode(_component_v_list_item_title, { class: "text-body-2" }, {
-                              default: _withCtx(() => _cache[25] || (_cache[25] = [
+                              default: _withCtx(() => _cache[24] || (_cache[24] = [
                                 _createTextVNode("收藏演员")
                               ])),
                               _: 1
@@ -6666,7 +6673,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                           ]),
                           default: _withCtx(() => [
                             _createVNode(_component_v_list_item_title, { class: "text-body-2" }, {
-                              default: _withCtx(() => _cache[26] || (_cache[26] = [
+                              default: _withCtx(() => _cache[25] || (_cache[25] = [
                                 _createTextVNode("通知")
                               ])),
                               _: 1
@@ -6681,7 +6688,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                           ]),
                           default: _withCtx(() => [
                             _createVNode(_component_v_list_item_title, { class: "text-body-2" }, {
-                              default: _withCtx(() => _cache[27] || (_cache[27] = [
+                              default: _withCtx(() => _cache[26] || (_cache[26] = [
                                 _createTextVNode("缓存")
                               ])),
                               _: 1
@@ -6695,7 +6702,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                           ]),
                           default: _withCtx(() => [
                             _createVNode(_component_v_list_item_title, { class: "text-body-2" }, {
-                              default: _withCtx(() => _cache[28] || (_cache[28] = [
+                              default: _withCtx(() => _cache[27] || (_cache[27] = [
                                 _createTextVNode("下次检查")
                               ])),
                               _: 1
@@ -6713,9 +6720,9 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                       "prepend-icon": "mdi-refresh",
                       loading: _unref(runtimeLoading),
                       class: "mt-2",
-                      onClick: _cache[9] || (_cache[9] = ($event) => _unref(refreshRuntime)())
+                      onClick: _cache[8] || (_cache[8] = ($event) => _unref(refreshRuntime)())
                     }, {
-                      default: _withCtx(() => _cache[29] || (_cache[29] = [
+                      default: _withCtx(() => _cache[28] || (_cache[28] = [
                         _createTextVNode("刷新")
                       ])),
                       _: 1
@@ -6749,9 +6756,9 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
           "plugin-id": framePluginId.value,
           api: currentApi(),
           toast: _unref(injectedToast),
-          onClose: _cache[10] || (_cache[10] = ($event) => drawerOpen.value = false),
+          onClose: _cache[9] || (_cache[9] = ($event) => drawerOpen.value = false),
           onOpenActor: openActorFromOverlay,
-          onRefreshSide: _cache[11] || (_cache[11] = ($event) => _unref(refreshRuntime)())
+          onRefreshSide: _cache[10] || (_cache[10] = ($event) => _unref(refreshRuntime)())
         }, null, 8, ["open", "number", "id", "store", "plugin-id", "api", "toast"])) : _createCommentVNode("", true),
         framePluginId.value ? (_openBlock(), _createBlock(SearchDialog, {
           key: 1,
@@ -6760,7 +6767,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
           open: searchOpen.value,
           "plugin-id": framePluginId.value,
           api: currentApi(),
-          onClose: _cache[12] || (_cache[12] = ($event) => searchOpen.value = false),
+          onClose: _cache[11] || (_cache[11] = ($event) => searchOpen.value = false),
           onOpenMovie: onSearchPickMovie,
           onOpenActor: openActorFromOverlay
         }, null, 8, ["open", "plugin-id", "api"])) : _createCommentVNode("", true)
@@ -6769,6 +6776,6 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
   }
 });
 
-const Console = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-2f4481cb"]]);
+const Console = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-fe66b9e3"]]);
 
 export { Console as C, consoleEmits as c };

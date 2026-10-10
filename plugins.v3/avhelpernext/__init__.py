@@ -197,34 +197,29 @@ class AVHelperNext(_PluginBase):
     # ---------- 宿主扩展点 ----------
 
     def get_service(self) -> List[Dict[str, Any]]:
-        """重构期不注册任何定时任务（返回空表）。
+        """注册定时服务：订阅检查（每天 3 次）与缓存清理（每天 4 点）。
 
-        重构版与原版并存，两边都挂 cron 会对同一批站点重复抓取、重复下载，所以这里一律不注册。
-        合并回原插件时恢复原来的两个服务：
-          {"id": "subcheck", "name": "AV 订阅检查", "trigger": "cron",
-           "kwargs": {"hour": "9,14,21", "minute": "30"}, "func": self.job_subcheck}
-          {"id": "cacheclean", "name": "AV 缓存清理", "trigger": "cron",
-           "kwargs": {"hour": 4, "minute": 0}, "func": self.job_cacheclean}
+        2026-10-10 起**重构版成为在用插件**（原版 AVHelper 已按用户要求停用），
+        所以这里把两个 cron 恢复正常 —— 否则订阅检查会静默停摆。
+        若将来两个插件同时启用，务必只让一边挂 cron（会重复抓站点、重复下载）。
         """
-        return []
+        return [
+            {"id": "subcheck", "name": "AV 订阅检查", "trigger": "cron",
+             "kwargs": {"hour": "9,14,21", "minute": "30"}, "func": self.job_subcheck},
+            {"id": "cacheclean", "name": "AV 缓存清理", "trigger": "cron",
+             "kwargs": {"hour": 4, "minute": 0}, "func": self.job_cacheclean},
+        ]
 
     def get_media_source(self) -> Optional[List[Dict[str, Any]]]:
-        """重构期不注册媒体数据源（返回 None）。
+        """注册插件提供的 JAVDB 媒体数据源。
 
-        重构版与原版并存：两边都注册会在宿主「媒体数据源」里出现两条 JAVDB，
-        且识别链路会重复抓 javdb（多付一次限流额度）。番号识别仍由原版负责。
-        合并回原插件时恢复：
-          return [{"name": "JAVDB", "media_source": "javdb", "media_types": ["电影"]}]
+        与 `get_service` 同理：重构版已是在用插件，注册回来宿主「媒体数据源」里才有 JAVDB。
         """
-        return None
+        return [{"name": "JAVDB", "media_source": "javdb", "media_types": ["电影"]}]
 
     def get_module(self) -> Optional[Dict[str, Any]]:
-        """重构期不胁持媒体识别（返回 None）。
-
-        合并回原插件时恢复：
-          return {"async_recognize_media": self._recognize_media}
-        """
-        return None
+        """胁持媒体识别：只接手 javdb 来源的番号识别（重构版已是在用插件）。"""
+        return {"async_recognize_media": self._recognize_media}
 
     async def _recognize_media(self, meta: Any = None, mtype: Any = None,
                                media_source: Any = None, media_id: Any = None,
