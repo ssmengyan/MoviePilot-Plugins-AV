@@ -1190,8 +1190,13 @@ class AVHelperNext(_PluginBase):
         removed_bytes += freed
 
         # 2. 孤儿文件（在缓存目录里但不在索引里；数据库文件除外）
+        #
+        # **只扫 META_DIR，不扫 images**：图片缓存从不登记索引（`imgproxy.fetch()` 与 `/img`
+        # 路由都不调 `cache_put`），所以"不在索引里"对图片而言恒真 —— 把 images 一起扫等于
+        # 每晚把整个图片缓存删光（2026-10-10 实测：847 个文件被判孤儿）。图片本该由下面第 3 步
+        # 的「容量上限 + 按 mtime 淘汰」来兜底。原实现两处并存，属既有缺陷，重构版修正。
         indexed = {item["path"] for item in self.store.cache_all()}
-        for folder in (META_DIR, CACHE_ROOT / "images"):
+        for folder in (META_DIR,):
             if not folder.exists():
                 continue
             for path in folder.glob("*"):
