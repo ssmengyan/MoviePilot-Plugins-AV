@@ -39,7 +39,7 @@
  *    「正在获取封面…」的文字提示；文案保留在同一位置（缺封面时才出现）；
  * 4. 老实现 `renderPills()` 之后还要等整应用重绘；这里 `emit('refreshSide')` 请壳去刷右栏概况。
  */
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import EmptyState from '../common/EmptyState.vue'
 import ErrorState from '../common/ErrorState.vue'
 import Thumb from '../common/Thumb.vue'
@@ -87,6 +87,22 @@ const emit = defineEmits<{
   /** 收藏 / 订阅 / 下载成功：请壳刷新右栏「运行概况」（老 `renderPills()`）。 */
   (event: 'refreshSide'): void
 }>()
+
+/**
+ * Esc 关抽屉。
+ *
+ * **不能**指望 `v-navigation-drawer` 自己关 —— 真机实测按 Esc 抽屉纹丝不动、遮罩继续挡住点击，
+ * 而老实现是 `document` 上的全局 keydown → `closeAll()`。
+ * 灯箱开着时交给灯箱处理（它的监听在子组件挂载时注册得更早，老实现同样是"命中灯箱就 return"）。
+ */
+function onKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Escape' || !props.open) return
+  if (lightbox.value?.isOpen?.()) return
+  emit('close')
+}
+
+onMounted(() => document.addEventListener('keydown', onKeydown, true))
+onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown, true))
 
 const t = hostToast(props.toast as any)
 

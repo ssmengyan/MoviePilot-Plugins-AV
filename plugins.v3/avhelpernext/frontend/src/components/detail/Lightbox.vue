@@ -111,7 +111,10 @@ function onBackdrop(event: MouseEvent): void {
   if (event.target === event.currentTarget) close()
 }
 
-defineExpose({ openAt, step, close })
+/** 给外层抽屉用：灯箱开着时 Esc 归灯箱处理（老实现命中灯箱就 `return`，不再去关抽屉）。 */
+const isOpen = (): boolean => open.value
+
+defineExpose({ openAt, step, close, isOpen })
 </script>
 
 <template>

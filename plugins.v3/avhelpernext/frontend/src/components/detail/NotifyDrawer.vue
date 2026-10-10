@@ -39,7 +39,7 @@
  *
  * **不**做（老实现也没有）：不在抽屉里做已读/未读分色，不逐条删除，不做"全部已读"以外的动作。
  */
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import EmptyState from '../common/EmptyState.vue'
 import Thumb from '../common/Thumb.vue'
 import type { NoticeItem } from '../../composables/settingsModel'
@@ -102,6 +102,20 @@ async function askClear(): Promise<void> {
   if (!ok) return
   emit('clear')
 }
+
+/**
+ * Esc 关通知抽屉。
+ *
+ * 与详情抽屉同款问题：**不能**指望 `v-navigation-drawer` 自己处理 Esc
+ * （真机实测详情抽屉按 Esc 关不掉），老实现是 `document` 全局 keydown → `closeAll()`。
+ */
+function onKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Escape' || !props.open) return
+  emit('close')
+}
+
+onMounted(() => document.addEventListener('keydown', onKeydown, true))
+onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown, true))
 
 /**
  * 打开即算已读：老 `openNotify()` 是「拉一次 → `noticeMarkSeen()` → `renderPills()`」，

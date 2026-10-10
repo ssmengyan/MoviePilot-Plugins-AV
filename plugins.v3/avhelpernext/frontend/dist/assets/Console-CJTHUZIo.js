@@ -2819,7 +2819,7 @@ const _hoisted_8$7 = { class: "avh-q__hint avh-q__path" };
 const _hoisted_9$7 = { class: "avh-q__right" };
 const _hoisted_10$7 = { class: "avh-q__no" };
 const _hoisted_11$6 = { class: "avh-q__hint" };
-const {computed: computed$9,onBeforeUnmount: onBeforeUnmount$3,onMounted: onMounted$3,watch: watch$7} = await importShared('vue');
+const {computed: computed$9,onBeforeUnmount: onBeforeUnmount$5,onMounted: onMounted$5,watch: watch$7} = await importShared('vue');
 const POLL_MS$1 = 5e3;
 const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
   __name: "DownloadsView",
@@ -2883,11 +2883,11 @@ const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
       if (document.visibilityState === "visible") startPolling();
       else stopPolling();
     }
-    onMounted$3(() => {
+    onMounted$5(() => {
       if (document.visibilityState === "visible") startPolling();
       document.addEventListener("visibilitychange", onVisibilityChange);
     });
-    onBeforeUnmount$3(() => {
+    onBeforeUnmount$5(() => {
       stopPolling();
       document.removeEventListener("visibilitychange", onVisibilityChange);
     });
@@ -2963,7 +2963,7 @@ const _hoisted_3$9 = {
   class: "avh-tasks__hint"
 };
 const _hoisted_4$9 = { class: "avh-tasks__secttl" };
-const {computed: computed$8,onBeforeUnmount: onBeforeUnmount$2,onMounted: onMounted$2,ref: ref$a,watch: watch$6} = await importShared('vue');
+const {computed: computed$8,onBeforeUnmount: onBeforeUnmount$4,onMounted: onMounted$4,ref: ref$a,watch: watch$6} = await importShared('vue');
 const POLL_MS = 5e3;
 const _sfc_main$a = /* @__PURE__ */ _defineComponent$a({
   __name: "TasksView",
@@ -3033,12 +3033,12 @@ const _sfc_main$a = /* @__PURE__ */ _defineComponent$a({
       if (document.visibilityState === "visible") startPolling();
       else stopPolling();
     }
-    onMounted$2(() => {
+    onMounted$4(() => {
       void props.store.refreshTasks(true);
       if (document.visibilityState === "visible") startPolling();
       document.addEventListener("visibilitychange", onVisibilityChange);
     });
-    onBeforeUnmount$2(() => {
+    onBeforeUnmount$4(() => {
       stopPolling();
       document.removeEventListener("visibilitychange", onVisibilityChange);
     });
@@ -4494,7 +4494,7 @@ const {createElementVNode:_createElementVNode$4,toDisplayString:_toDisplayString
 
 const _hoisted_1$4 = ["src"];
 const _hoisted_2$4 = { class: "avh-lb__ctr" };
-const {onBeforeUnmount: onBeforeUnmount$1,onMounted: onMounted$1,ref: ref$5} = await importShared('vue');
+const {onBeforeUnmount: onBeforeUnmount$3,onMounted: onMounted$3,ref: ref$5} = await importShared('vue');
 
 const _sfc_main$4 = /* @__PURE__ */ _defineComponent$4({
   __name: "Lightbox",
@@ -4548,12 +4548,13 @@ const _sfc_main$4 = /* @__PURE__ */ _defineComponent$4({
         step(1);
       }
     }
-    onMounted$1(() => document.addEventListener("keydown", onKeydown, true));
-    onBeforeUnmount$1(() => document.removeEventListener("keydown", onKeydown, true));
+    onMounted$3(() => document.addEventListener("keydown", onKeydown, true));
+    onBeforeUnmount$3(() => document.removeEventListener("keydown", onKeydown, true));
     function onBackdrop(event) {
       if (event.target === event.currentTarget) close();
     }
-    __expose({ openAt, step, close });
+    const isOpen = () => open.value;
+    __expose({ openAt, step, close, isOpen });
     return (_ctx, _cache) => {
       const _component_v_overlay = _resolveComponent$4("v-overlay");
       return _openBlock$4(), _createBlock$4(_component_v_overlay, {
@@ -4602,7 +4603,7 @@ const _sfc_main$4 = /* @__PURE__ */ _defineComponent$4({
   }
 });
 
-const Lightbox = /* @__PURE__ */ _export_sfc(_sfc_main$4, [["__scopeId", "data-v-c4dff992"]]);
+const Lightbox = /* @__PURE__ */ _export_sfc(_sfc_main$4, [["__scopeId", "data-v-174e2165"]]);
 
 const {defineComponent:_defineComponent$3} = await importShared('vue');
 
@@ -4708,7 +4709,7 @@ const _hoisted_46 = { class: "avh-hero__num" };
 const _hoisted_47 = { class: "avh-kv" };
 const _hoisted_48 = { key: 0 };
 const _hoisted_49 = { key: 1 };
-const {computed: computed$4,nextTick: nextTick$1,ref: ref$4,watch: watch$3} = await importShared('vue');
+const {computed: computed$4,nextTick: nextTick$1,onBeforeUnmount: onBeforeUnmount$2,onMounted: onMounted$2,ref: ref$4,watch: watch$3} = await importShared('vue');
 const _sfc_main$3 = /* @__PURE__ */ _defineComponent$3({
   __name: "DetailDrawer",
   props: {
@@ -4724,6 +4725,13 @@ const _sfc_main$3 = /* @__PURE__ */ _defineComponent$3({
   setup(__props, { expose: __expose, emit: __emit }) {
     const props = __props;
     const emit = __emit;
+    function onKeydown(event) {
+      if (event.key !== "Escape" || !props.open) return;
+      if (lightbox.value?.isOpen?.()) return;
+      emit("close");
+    }
+    onMounted$2(() => document.addEventListener("keydown", onKeydown, true));
+    onBeforeUnmount$2(() => document.removeEventListener("keydown", onKeydown, true));
     const t = hostToast(props.toast);
     const IMG_FALLBACK = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(
       '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"><rect width="100%" height="100%" fill="#1c232d"/><text x="50%" y="50%" fill="#6b7887" font-size="16" text-anchor="middle">图片加载失败</text></svg>'
@@ -5377,7 +5385,7 @@ const _sfc_main$3 = /* @__PURE__ */ _defineComponent$3({
   }
 });
 
-const DetailDrawer = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-250518bc"]]);
+const DetailDrawer = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-b9a9daed"]]);
 
 const {defineComponent:_defineComponent$2} = await importShared('vue');
 
@@ -5396,7 +5404,7 @@ const _hoisted_6$2 = {
   class: "avh-notify__meta"
 };
 const _hoisted_7$2 = { class: "avh-notify__f" };
-const {computed: computed$3,nextTick,ref: ref$3,watch: watch$2} = await importShared('vue');
+const {computed: computed$3,nextTick,onBeforeUnmount: onBeforeUnmount$1,onMounted: onMounted$1,ref: ref$3,watch: watch$2} = await importShared('vue');
 const _sfc_main$2 = /* @__PURE__ */ _defineComponent$2({
   __name: "NotifyDrawer",
   props: {
@@ -5431,6 +5439,12 @@ const _sfc_main$2 = /* @__PURE__ */ _defineComponent$2({
       if (!ok) return;
       emit("clear");
     }
+    function onKeydown(event) {
+      if (event.key !== "Escape" || !props.open) return;
+      emit("close");
+    }
+    onMounted$1(() => document.addEventListener("keydown", onKeydown, true));
+    onBeforeUnmount$1(() => document.removeEventListener("keydown", onKeydown, true));
     watch$2(
       () => props.open,
       (value) => {
@@ -5538,7 +5552,7 @@ const _sfc_main$2 = /* @__PURE__ */ _defineComponent$2({
   }
 });
 
-const NotifyDrawer = /* @__PURE__ */ _export_sfc(_sfc_main$2, [["__scopeId", "data-v-b3835159"]]);
+const NotifyDrawer = /* @__PURE__ */ _export_sfc(_sfc_main$2, [["__scopeId", "data-v-0a21181e"]]);
 
 const {defineComponent:_defineComponent$1} = await importShared('vue');
 
