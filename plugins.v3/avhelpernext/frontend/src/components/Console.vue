@@ -27,8 +27,10 @@ import SubsView from './views/SubsView.vue'
 import ActorsView from './views/ActorsView.vue'
 import DiscoverView from './views/DiscoverView.vue'
 import DetailDrawer from './detail/DetailDrawer.vue'
+import NotifyDrawer from './detail/NotifyDrawer.vue'
 import SearchDialog from './detail/SearchDialog.vue'
 import { usePluginStore } from '../composables/usePluginStore'
+import { countUnread } from '../composables/noticesSeen'
 import { takePendingSettingsSection } from '../composables/settingsJump'
 
 /** 壳只有两种模式：`data` = 数据台（iframe），`settings` = 设置台（七个栏目）。 */
@@ -111,6 +113,62 @@ const searchDialog = ref<InstanceType<typeof SearchDialog> | null>(null)
 const query = ref('')
 const actorFocus = ref('')
 const actorNonce = ref(0)
+
+/**
+ * 通知抽屉（老 `ui/index.html` 的 `#bellBtn` / `#ndrawer` + `ui/views/notify.js`）：
+ * 与详情抽屉、搜索弹窗一样是**跨栏目**的浮层，所以状态同样由壳持有。
+ *
+ * - 数据源就是数据台的 store（`store.notices`）；`/bootstrap` 每 15s 轮询已经在拉它
+ *   （`useRuntimeInfo`），所以这里**不新开轮询、也不额外打 `/notices`**；
+ * - 未读角标与设置台「通知」栏共用同一个已读位点
+ *   （**键 = `avhnext.settings.noticesSeen`**，见 `composables/noticesSeen.ts`）；
+ * - 打开抽屉即 `markNoticesSeen()`（抽屉内部做），角标随位点响应式归零。
+ */
+const notifyOpen = ref(false)
+
+/**
+ * 未读条数（`time` 晚于已读位点的条数）。
+ *
+ * 数据来源与抽屉一致，都是数据台 store 的 `store.notices`（`/bootstrap` 轮询那份）；
+ * 兜底再读一次设置台草稿的 `notices`（设置台挂载时自己 `GET /notices` 拉的同一份数据）
+ * ——在 `?dedupe=1` 之前的老宿主行为、或 `/bootstrap` 某轮没带 `notices` 时，
+ * 草稿那份更可信。**取两者的较大值**：同一条通知不会被数两次，角标只会少不会多。
+ *
+ * 写成函数而不是 `computed`：它要读设置台草稿的 `notices`，而那份解构在本行**之后**才发生
+ * （模块顶层的 TDZ 会直接抛错）。模板里每次渲染都会重新求值，响应式照样跟得上。
+ */
+function notifyUnread(): number {
+  return Math.max(countUnread(store.notices.value), countUnread(notices.value))
+}
+
+/** 打开通知抽屉：老 `openNotify()` 第一件事就是关掉详情抽屉与弹窗（同一时刻只开一层）。 */
+function openNotify(): void {
+  drawerOpen.value = false
+  searchOpen.value = false
+  notifyOpen.value = true
+}
+
+/**
+ * 「清空通知」（通知抽屉那一侧）。抽屉自己已经过了宿主确认，这里直接发请求。
+ *
+ * 数据源是 store，所以清空走 `store.clearNotices()`；设置台草稿（`draft.notices`）是同一份
+ * 数据的另一个副本，清完顺手同步一把，免得切到设置台还看见已经删掉的条目。
+ */
+async function clearNoticesFromDrawer(): Promise<void> {
+  noticeClearing.value = true
+  try {
+    const result = await store.clearNotices()
+    if (!result.ok) {
+      toast.warning(result.message || '清空通知失败')
+      return
+    }
+    notices.value = []
+    toast.success(result.message || '通知已清空')
+    await refreshRuntime()
+  } finally {
+    noticeClearing.value = false
+  }
+}
 
 const isSettings = computed(() => props.mode === 'settings')
 
@@ -455,6 +513,23 @@ onBeforeUnmount(() => {
         <v-btn color="primary" variant="flat" size="small" @click="runSearch">搜索</v-btn>
       </div>
 
+      <!--
+        🔔 通知（老 `ui/index.html` 顶条最右那颗 `#bellBtn`：`<button class="ghost" id="bellBtn">🔔 通知
+        <span class="bellbadge zero" id="bellCount">0</span></button>`）。
+        位置与老实现一致：搜索框右侧、破坏性/主操作按钮之前。
+        角标：未读为 0 时**整颗不画**（等价老 `.bellbadge.zero{display:none}`），
+        计数逻辑与老 `noticeUnread()` 一致（`time` 晚于已读位点的条数）。
+      -->
+      <v-btn
+        variant="text"
+        class="avh-bell me-2"
+        title="通知"
+        @click="openNotify"
+      >
+        🔔 通知
+        <span v-if="notifyUnread() > 0" class="avh-bellbadge">{{ notifyUnread() }}</span>
+      </v-btn>
+
       <v-btn
         color="primary"
         variant="flat"
@@ -726,8 +801,8 @@ onBeforeUnmount(() => {
     </div>
 
     <!--
-      跨栏目的两个弹层（S6-7）：挂在壳的根节点上，切栏目不会把已经打开的详情抽屉/搜索结果弄丢
-      （老实现里 `#drawer` / `#modal` / `#lb` 就在 `ui/index.html` 的根层级上）。
+      跨栏目的三个弹层（S6-7 详情/搜索，S6-8 通知）：挂在壳的根节点上，切栏目不会把已经打开的
+      浮层弄丢（老实现里 `#drawer` / `#ndrawer` / `#modal` / `#lb` 就在 `ui/index.html` 的根层级上）。
     -->
     <DetailDrawer
       v-if="framePluginId"
@@ -752,6 +827,19 @@ onBeforeUnmount(() => {
       @close="searchOpen = false"
       @open-movie="onSearchPickMovie"
       @open-actor="openActorFromOverlay"
+    />
+
+    <!--
+      通知抽屉（S6-8）：列表就是 `store.notices`（`/bootstrap` 轮询那份），
+      「清空」走 `store.clearNotices()`；已读位点由抽屉内部上移（打开即已读）。
+    -->
+    <NotifyDrawer
+      :open="notifyOpen"
+      :notices="store.notices.value"
+      :plugin-id="framePluginId"
+      :clearing="noticeClearing"
+      @close="notifyOpen = false"
+      @clear="clearNoticesFromDrawer"
     />
   </div>
 </template>
@@ -789,6 +877,27 @@ onBeforeUnmount(() => {
 .avh-searchbox__input {
   flex: 1 1 auto;
   min-width: 120px;
+}
+
+/* 顶栏「🔔 通知」那颗按钮：老实现是 `.ghost`（`white-space:nowrap` + 12px 字号），
+   不换行才不会在窄弹窗里折成两行。 */
+.avh-bell {
+  white-space: nowrap;
+}
+
+/* 未读角标：照抄老 `.bellbadge`（圆角胶囊、11px、左侧 6px 间距、最小宽 16px）。
+   老实现用 `.zero{display:none}` 在 0 时隐藏，这里等价地 `v-if="notifyUnread() > 0"` 不渲染。 */
+.avh-bellbadge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  min-width: 16px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  color: #fff;
+  background: rgb(var(--v-theme-error));
 }
 
 .avh-body {

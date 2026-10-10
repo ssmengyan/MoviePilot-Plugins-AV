@@ -5,12 +5,17 @@
  * 通知渠道沿用 MoviePilot 原生通知（`post_message`），**本插件不另建渠道**；
  * 这一栏只管已读位点与清空，数据走 `GET /notices`、`DELETE /notices`。
  *
- * 已读位点与内嵌应用（`ui/views/notify.js`）用同一个 localStorage 键：
- * 已读位点上移到设置台自己的键会让两边角标各说各话，所以这里**只读**旧键，
- * 本栏自己的位点写新键（打开本栏即算已读，与铃铛的行为一致）。
+ * **已读位点与顶栏铃铛共用同一个键**（S6-8 统一）：
+ * `avhnext.settings.noticesSeen` —— 唯一实现在 `composables/noticesSeen.ts`。
+ * 这个键原来是本栏专用的（本栏先上线），顶栏通知抽屉做出来之后两边统一到它，
+ * 于是"打开本栏"与"打开铃铛抽屉"上移的是同一个位点，两边不会各说各话。
+ * 老内嵌应用的键 `avh.noticesSeen` 不再读、不再写（键只留一个的口径见任务约定）。
+ *
+ * 打开这一栏即算已读（与老 `openNotify()` 点铃铛同一条语义）：`markNoticesSeen()`。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, watch } from 'vue'
 import type { NoticeItem } from '../../composables/settingsModel'
+import { markNoticesSeen, seenAt } from '../../composables/noticesSeen'
 
 const props = defineProps<{
   notices: NoticeItem[]
@@ -24,49 +29,22 @@ const emit = defineEmits<{
   (event: 'reload'): void
 }>()
 
-/** 内嵌应用用的键（只读，用于判断「那边已读到哪」）。 */
-const LEGACY_SEEN_KEY = 'avh.noticesSeen'
-/** 设置台自己的已读位点（不污染内嵌应用的键）。 */
-const PANEL_SEEN_KEY = 'avhnext.settings.noticesSeen'
-
-const panelSeen = ref(readStorage(PANEL_SEEN_KEY))
-const legacySeen = ref(readStorage(LEGACY_SEEN_KEY))
-
-function readStorage(key: string): string {
-  try {
-    return localStorage.getItem(key) || ''
-  } catch {
-    return ''
-  }
-}
-
 const total = computed(() => props.notices.length)
-/** 未读 = 时间戳晚于设置台已读位点（与内嵌应用同一套「按时间戳算」的口径）。 */
+
+/**
+ * 未读 = 时间戳晚于共享已读位点的条数（与顶栏角标、老 `noticeUnread()` 同一套口径）。
+ *
+ * `seenAt` 是模块级 ref：`markSeen()` 一改，这个 computed 与顶栏角标**同时**重算，
+ * 屏幕上不会出现"设置台说 3 条未读、铃铛已经清零"这种自相矛盾的画面。
+ */
 const unread = computed(() =>
-  props.notices.filter(item => String(item.time || '') > panelSeen.value).length,
+  props.notices.filter(item => String(item.time || '') > seenAt.value).length,
 )
 
-function markSeen(): void {
-  const latest = props.notices.reduce(
-    (acc, item) => (String(item.time || '') > acc ? String(item.time) : acc),
-    panelSeen.value,
-  )
-  if (latest === panelSeen.value) return
-  panelSeen.value = latest
-  try {
-    localStorage.setItem(PANEL_SEEN_KEY, latest)
-  } catch {
-    /* 写不了就只保留内存位点 */
-  }
-}
-
-// 打开这一栏即算已读（和内嵌应用点铃铛一样）：先把未读数读出来，再上移位点。
+/** 打开这一栏即算已读：先把未读数读出来（`unread` 已缓存），再上移位点。 */
 watch(
   () => props.notices,
-  () => {
-    legacySeen.value = readStorage(LEGACY_SEEN_KEY)
-    setTimeout(markSeen, 0)
-  },
+  () => markNoticesSeen(props.notices),
   { immediate: true },
 )
 </script>
@@ -86,14 +64,14 @@ watch(
         <v-chip color="primary" variant="tonal" size="small">
           未读 {{ unread }} / 共 {{ total }}
         </v-chip>
-        <v-chip v-if="legacySeen" variant="text" size="small" class="text-caption">
-          内嵌应用已读到 {{ legacySeen }}
+        <v-chip v-if="seenAt" variant="text" size="small" class="text-caption">
+          已读到 {{ seenAt }}
         </v-chip>
       </div>
 
       <p class="text-caption text-medium-emphasis mb-2">
         通知由 MoviePilot 原生的通知渠道发出（在「设置 → 通知」里配置），这里看到的只是插件自己的收件箱。
-        打开本栏即算已读。
+        打开本栏即算已读；这里的「未读」与数据台顶栏铃铛上的角标是同一个位点。
       </p>
 
       <v-list v-if="notices.length" density="compact" class="avh-notices mb-2">
