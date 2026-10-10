@@ -25,6 +25,7 @@ import DownloadsView from './views/DownloadsView.vue'
 import TasksView from './views/TasksView.vue'
 import SubsView from './views/SubsView.vue'
 import ActorsView from './views/ActorsView.vue'
+import DiscoverView from './views/DiscoverView.vue'
 import { usePluginStore } from '../composables/usePluginStore'
 import { takePendingSettingsSection } from '../composables/settingsJump'
 
@@ -64,15 +65,17 @@ const pluginId = computed(() => props.pluginId || props.sourcePluginId || '')
 /**
  * 数据台**已原生化**的栏目 → 视图组件（S6 增量替换，设计文档 §6.1）。
  *
- * 不在这张表里的栏目仍由 `AppFrame` 承载被嵌应用（`ui/`）：一次只迁一个视图，
- * 出问题就把该栏目从这里删掉回退成 iframe，不需要回滚整包。
- * **后续把 discover 搬过来时，往这里加一行即可（六栏里只剩它还是 iframe）。**
+ * **六栏到这里全部原生化**（2026-10-10，`discover` 是最后一栏）：这张表里没有的栏目
+ * 仍由 `AppFrame` 承载被嵌应用（`ui/`），`AppFrame` 从此只作为"设置台之外的回退"保留
+ * ——真机上它只在两种情况下出现：这张表被回退式删掉一行，或宿主不认识 `vue` 渲染模式
+ * （那时整个联邦组件根本不会加载，`get_page()` 的 iframe 才是退路）。
  *
  * 所有原生视图共用同一组 props（`store` / `pluginId` / `api` / `toast`）；
- * `@switch` 与 `@refresh-side` 也统一绑在 `<component>` 上——没有声明这两个事件的
- * 视图只是收不到回调（它们本来就不发），不影响行为。
+ * `@switch` / `@refresh-side` / `@open-movie` 也统一绑在 `<component>` 上——没有声明这些
+ * 事件的视图只是收不到回调（它们本来就不发），不影响行为。
  */
 const NATIVE_VIEWS: Record<string, Component> = {
+  discover: DiscoverView,
   sitesearch: SiteSearchView,
   downloads: DownloadsView,
   tasks: TasksView,
@@ -186,6 +189,20 @@ function patchRule(patch: Partial<RuleState>): void {
 
 function pick(item: SectionItem): void {
   section.value = item.key
+}
+
+/**
+ * 「发现榜单」点卡片：老实现 `openMovie(number, id)` 打开「影片详情」抽屉
+ * （`ui/views/detail.js`：预览图 + 磁力 + 长图补图 + 灯箱）。
+ *
+ * 抽屉是 §6.1 里 discover 之后的最后一块，**本轮先接成一句临时提示**（不静默吞掉点击，
+ * 也不假装打开了什么）。下一轮做完抽屉后，把这两行换成真实调用即可——事件载荷
+ * `{ number, id }` 就是老 `openMovie(num, id)` 的两个入参，届时无需改 `DiscoverView`。
+ */
+function onOpenMovie(payload: { number?: string; id?: string }): void {
+  const number = String(payload?.number || '')
+  toast.info('详情抽屉将在下一步迁移')
+  toast.info(number ? `先记下番号：${number}` : '这条记录没有番号')
 }
 
 async function loadVersion(): Promise<void> {
@@ -415,7 +432,7 @@ onBeforeUnmount(() => {
       <!-- 内容区 -->
       <section class="avh-content">
         <template v-if="!isSettings">
-          <!-- S6 增量替换：已原生化的栏目走 Vue 组件（见 NATIVE_VIEWS），其余仍由 iframe 承载被嵌应用。 -->
+          <!-- S6 增量替换：已原生化的栏目走 Vue 组件（见 NATIVE_VIEWS），六栏现在全在这里。 -->
           <component
             :is="nativeView"
             v-if="nativeView && framePluginId"
@@ -425,6 +442,7 @@ onBeforeUnmount(() => {
             :toast="injectedToast"
             @switch="emit('switch')"
             @refresh-side="refreshRuntime()"
+            @open-movie="onOpenMovie"
           />
           <AppFrame
             v-else-if="framePluginId"

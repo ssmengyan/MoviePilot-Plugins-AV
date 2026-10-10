@@ -127,6 +127,21 @@ const durationText = () => {
   overflow: hidden;
 }
 
+/*
+ * 让内层 `Thumb` 撑满这 3:4 的盒子。
+ *
+ * 老实现的 `.thumb img{width:100%;height:100%;object-fit:cover}` 与
+ * `.thumb .noimg{position:absolute;inset:0;...}` 都挂在**同一个** 3:4 容器上；
+ * 通用件 `Thumb` 自己不带高度（形态由使用方决定），不补这一条就会出现两个偏差：
+ *   1. 封面按自身比例渲染（竖图 2:3 比盒子高、横图 3:2 比盒子矮），
+ *      `object-fit:cover` 形同虚设 —— 老实现是"永远铺满 3:4 并裁切"；
+ *   2. 缺图时 `.noimg` 是 `inset:0` 的绝对定位盒，父级零高 → 番号占位**看不见**
+ *      （老实现会把番号画在封面位置上）。
+ */
+.avh-card__thumb :deep(.avh-thumb) {
+  height: 100%;
+}
+
 .avh-card__badges {
   position: absolute;
   left: 6px;
