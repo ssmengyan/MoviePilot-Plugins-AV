@@ -22,6 +22,7 @@ import RuntimePanel from './settings/RuntimePanel.vue'
 import AboutPanel from './settings/AboutPanel.vue'
 import SiteSearchView from './views/SiteSearchView.vue'
 import DownloadsView from './views/DownloadsView.vue'
+import TasksView from './views/TasksView.vue'
 import { usePluginStore } from '../composables/usePluginStore'
 
 /** 壳只有两种模式：`data` = 数据台（iframe），`settings` = 设置台（七个栏目）。 */
@@ -62,7 +63,7 @@ const pluginId = computed(() => props.pluginId || props.sourcePluginId || '')
  *
  * 不在这张表里的栏目仍由 `AppFrame` 承载被嵌应用（`ui/`）：一次只迁一个视图，
  * 出问题就把该栏目从这里删掉回退成 iframe，不需要回滚整包。
- * **后续把 tasks / subs / actors / discover 搬过来时，往这里加一行即可。**
+ * **后续把 subs / actors / discover 搬过来时，往这里加一行即可。**
  *
  * 所有原生视图共用同一组 props（`store` / `pluginId` / `api` / `toast`）；
  * `@switch` 与 `@refresh-side` 也统一绑在 `<component>` 上——没有声明这两个事件的
@@ -71,6 +72,7 @@ const pluginId = computed(() => props.pluginId || props.sourcePluginId || '')
 const NATIVE_VIEWS: Record<string, Component> = {
   sitesearch: SiteSearchView,
   downloads: DownloadsView,
+  tasks: TasksView,
 }
 
 /** iframe 必须用实例 id（普通插件 = pluginId；分身共享同一份联邦产物）。 */
