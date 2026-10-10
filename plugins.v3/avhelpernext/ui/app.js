@@ -85,7 +85,7 @@ function bootAndRender(){
   renderPills();
   return loadBootstrap().then(ok => {
     if (!readToken()) showAuthBar('未取到登录凭据，请重新登录 MoviePilot');
-    if (!S.enabled) toast('插件未启用', '请先在 MoviePilot 插件设置里启用 AVHelper', 'warn');
+    if (!S.enabled) toast('插件未启用', '请先在 MoviePilot 插件设置里启用 AVHelperNext', 'warn');
     if (!ok && !S.bootError) S.bootError = '接口无响应';
     S.booted = true;
     render();

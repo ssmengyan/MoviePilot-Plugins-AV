@@ -4,7 +4,7 @@ import { readToken, showAuthBar } from './auth.js';
 
 
 /* ============ 接口层 ============ */
-const API_BASE = '/api/v1/plugin/AVHelper';
+const API_BASE = '/api/v1/plugin/AVHelperNext';
 
 export function apiUrl(path, params){
   let u = API_BASE + path;

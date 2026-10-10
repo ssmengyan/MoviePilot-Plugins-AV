@@ -4,6 +4,7 @@ import AppFrame from './AppFrame.vue'
 import { DEFAULT_MAX_WIDTH, type ConfigProps } from './contract'
 import { consoleEmits } from './emitContract'
 import {
+  bindPluginApi,
   errorText,
   hostToast,
   type PluginApi,
@@ -191,8 +192,28 @@ const FALLBACK_API: PluginApi = {
   post: () => Promise.reject(new Error('宿主 api 不可用')),
 }
 
-function currentApi(): PluginApi {
+/**
+ * 宿主**原始**请求器：只给宿主自己的路由用（`plugin/page/<id>`、`plugin/remotes`、
+ * `plugin/form/<id>`）——那些路径不能补插件 id，否则会被当成插件端点而 404/空。
+ */
+function rawApi(): PluginApi {
   return props.api && typeof props.api.get === 'function' ? props.api : FALLBACK_API
+}
+
+/**
+ * 插件自身端点的请求器：`bindPluginApi` 给每条 `plugin/<端点>` 补上实例 id。
+ *
+ * 宿主**不会**替组件补（普通安装下 `source_plugin_id` 为 `null`，垫片原样转发），
+ * 少了这一步所有数据接口都会落到 `/api/v1/plugin/<端点>` 的兜底路由上、静默返回空
+ * —— 真机症状就是"完全加载不出来数据"（详见 `bindPluginApi` 的说明）。
+ *
+ * 用 `computed` 是为了**对象标识稳定**：模板里 `:api="currentApi()"` 每次重渲染都会
+ * 求值，直接新建对象会让子组件的 props 每次都变、把 `watch(api)` 一类的逻辑反复触发。
+ */
+const boundApi = computed<PluginApi>(() => bindPluginApi(rawApi(), pluginId.value))
+
+function currentApi(): PluginApi {
+  return boundApi.value
 }
 
 const runtime = useRuntimeInfo(currentApi())
@@ -357,7 +378,8 @@ function onSearchPickMovie(payload: { number?: string; id?: string }): void {
 async function loadVersion(): Promise<void> {
   if (!framePluginId.value) return
   try {
-    const res: any = await currentApi().get(`plugin/page/${framePluginId.value}`)
+    // 宿主自己的路由（`/api/v1/plugin/page/<id>`），走原始请求器、不补插件 id。
+    const res: any = await rawApi().get(`plugin/page/${framePluginId.value}`)
     const payload = res && typeof res === 'object' && 'data' in res ? res.data : res
     const value = payload?.plugin_version
     if (typeof value === 'string' && value) {
@@ -370,7 +392,7 @@ async function loadVersion(): Promise<void> {
   // 兜底：宿主 `plugin/page` 只返回 {render_mode, page}，不带插件版本；
   // 而 `plugin/remotes` 的入口 URL 上挂着 `?v=<plugin_version>`（宿主自己拼的），从那里取。
   try {
-    const remotes: any = await currentApi().get('plugin/remotes?token=moviepilot')
+    const remotes: any = await rawApi().get('plugin/remotes?token=moviepilot')
     const list = Array.isArray(remotes) ? remotes : (remotes?.data ?? [])
     const mine = (Array.isArray(list) ? list : []).find(
       (item: any) => String(item?.id || '').toLowerCase() === framePluginId.value.toLowerCase(),

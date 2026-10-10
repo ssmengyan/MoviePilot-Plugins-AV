@@ -83,6 +83,37 @@ function hostToast(toast) {
     error: typeof toast?.error === "function" ? toast.error.bind(toast) : noop
   };
 }
+function bindPluginApi(api, pluginId) {
+  const id = String(pluginId || "").trim();
+  if (!id) return api;
+  const head = "plugin/";
+  const prefix = `${head}${id}/`;
+  function one(path) {
+    if (typeof path !== "string") return path;
+    if (!path.startsWith(head) || path.startsWith(prefix)) return path;
+    return prefix + path.slice(head.length);
+  }
+  function oneConfig(config) {
+    if (!config || typeof config !== "object") return config;
+    const url = config.url;
+    const next = one(url);
+    return next === url ? config : { ...config, url: next };
+  }
+  const bound = {
+    get: (url, config) => api.get(one(url), config),
+    post: (url, data, config) => api.post(one(url), data, config)
+  };
+  if (api.put) {
+    bound.put = (url, data, config) => api.put(one(url), data, config);
+  }
+  if (api.delete) {
+    bound.delete = (url, config) => api.delete(one(url), config);
+  }
+  if (api.request) {
+    bound.request = (config) => api.request(oneConfig(config));
+  }
+  return bound;
+}
 
 const POLICY_MIN_INTERVAL_MIN = 240;
 
@@ -6326,7 +6357,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
       { key: "downloads", title: "下载", icon: "mdi-download" },
       { key: "sitesearch", title: "站点搜索", icon: "mdi-magnify" }
     ];
-    computed(() => props.pluginId || props.sourcePluginId || "");
+    const pluginId = computed(() => props.pluginId || props.sourcePluginId || "");
     const NATIVE_VIEWS = {
       discover: DiscoverView,
       sitesearch: SiteSearchView,
@@ -6384,8 +6415,12 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
       get: () => Promise.reject(new Error("宿主 api 不可用")),
       post: () => Promise.reject(new Error("宿主 api 不可用"))
     };
-    function currentApi() {
+    function rawApi() {
       return props.api && typeof props.api.get === "function" ? props.api : FALLBACK_API;
+    }
+    const boundApi = computed(() => bindPluginApi(rawApi(), pluginId.value));
+    function currentApi() {
+      return boundApi.value;
     }
     const runtime = useRuntimeInfo(currentApi());
     const { data: bootstrap, overview, updatedAt, error: runtimeError, loading: runtimeLoading, refresh: refreshRuntime } = runtime;
@@ -6478,7 +6513,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
     async function loadVersion() {
       if (!framePluginId.value) return;
       try {
-        const res = await currentApi().get(`plugin/page/${framePluginId.value}`);
+        const res = await rawApi().get(`plugin/page/${framePluginId.value}`);
         const payload = res && typeof res === "object" && "data" in res ? res.data : res;
         const value = payload?.plugin_version;
         if (typeof value === "string" && value) {
@@ -6488,7 +6523,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
       } catch {
       }
       try {
-        const remotes = await currentApi().get("plugin/remotes?token=moviepilot");
+        const remotes = await rawApi().get("plugin/remotes?token=moviepilot");
         const list = Array.isArray(remotes) ? remotes : remotes?.data ?? [];
         const mine = (Array.isArray(list) ? list : []).find(
           (item) => String(item?.id || "").toLowerCase() === framePluginId.value.toLowerCase()
@@ -7123,6 +7158,6 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
   }
 });
 
-const Console = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-54967e8c"]]);
+const Console = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-35dbc8a5"]]);
 
 export { Console as C, consoleEmits as c };
