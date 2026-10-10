@@ -1,5 +1,5 @@
 import { importShared } from './__federation_fn_import-JrT3xvdd.js';
-import { C as Console, c as consoleEmits } from './Console-C9t30WF1.js';
+import { C as Console, c as consoleEmits } from './Console-DCSh7vLu.js';
 
 const {defineComponent:_defineComponent} = await importShared('vue');
 

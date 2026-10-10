@@ -1571,25 +1571,25 @@
   color: rgb(var(--v-theme-on-surface));
 }
 
-.avh-console[data-v-580c5f77] {
+.avh-console[data-v-54967e8c] {
   display: flex;
   flex-direction: column;
   min-height: 0;
   background: rgb(var(--v-theme-surface));
   color: rgb(var(--v-theme-on-surface));
 }
-.avh-topbar[data-v-580c5f77] {
+.avh-topbar[data-v-54967e8c] {
   flex: 0 0 auto;
   padding-inline: 0;
 }
-.avh-title[data-v-580c5f77] {
+.avh-title[data-v-54967e8c] {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
 /* 顶栏搜索（老 `.searchbox`：输入框 + 紧贴的「搜索」按钮，占位符同款） */
-.avh-searchbox[data-v-580c5f77] {
+.avh-searchbox[data-v-54967e8c] {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1597,20 +1597,20 @@
   min-width: 200px;
   margin-right: 12px;
 }
-.avh-searchbox__input[data-v-580c5f77] {
+.avh-searchbox__input[data-v-54967e8c] {
   flex: 1 1 auto;
   min-width: 120px;
 }
 
 /* 顶栏「🔔 通知」那颗按钮：老实现是 `.ghost`（`white-space:nowrap` + 12px 字号），
    不换行才不会在窄弹窗里折成两行。 */
-.avh-bell[data-v-580c5f77] {
+.avh-bell[data-v-54967e8c] {
   white-space: nowrap;
 }
 
 /* 未读角标：照抄老 `.bellbadge`（圆角胶囊、11px、左侧 6px 间距、最小宽 16px）。
    老实现用 `.zero{display:none}` 在 0 时隐藏，这里等价地 `v-if="notifyUnread() > 0"` 不渲染。 */
-.avh-bellbadge[data-v-580c5f77] {
+.avh-bellbadge[data-v-54967e8c] {
   display: inline-block;
   margin-left: 6px;
   padding: 0 6px;
@@ -1622,39 +1622,66 @@
   color: #fff;
   background: rgb(var(--v-theme-error));
 }
-.avh-body[data-v-580c5f77] {
+
+/* 左栏数量角标：几何值照抄老 `nav .pill`（`ui/app.css`）——
+   圆角 999px、字号 11px、内边距 `0 6px`、行高 16px、最小宽 16px、文字居中。
+   配色不搬老界面的写死值（`--acc2:#2f6fd0` / `--warn:#d29922` / `#fff` / `#2b2100`），
+   改走 Vuetify 主题变量：普通态 = 老那颗蓝（`primary`），warn 态 = 老那颗琥珀（`warning`）。 */
+.avh-pill[data-v-54967e8c] {
+  display: inline-block;
+  min-width: 16px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  background: rgb(var(--v-theme-primary));
+  color: rgb(var(--v-theme-on-primary));
+}
+
+/* 老 `.pill.warn`：只有「任务」栏那一颗。 */
+.avh-pill--warn[data-v-54967e8c] {
+  background: rgb(var(--v-theme-warning));
+  color: rgb(var(--v-theme-on-warning));
+}
+
+/* 计数为 0 也照画（老实现 `textContent = n`，不留空），只是弱化到不抢眼。 */
+.avh-pill--zero[data-v-54967e8c] {
+  opacity: 0.55;
+}
+.avh-body[data-v-54967e8c] {
   display: flex;
   align-items: stretch;
   min-height: 0;
   padding: 12px;
   gap: 4px;
 }
-.avh-nav[data-v-580c5f77] {
+.avh-nav[data-v-54967e8c] {
   flex: 0 0 200px;
   max-width: 200px;
   overflow-y: auto;
 }
-.avh-content[data-v-580c5f77] {
+.avh-content[data-v-54967e8c] {
   flex: 1 1 auto;
   min-width: 0;
   overflow: auto;
   padding-inline: 12px;
 }
-.avh-side[data-v-580c5f77] {
+.avh-side[data-v-54967e8c] {
   flex: 0 0 264px;
   max-width: 264px;
   overflow-y: auto;
 }
-.avh-overview[data-v-580c5f77] {
+.avh-overview[data-v-54967e8c] {
   position: sticky;
   top: 0;
 }
 @media (max-width: 1100px) {
-.avh-body[data-v-580c5f77] {
+.avh-body[data-v-54967e8c] {
     flex-wrap: wrap;
 }
-.avh-nav[data-v-580c5f77],
-  .avh-side[data-v-580c5f77] {
+.avh-nav[data-v-54967e8c],
+  .avh-side[data-v-54967e8c] {
     flex: 1 1 auto;
     max-width: none;
 }

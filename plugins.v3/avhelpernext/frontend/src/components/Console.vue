@@ -211,6 +211,44 @@ watch(
   { immediate: true },
 )
 
+/**
+ * 数据台左栏的**数量角标**（老 `ui/index.html` 的 `#pillFavs` / `#pillSubs` /
+ * `#pillTasks` / `#pillQueue` 四颗，口径逐条照抄老 `ui/app.js` 的 `renderPills()`）：
+ *
+ * | 栏目 | 老 id | 老口径 | 这里取的 store 字段 |
+ * | --- | --- | --- | --- |
+ * | 我的演员 | `#pillFavs` | `S.favs.length` | `favs` |
+ * | 订阅 | `#pillSubs` | `S.subs.length` | `subs` |
+ * | 任务 | `#pillTasks` | `S.tasks` 里 `state === 'await'` 的条数 | `awaitTasks` |
+ * | 下载 | `#pillQueue` | `S.queue` 里 `state !== 'done'` 的条数 | `downloading` |
+ *
+ * 数据全部来自数据台 store，也就是壳已经在轮询的 `/bootstrap`（`useRuntimeInfo`，15 秒一轮，
+ * 页面不可见时暂停）灌进来的那一份 —— **不新增请求、也不新增轮询**。
+ * 「发现榜单」「站点搜索」照老实现**没有**角标（`badge` 为 `null`，模板里不渲染）。
+ *
+ * 计数为 0 时**照样显示 `0`**：老实现就是 `$('#pillX').textContent = n`，没有隐藏分支
+ * （只有顶栏 `#bellCount` 有 `.zero{display:none}`），所以这里只在 0 时加 `avh-pill--zero`
+ * 做视觉弱化，角标本身仍然画出来。
+ */
+interface NavBadge {
+  /** 角标文本（老实现是 `textContent = n`，非数字不参与格式化）。 */
+  count: number
+  /** `true` = 老 `.pill.warn` 配色（老实现只有「任务」栏是 warn）。 */
+  warn: boolean
+}
+
+const navBadges = computed<Record<string, NavBadge>>(() => ({
+  actors: { count: store.favs.value.length, warn: false },
+  subs: { count: store.subs.value.length, warn: false },
+  tasks: { count: store.awaitTasks.value, warn: true },
+  downloads: { count: store.downloading.value, warn: false },
+}))
+
+/** 数据台左栏条目 = 栏目 + 角标（`badge === null` = 这一栏不画角标）。 */
+const dataSections = computed<(SectionItem & { badge: NavBadge | null })[]>(() =>
+  DATA_SECTIONS.map(item => ({ ...item, badge: navBadges.value[item.key] ?? null })),
+)
+
 /** 设置台草稿：脏标记与保存顺序都在这里（设计文档 §5）。 */
 const draft = useSettingsDraft({
   api: currentApi(),
@@ -245,7 +283,6 @@ const {
   applyBootstrap,
   save: saveDraft,
   loadNotices,
-  clearNotices: clearNoticesDraft,
   cleanCache: cleanCacheDraft,
 } = draft
 
@@ -416,7 +453,15 @@ async function clearNotices(): Promise<void> {
   if (!ok) return
   noticeClearing.value = true
   try {
-    await clearNoticesDraft()
+    // 走 store 这条实现（与通知抽屉同一条）：清空后 store 的 notices 归零 → 顶栏角标**即时**消失。
+    // 只清设置台那份草稿的话，角标要等 ≤15s 的下一次 `/bootstrap` 才归零（缺口 G7）。
+    const result = await store.clearNotices()
+    if (!result.ok) {
+      toast.warning(result.message || '清空通知失败')
+      return
+    }
+    notices.value = []          // 设置台「通知」栏显示的就是这个 ref，顺手清掉，免得还列着旧条目
+    await refreshRuntime()
   } finally {
     noticeClearing.value = false
   }
@@ -560,14 +605,26 @@ onBeforeUnmount(() => {
         <v-list density="compact" nav :selected="[activeNavKey]" mandatory>
           <template v-if="!isSettings">
             <v-list-subheader>数据台</v-list-subheader>
+            <!--
+              数量角标（老 `nav .pill`）：`#append` 插槽画在标题右侧，与老 `<button>文字<span class="pill">`
+              的位置一致。「发现榜单」「站点搜索」的 `badge` 为 `null` → 不画，照老实现。
+            -->
             <v-list-item
-              v-for="item in DATA_SECTIONS"
+              v-for="item in dataSections"
               :key="item.key"
               :value="`data:${item.key}`"
               :prepend-icon="item.icon"
               :title="item.title"
               @click="pick(item)"
-            />
+            >
+              <template #append>
+                <span
+                  v-if="item.badge"
+                  class="avh-pill"
+                  :class="{ 'avh-pill--warn': item.badge.warn, 'avh-pill--zero': item.badge.count === 0 }"
+                >{{ item.badge.count }}</span>
+              </template>
+            </v-list-item>
           </template>
 
           <template v-else>
@@ -898,6 +955,33 @@ onBeforeUnmount(() => {
   text-align: center;
   color: #fff;
   background: rgb(var(--v-theme-error));
+}
+
+/* 左栏数量角标：几何值照抄老 `nav .pill`（`ui/app.css`）——
+   圆角 999px、字号 11px、内边距 `0 6px`、行高 16px、最小宽 16px、文字居中。
+   配色不搬老界面的写死值（`--acc2:#2f6fd0` / `--warn:#d29922` / `#fff` / `#2b2100`），
+   改走 Vuetify 主题变量：普通态 = 老那颗蓝（`primary`），warn 态 = 老那颗琥珀（`warning`）。 */
+.avh-pill {
+  display: inline-block;
+  min-width: 16px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  background: rgb(var(--v-theme-primary));
+  color: rgb(var(--v-theme-on-primary));
+}
+
+/* 老 `.pill.warn`：只有「任务」栏那一颗。 */
+.avh-pill--warn {
+  background: rgb(var(--v-theme-warning));
+  color: rgb(var(--v-theme-on-warning));
+}
+
+/* 计数为 0 也照画（老实现 `textContent = n`，不留空），只是弱化到不抢眼。 */
+.avh-pill--zero {
+  opacity: 0.55;
 }
 
 .avh-body {

@@ -2101,7 +2101,7 @@ const AboutPanel = /* @__PURE__ */ _export_sfc(_sfc_main$h, [["__scopeId", "data
 
 const {defineComponent:_defineComponent$g} = await importShared('vue');
 
-const {openBlock:_openBlock$g,createElementBlock:_createElementBlock$g,toDisplayString:_toDisplayString$g,normalizeClass:_normalizeClass$8} = await importShared('vue');
+const {openBlock:_openBlock$g,createElementBlock:_createElementBlock$g,toDisplayString:_toDisplayString$g,normalizeClass:_normalizeClass$9} = await importShared('vue');
 
 const _hoisted_1$g = ["src", "alt", "loading"];
 const _hoisted_2$g = {
@@ -2161,7 +2161,7 @@ const _sfc_main$g = /* @__PURE__ */ _defineComponent$g({
     }
     return (_ctx, _cache) => {
       return _openBlock$g(), _createElementBlock$g("div", {
-        class: _normalizeClass$8(["avh-thumb", `avh-thumb--${_ctx.variant}`])
+        class: _normalizeClass$9(["avh-thumb", `avh-thumb--${_ctx.variant}`])
       }, [
         !showPlaceholder.value ? (_openBlock$g(), _createElementBlock$g("img", {
           key: 0,
@@ -2224,7 +2224,7 @@ async function pumpThumbFill(api) {
 
 const {defineComponent:_defineComponent$f} = await importShared('vue');
 
-const {createVNode:_createVNode$c,toDisplayString:_toDisplayString$f,createElementVNode:_createElementVNode$f,openBlock:_openBlock$f,createElementBlock:_createElementBlock$f,createCommentVNode:_createCommentVNode$c,renderList:_renderList$9,Fragment:_Fragment$9,createTextVNode:_createTextVNode$b,normalizeClass:_normalizeClass$7,unref:_unref$1,resolveComponent:_resolveComponent$c,withCtx:_withCtx$c,createBlock:_createBlock$b} = await importShared('vue');
+const {createVNode:_createVNode$c,toDisplayString:_toDisplayString$f,createElementVNode:_createElementVNode$f,openBlock:_openBlock$f,createElementBlock:_createElementBlock$f,createCommentVNode:_createCommentVNode$c,renderList:_renderList$9,Fragment:_Fragment$9,createTextVNode:_createTextVNode$b,normalizeClass:_normalizeClass$8,unref:_unref$1,resolveComponent:_resolveComponent$c,withCtx:_withCtx$c,createBlock:_createBlock$b} = await importShared('vue');
 
 const _hoisted_1$f = { class: "avh-cand" };
 const _hoisted_2$f = { class: "avh-cand__head" };
@@ -2374,7 +2374,7 @@ const _sfc_main$f = /* @__PURE__ */ _defineComponent$f({
                   }, " — PT 没有合格候选，以下为 BT 磁力兜底 — ", -1)
                 ]))) : (_openBlock$f(), _createElementBlock$f(_Fragment$9, { key: 1 }, [
                   _createElementVNode$f("tr", {
-                    class: _normalizeClass$7(rowClass(row.cand))
+                    class: _normalizeClass$8(rowClass(row.cand))
                   }, [
                     _createElementVNode$f("td", null, [
                       row.cand.src === "BT" ? (_openBlock$f(), _createElementBlock$f("span", _hoisted_8$8, "BT")) : _createCommentVNode$c("", true),
@@ -2383,12 +2383,12 @@ const _sfc_main$f = /* @__PURE__ */ _defineComponent$f({
                     _createElementVNode$f("td", null, _toDisplayString$f(row.cand.spec || ""), 1),
                     _createElementVNode$f("td", null, [
                       _createElementVNode$f("span", {
-                        class: _normalizeClass$7(["avh-tag", row.cand.cnsub ? "avh-tag--on" : ""])
+                        class: _normalizeClass$8(["avh-tag", row.cand.cnsub ? "avh-tag--on" : ""])
                       }, _toDisplayString$f(row.cand.cnsub ? "有" : "无"), 3)
                     ]),
                     _createElementVNode$f("td", null, [
                       _createElementVNode$f("span", {
-                        class: _normalizeClass$7(["avh-tag", row.cand.uncensored ? "avh-tag--uc" : ""])
+                        class: _normalizeClass$8(["avh-tag", row.cand.uncensored ? "avh-tag--uc" : ""])
                       }, _toDisplayString$f(row.cand.uncensored ? "破解" : "—"), 3)
                     ]),
                     _createElementVNode$f("td", null, _toDisplayString$f(row.cand.size || ""), 1),
@@ -2401,7 +2401,7 @@ const _sfc_main$f = /* @__PURE__ */ _defineComponent$f({
                       title: row.cand.breakdown || ""
                     }, [
                       _createElementVNode$f("span", {
-                        class: _normalizeClass$7(["avh-score", `avh-score--${_unref$1(scoreLevel)(row.cand.score, isPass(row.cand))}`])
+                        class: _normalizeClass$8(["avh-score", `avh-score--${_unref$1(scoreLevel)(row.cand.score, isPass(row.cand))}`])
                       }, _toDisplayString$f(scoreText(row.cand)), 3)
                     ], 8, _hoisted_11$7),
                     _createElementVNode$f("td", null, [
@@ -2435,7 +2435,7 @@ const _sfc_main$f = /* @__PURE__ */ _defineComponent$f({
                   ], 2),
                   titleOf(row.cand) ? (_openBlock$f(), _createElementBlock$f("tr", {
                     key: 0,
-                    class: _normalizeClass$7(["avh-cand__sub", ...rowClass(row.cand)])
+                    class: _normalizeClass$8(["avh-cand__sub", ...rowClass(row.cand)])
                   }, [
                     _createElementVNode$f("td", _hoisted_12$5, [
                       _createElementVNode$f("div", {
@@ -2806,7 +2806,7 @@ const SiteSearchView = /* @__PURE__ */ _export_sfc(_sfc_main$c, [["__scopeId", "
 
 const {defineComponent:_defineComponent$b} = await importShared('vue');
 
-const {createElementVNode:_createElementVNode$b,createTextVNode:_createTextVNode$8,resolveComponent:_resolveComponent$9,withCtx:_withCtx$9,createVNode:_createVNode$9,renderList:_renderList$8,Fragment:_Fragment$8,openBlock:_openBlock$b,createElementBlock:_createElementBlock$b,toDisplayString:_toDisplayString$b,normalizeStyle:_normalizeStyle$2,normalizeClass:_normalizeClass$6,createBlock:_createBlock$9} = await importShared('vue');
+const {createElementVNode:_createElementVNode$b,createTextVNode:_createTextVNode$8,resolveComponent:_resolveComponent$9,withCtx:_withCtx$9,createVNode:_createVNode$9,renderList:_renderList$8,Fragment:_Fragment$8,openBlock:_openBlock$b,createElementBlock:_createElementBlock$b,toDisplayString:_toDisplayString$b,normalizeStyle:_normalizeStyle$2,normalizeClass:_normalizeClass$7,createBlock:_createBlock$9} = await importShared('vue');
 
 const _hoisted_1$b = { class: "avh-downloads" };
 const _hoisted_2$b = { class: "avh-downloads__toolbar" };
@@ -2933,7 +2933,7 @@ const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
                 ])
               ]),
               _createElementVNode$b("div", {
-                class: _normalizeClass$6(["avh-bar", { "avh-bar--done": isDone(item) }])
+                class: _normalizeClass$7(["avh-bar", { "avh-bar--done": isDone(item) }])
               }, [
                 _createElementVNode$b("i", {
                   style: _normalizeStyle$2({ width: `${progressOf(item)}%` })
@@ -3085,7 +3085,7 @@ const TasksView = /* @__PURE__ */ _export_sfc(_sfc_main$a, [["__scopeId", "data-
 
 const {defineComponent:_defineComponent$9} = await importShared('vue');
 
-const {toDisplayString:_toDisplayString$9,createElementVNode:_createElementVNode$9,createTextVNode:_createTextVNode$6,resolveComponent:_resolveComponent$7,withCtx:_withCtx$7,createVNode:_createVNode$7,renderList:_renderList$6,Fragment:_Fragment$6,openBlock:_openBlock$9,createElementBlock:_createElementBlock$9,normalizeClass:_normalizeClass$5,createBlock:_createBlock$7} = await importShared('vue');
+const {toDisplayString:_toDisplayString$9,createElementVNode:_createElementVNode$9,createTextVNode:_createTextVNode$6,resolveComponent:_resolveComponent$7,withCtx:_withCtx$7,createVNode:_createVNode$7,renderList:_renderList$6,Fragment:_Fragment$6,openBlock:_openBlock$9,createElementBlock:_createElementBlock$9,normalizeClass:_normalizeClass$6,createBlock:_createBlock$7} = await importShared('vue');
 
 const _hoisted_1$9 = { class: "avh-subs" };
 const _hoisted_2$9 = { class: "avh-subs__toolbar" };
@@ -3275,7 +3275,7 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
               }, [
                 _createElementVNode$9("span", _hoisted_8$6, _toDisplayString$9(row.label), 1),
                 _createElementVNode$9("span", {
-                  class: _normalizeClass$5(["avh-subs__rulevalue", { "avh-subs__rulevalue--on": row.on }])
+                  class: _normalizeClass$6(["avh-subs__rulevalue", { "avh-subs__rulevalue--on": row.on }])
                 }, _toDisplayString$9(row.text), 3)
               ]);
             }), 128))
@@ -3340,7 +3340,7 @@ const SubsView = /* @__PURE__ */ _export_sfc(_sfc_main$9, [["__scopeId", "data-v
 
 const {defineComponent:_defineComponent$8} = await importShared('vue');
 
-const {openBlock:_openBlock$8,createElementBlock:_createElementBlock$8,createCommentVNode:_createCommentVNode$8,createVNode:_createVNode$6,toDisplayString:_toDisplayString$8,createElementVNode:_createElementVNode$8,normalizeClass:_normalizeClass$4} = await importShared('vue');
+const {openBlock:_openBlock$8,createElementBlock:_createElementBlock$8,createCommentVNode:_createCommentVNode$8,createVNode:_createVNode$6,toDisplayString:_toDisplayString$8,createElementVNode:_createElementVNode$8,normalizeClass:_normalizeClass$5} = await importShared('vue');
 
 const _hoisted_1$8 = ["title"];
 const _hoisted_2$8 = {
@@ -3378,7 +3378,7 @@ const _sfc_main$8 = /* @__PURE__ */ _defineComponent$8({
     }
     return (_ctx, _cache) => {
       return _openBlock$8(), _createElementBlock$8("div", {
-        class: _normalizeClass$4(["avh-actor", { "avh-actor--picker": _ctx.picker, "avh-actor--faved": _ctx.picker && _ctx.favorited }]),
+        class: _normalizeClass$5(["avh-actor", { "avh-actor--picker": _ctx.picker, "avh-actor--faved": _ctx.picker && _ctx.favorited }]),
         title: _ctx.name,
         onClick: onSelect
       }, [
@@ -3394,7 +3394,7 @@ const _sfc_main$8 = /* @__PURE__ */ _defineComponent$8({
         _createElementVNode$8("div", _hoisted_4$7, _toDisplayString$8(_ctx.zh || ""), 1),
         _ctx.picker ? (_openBlock$8(), _createElementBlock$8("div", _hoisted_5$7, [
           _createElementVNode$8("span", {
-            class: _normalizeClass$4(["avh-tag", _ctx.favorited ? "avh-tag--on" : ""])
+            class: _normalizeClass$5(["avh-tag", _ctx.favorited ? "avh-tag--on" : ""])
           }, _toDisplayString$8(_ctx.favorited ? "✓ 已收藏" : "➕ 收藏"), 3)
         ])) : _createCommentVNode$8("", true)
       ], 10, _hoisted_1$8);
@@ -3410,7 +3410,7 @@ function cssUrl(value) {
 
 const {defineComponent:_defineComponent$7} = await importShared('vue');
 
-const {createTextVNode:_createTextVNode$5,resolveComponent:_resolveComponent$6,withCtx:_withCtx$6,createVNode:_createVNode$5,createElementVNode:_createElementVNode$7,openBlock:_openBlock$7,createElementBlock:_createElementBlock$7,createCommentVNode:_createCommentVNode$7,createBlock:_createBlock$6,toDisplayString:_toDisplayString$7,normalizeClass:_normalizeClass$3,renderList:_renderList$5,Fragment:_Fragment$5,normalizeStyle:_normalizeStyle$1} = await importShared('vue');
+const {createTextVNode:_createTextVNode$5,resolveComponent:_resolveComponent$6,withCtx:_withCtx$6,createVNode:_createVNode$5,createElementVNode:_createElementVNode$7,openBlock:_openBlock$7,createElementBlock:_createElementBlock$7,createCommentVNode:_createCommentVNode$7,createBlock:_createBlock$6,toDisplayString:_toDisplayString$7,normalizeClass:_normalizeClass$4,renderList:_renderList$5,Fragment:_Fragment$5,normalizeStyle:_normalizeStyle$1} = await importShared('vue');
 
 const _hoisted_1$7 = { class: "avh-actors__toolbar" };
 const _hoisted_2$7 = {
@@ -3905,14 +3905,14 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
             yearInfo.value.years.length > 1 ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_18$1, [
               _createElementVNode$7("button", {
                 type: "button",
-                class: _normalizeClass$3({ "avh-filmyears__on": !year.value }),
+                class: _normalizeClass$4({ "avh-filmyears__on": !year.value }),
                 onClick: _cache[0] || (_cache[0] = ($event) => pickYear(""))
               }, "全部 " + _toDisplayString$7(movies.value.length), 3),
               (_openBlock$7(true), _createElementBlock$7(_Fragment$5, null, _renderList$5(yearInfo.value.years, (y) => {
                 return _openBlock$7(), _createElementBlock$7("button", {
                   key: y,
                   type: "button",
-                  class: _normalizeClass$3({ "avh-filmyears__on": year.value === y }),
+                  class: _normalizeClass$4({ "avh-filmyears__on": year.value === y }),
                   onClick: ($event) => pickYear(y)
                 }, [
                   _createTextVNode$5(_toDisplayString$7(y), 1),
@@ -3946,7 +3946,7 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
                       _createElementVNode$7("div", _hoisted_26$1, [
                         _createElementVNode$7("span", null, _toDisplayString$7(mv.date || ""), 1),
                         _createElementVNode$7("span", {
-                          class: _normalizeClass$3(["avh-tag", { "avh-tag--on": !!mv.cnsub }])
+                          class: _normalizeClass$4(["avh-tag", { "avh-tag--on": !!mv.cnsub }])
                         }, _toDisplayString$7(mv.cnsub ? "中字" : "无中字"), 3),
                         _createElementVNode$7("span", null, "🧲 " + _toDisplayString$7(mv.magnets || 0), 1),
                         mv.lib ? (_openBlock$7(), _createElementBlock$7("span", _hoisted_27$1, "已入库")) : _createCommentVNode$7("", true)
@@ -4262,7 +4262,7 @@ function prefetchCards(api, movies, n = PREFETCH_N) {
 
 const {defineComponent:_defineComponent$5} = await importShared('vue');
 
-const {openBlock:_openBlock$5,createElementBlock:_createElementBlock$5,createCommentVNode:_createCommentVNode$5,renderList:_renderList$4,Fragment:_Fragment$4,toDisplayString:_toDisplayString$5,normalizeClass:_normalizeClass$2,createElementVNode:_createElementVNode$5,createTextVNode:_createTextVNode$4,resolveComponent:_resolveComponent$5,withCtx:_withCtx$5,createBlock:_createBlock$5} = await importShared('vue');
+const {openBlock:_openBlock$5,createElementBlock:_createElementBlock$5,createCommentVNode:_createCommentVNode$5,renderList:_renderList$4,Fragment:_Fragment$4,toDisplayString:_toDisplayString$5,normalizeClass:_normalizeClass$3,createElementVNode:_createElementVNode$5,createTextVNode:_createTextVNode$4,resolveComponent:_resolveComponent$5,withCtx:_withCtx$5,createBlock:_createBlock$5} = await importShared('vue');
 
 const _hoisted_1$5 = { class: "avh-discover" };
 const _hoisted_2$5 = {
@@ -4425,7 +4425,7 @@ const _sfc_main$5 = /* @__PURE__ */ _defineComponent$5({
               (_openBlock$5(), _createElementBlock$5(_Fragment$4, null, _renderList$4(PERIOD_TABS, (item) => {
                 return _createElementVNode$5("button", {
                   key: item.key,
-                  class: _normalizeClass$2({ "avh-tabs__on": item.key === period.value }),
+                  class: _normalizeClass$3({ "avh-tabs__on": item.key === period.value }),
                   onClick: ($event) => pickPeriod(item.key)
                 }, _toDisplayString$5(item.name), 11, _hoisted_5$4);
               }), 64))
@@ -4434,7 +4434,7 @@ const _sfc_main$5 = /* @__PURE__ */ _defineComponent$5({
               (_openBlock$5(), _createElementBlock$5(_Fragment$4, null, _renderList$4(ZONE_TABS, (item) => {
                 return _createElementVNode$5("button", {
                   key: item.key,
-                  class: _normalizeClass$2({ "avh-tabs__on": item.key === kind.value }),
+                  class: _normalizeClass$3({ "avh-tabs__on": item.key === kind.value }),
                   onClick: ($event) => pickKind(item.key)
                 }, _toDisplayString$5(item.name), 11, _hoisted_7$4);
               }), 64))
@@ -4606,7 +4606,7 @@ const Lightbox = /* @__PURE__ */ _export_sfc(_sfc_main$4, [["__scopeId", "data-v
 
 const {defineComponent:_defineComponent$3} = await importShared('vue');
 
-const {toDisplayString:_toDisplayString$3,createElementVNode:_createElementVNode$3,createTextVNode:_createTextVNode$3,resolveComponent:_resolveComponent$3,withCtx:_withCtx$3,openBlock:_openBlock$3,createBlock:_createBlock$3,createCommentVNode:_createCommentVNode$3,createVNode:_createVNode$3,createElementBlock:_createElementBlock$3,Fragment:_Fragment$3,renderList:_renderList$3,normalizeClass:_normalizeClass$1,normalizeStyle:_normalizeStyle} = await importShared('vue');
+const {toDisplayString:_toDisplayString$3,createElementVNode:_createElementVNode$3,createTextVNode:_createTextVNode$3,resolveComponent:_resolveComponent$3,withCtx:_withCtx$3,openBlock:_openBlock$3,createBlock:_createBlock$3,createCommentVNode:_createCommentVNode$3,createVNode:_createVNode$3,createElementBlock:_createElementBlock$3,Fragment:_Fragment$3,renderList:_renderList$3,normalizeClass:_normalizeClass$2,normalizeStyle:_normalizeStyle} = await importShared('vue');
 
 const _hoisted_1$3 = { class: "avh-detail__head" };
 const _hoisted_2$3 = { class: "avh-detail__title" };
@@ -5250,7 +5250,7 @@ const _sfc_main$3 = /* @__PURE__ */ _defineComponent$3({
                 previews.value.length ? (_openBlock$3(true), _createElementBlock$3(_Fragment$3, { key: 0 }, _renderList$3(previews.value, (shot, index) => {
                   return _openBlock$3(), _createElementBlock$3("div", {
                     key: `${index}#${String(shot).slice(-24)}`,
-                    class: _normalizeClass$1(["avh-shot", { "avh-shot--blur": !!shot }]),
+                    class: _normalizeClass$2(["avh-shot", { "avh-shot--blur": !!shot }]),
                     style: _normalizeStyle(shotStyle(shot)),
                     onClick: ($event) => openShot(index)
                   }, [
@@ -5275,7 +5275,7 @@ const _sfc_main$3 = /* @__PURE__ */ _defineComponent$3({
                       _createElementVNode$3("div", _hoisted_29, _toDisplayString$3(magnet.name || magnet.hash || "未命名"), 1),
                       _createElementVNode$3("div", _hoisted_30, [
                         _createElementVNode$3("span", {
-                          class: _normalizeClass$1(["avh-tag", { "avh-tag--on": !!magnet.cnsub }])
+                          class: _normalizeClass$2(["avh-tag", { "avh-tag--on": !!magnet.cnsub }])
                         }, _toDisplayString$3(magnet.cnsub ? "中字" : "无中字"), 3),
                         magnet.hd ? (_openBlock$3(), _createElementBlock$3("span", _hoisted_31, "高清")) : _createCommentVNode$3("", true),
                         magnet.size ? (_openBlock$3(), _createElementBlock$3("span", _hoisted_32, _toDisplayString$3(magnet.size), 1)) : _createCommentVNode$3("", true)
@@ -5381,7 +5381,7 @@ const DetailDrawer = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "da
 
 const {defineComponent:_defineComponent$2} = await importShared('vue');
 
-const {createElementVNode:_createElementVNode$2,createTextVNode:_createTextVNode$2,resolveComponent:_resolveComponent$2,withCtx:_withCtx$2,createVNode:_createVNode$2,renderList:_renderList$2,Fragment:_Fragment$2,openBlock:_openBlock$2,createElementBlock:_createElementBlock$2,toDisplayString:_toDisplayString$2,createCommentVNode:_createCommentVNode$2,createBlock:_createBlock$2,normalizeClass:_normalizeClass} = await importShared('vue');
+const {createElementVNode:_createElementVNode$2,createTextVNode:_createTextVNode$2,resolveComponent:_resolveComponent$2,withCtx:_withCtx$2,createVNode:_createVNode$2,renderList:_renderList$2,Fragment:_Fragment$2,openBlock:_openBlock$2,createElementBlock:_createElementBlock$2,toDisplayString:_toDisplayString$2,createCommentVNode:_createCommentVNode$2,createBlock:_createBlock$2,normalizeClass:_normalizeClass$1} = await importShared('vue');
 
 const _hoisted_1$2 = { class: "avh-notify__head" };
 const _hoisted_2$2 = { class: "avh-notify__bub" };
@@ -5506,7 +5506,7 @@ const _sfc_main$2 = /* @__PURE__ */ _defineComponent$2({
             rows.value.length ? (_openBlock$2(true), _createElementBlock$2(_Fragment$2, { key: 0 }, _renderList$2(rows.value, (row) => {
               return _openBlock$2(), _createElementBlock$2("div", {
                 key: row.key,
-                class: _normalizeClass(["avh-notify__msg", row.kind ? `avh-notify__msg--${row.kind}` : ""])
+                class: _normalizeClass$1(["avh-notify__msg", row.kind ? `avh-notify__msg--${row.kind}` : ""])
               }, [
                 _cache[6] || (_cache[6] = _createElementVNode$2("div", { class: "avh-notify__ico" }, "🤖", -1)),
                 _createElementVNode$2("div", _hoisted_2$2, [
@@ -6179,7 +6179,7 @@ function usePluginStore(api) {
 
 const {defineComponent:_defineComponent} = await importShared('vue');
 
-const {resolveComponent:_resolveComponent,createVNode:_createVNode,createElementVNode:_createElementVNode,toDisplayString:_toDisplayString,openBlock:_openBlock,createElementBlock:_createElementBlock,createCommentVNode:_createCommentVNode,unref:_unref,createTextVNode:_createTextVNode,withCtx:_withCtx,createBlock:_createBlock,withKeys:_withKeys,renderList:_renderList,Fragment:_Fragment,resolveDynamicComponent:_resolveDynamicComponent} = await importShared('vue');
+const {resolveComponent:_resolveComponent,createVNode:_createVNode,createElementVNode:_createElementVNode,toDisplayString:_toDisplayString,openBlock:_openBlock,createElementBlock:_createElementBlock,createCommentVNode:_createCommentVNode,unref:_unref,createTextVNode:_createTextVNode,withCtx:_withCtx,createBlock:_createBlock,withKeys:_withKeys,renderList:_renderList,Fragment:_Fragment,normalizeClass:_normalizeClass,resolveDynamicComponent:_resolveDynamicComponent} = await importShared('vue');
 
 const _hoisted_1 = { class: "avh-console" };
 const _hoisted_2 = {
@@ -6300,6 +6300,15 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
       },
       { immediate: true }
     );
+    const navBadges = computed(() => ({
+      actors: { count: store.favs.value.length, warn: false },
+      subs: { count: store.subs.value.length, warn: false },
+      tasks: { count: store.awaitTasks.value, warn: true },
+      downloads: { count: store.downloading.value, warn: false }
+    }));
+    const dataSections = computed(
+      () => DATA_SECTIONS.map((item) => ({ ...item, badge: navBadges.value[item.key] ?? null }))
+    );
     const draft = useSettingsDraft({
       api: currentApi(),
       initialConfig: props.initialConfig,
@@ -6328,7 +6337,6 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
       applyBootstrap,
       save: saveDraft,
       loadNotices,
-      clearNotices: clearNoticesDraft,
       cleanCache: cleanCacheDraft
     } = draft;
     watch(bootstrap, (value) => applyBootstrap(value), { immediate: true });
@@ -6452,7 +6460,13 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
       if (!ok) return;
       noticeClearing.value = true;
       try {
-        await clearNoticesDraft();
+        const result = await store.clearNotices();
+        if (!result.ok) {
+          toast.warning(result.message || "清空通知失败");
+          return;
+        }
+        notices.value = [];
+        await refreshRuntime();
       } finally {
         noticeClearing.value = false;
       }
@@ -6637,15 +6651,23 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                     ])),
                     _: 1
                   }),
-                  (_openBlock(), _createElementBlock(_Fragment, null, _renderList(DATA_SECTIONS, (item) => {
-                    return _createVNode(_component_v_list_item, {
+                  (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(dataSections.value, (item) => {
+                    return _openBlock(), _createBlock(_component_v_list_item, {
                       key: item.key,
                       value: `data:${item.key}`,
                       "prepend-icon": item.icon,
                       title: item.title,
                       onClick: ($event) => pick(item)
-                    }, null, 8, ["value", "prepend-icon", "title", "onClick"]);
-                  }), 64))
+                    }, {
+                      append: _withCtx(() => [
+                        item.badge ? (_openBlock(), _createElementBlock("span", {
+                          key: 0,
+                          class: _normalizeClass(["avh-pill", { "avh-pill--warn": item.badge.warn, "avh-pill--zero": item.badge.count === 0 }])
+                        }, _toDisplayString(item.badge.count), 3)) : _createCommentVNode("", true)
+                      ]),
+                      _: 2
+                    }, 1032, ["value", "prepend-icon", "title", "onClick"]);
+                  }), 128))
                 ], 64)) : (_openBlock(), _createElementBlock(_Fragment, { key: 1 }, [
                   _createVNode(_component_v_list_subheader, null, {
                     default: _withCtx(() => _cache[20] || (_cache[20] = [
@@ -7004,6 +7026,6 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
   }
 });
 
-const Console = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-580c5f77"]]);
+const Console = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-54967e8c"]]);
 
 export { Console as C, consoleEmits as c };
