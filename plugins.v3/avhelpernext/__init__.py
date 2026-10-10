@@ -254,10 +254,13 @@ class AVHelperNext(_PluginBase):
                 {"name": a.get("name"), "avatar": self.image_url(a.get("avatar_url"))}
                 for a in (detail.get("actors") or []) if isinstance(a, dict) and a.get("name")
             ]
-            info.directors = [detail.get("director_name")] if detail.get("director_name") else []
-            info.production_companies = (
-                [detail.get("maker_name")] if detail.get("maker_name") else []
-            )
+            # v3 的响应模型要求这两项是**对象列表**（`MediaPerson` / `MediaCompany`）。
+            # 塞纯字符串会让宿主 `GET /api/v1/media/{id}` 直接 500（ResponseValidationError：
+            # `production_companies[0]` 收到 'S1 NO.1 STYLE' 不是对象）——2026-10-10 实测复现。
+            director = str(detail.get("director_name") or "").strip()
+            maker = str(detail.get("maker_name") or "").strip()
+            info.directors = [{"name": director}] if director else []
+            info.production_companies = [{"name": maker}] if maker else []
             self.remember_actor([str(media_id)], (info.actors or [{}])[0].get("name") or "")
             return info
         except Exception as error:  # 识别失败必须让原生模块继续工作
