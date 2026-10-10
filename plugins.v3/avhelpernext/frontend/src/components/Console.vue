@@ -20,6 +20,8 @@ import NotifyPanel from './settings/NotifyPanel.vue'
 import LibraryPanel from './settings/LibraryPanel.vue'
 import RuntimePanel from './settings/RuntimePanel.vue'
 import AboutPanel from './settings/AboutPanel.vue'
+import SiteSearchView from './views/SiteSearchView.vue'
+import { usePluginStore } from '../composables/usePluginStore'
 
 /** 壳只有两种模式：`data` = 数据台（iframe），`settings` = 设置台（七个栏目）。 */
 type ConsoleMode = 'data' | 'settings'
@@ -87,6 +89,19 @@ function currentApi(): PluginApi {
 
 const runtime = useRuntimeInfo(currentApi())
 const { data: bootstrap, overview, updatedAt, error: runtimeError, loading: runtimeLoading, refresh: refreshRuntime } = runtime
+
+/**
+ * 数据台 store：原生视图共用一份状态（S6 逐个把 iframe 里的视图搬过来）。
+ * 用壳已经拉到的 `/bootstrap` 灌一次（`hydrate` 不发请求），避免和右栏概况重复拉同一个端点。
+ */
+const store = usePluginStore(currentApi())
+watch(
+  bootstrap,
+  (payload) => {
+    if (payload) store.hydrate(payload as Record<string, unknown>)
+  },
+  { immediate: true },
+)
 
 /** 设置台草稿：脏标记与保存顺序都在这里（设计文档 §5）。 */
 const draft = useSettingsDraft({
@@ -355,8 +370,18 @@ onBeforeUnmount(() => {
       <!-- 内容区 -->
       <section class="avh-content">
         <template v-if="!isSettings">
+          <!-- S6 增量替换：已原生化的栏目走 Vue 组件，其余仍由 iframe 承载被嵌应用。 -->
+          <SiteSearchView
+            v-if="section === 'sitesearch' && framePluginId"
+            :store="store"
+            :plugin-id="framePluginId"
+            :api="currentApi()"
+            :toast="injectedToast"
+            @switch="emit('switch')"
+            @refresh-side="refreshRuntime()"
+          />
           <AppFrame
-            v-if="framePluginId"
+            v-else-if="framePluginId"
             :plugin-id="framePluginId"
             :section-key="section"
             :version="version"

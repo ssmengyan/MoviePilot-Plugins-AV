@@ -170,6 +170,18 @@ function bindUi(){
   $('#qInput').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(e.target.value); });
 }
 
+/* ============ 过渡：让外部（联邦壳 AppFrame）能指定首屏栏目 ============
+   壳的数据台在 S6 期间仍是 iframe，点左栏会重挂 iframe；带上 ?view=<key> 就落在对应栏目，
+   不再每次都回到「发现榜单」。**只读一次、只认白名单**：
+   - 缺省 / 空 / 非法值一律不写 S.view，行为与没有这个参数时逐字节一致（A/B 工装靠这条）；
+   - 取值与 #nav 的 data-v 一一对应（sites = 站点搜索，见 index.html 的导航按钮）。 */
+const VIEW_KEYS = ['discover', 'actors', 'subs', 'tasks', 'downloads', 'sites'];
+function applyViewQuery(){
+  let key = '';
+  try { key = new URLSearchParams(location.search).get('view') || ''; } catch (e) { return; }
+  if (VIEW_KEYS.indexOf(key) >= 0) S.view = key;
+}
+
 /* 挂到 window：HTML 内联事件（onclick）需要 AVH.openLb / AVH.closeAll */
 window.AVH = {
   S:S, render:render, closeAll:closeAll, openMovie:openMovie, openActor:openActor,
@@ -179,6 +191,7 @@ window.AVH = {
 };
 bindTokenEvents();
 bindUi();
+applyViewQuery();   // 必须在第一次 render() 之前：否则会先画一帧「发现榜单」
 render();
 startTaskPolling();
 bootAndRender();

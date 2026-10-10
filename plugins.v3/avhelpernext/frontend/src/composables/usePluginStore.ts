@@ -13,6 +13,9 @@
  * 2. 老实现 `applyBootstrap` 会在规则站点为空时**就地改写** `S.rule.sites/prefSites`；
  *    这里保持后端返回的规则原样（空数组 = 全部站点，语义本来就对），不改写。
  * 3. 老实现每个动作各自 `toast`；这里只返回 `ActionResult`，由视图决定文案与提示方式。
+ * 4. `refresh()` 有一条公开的兄弟 `hydrate(payload)`：壳/设置台已经在轮询 `/bootstrap`，
+ *    数据台视图读的是同一份数据，没必要第二次打同一个端点（`refresh()` 内部就是
+ *    「取一次 + hydrate」，解析规则只有一份）。
  */
 import { computed, ref, shallowRef, type Ref } from 'vue'
 import { errorText } from './usePluginApi'
@@ -196,16 +199,66 @@ export function usePluginStore(api: PluginApi) {
     return sites.value.length > 0
   }
 
+  /**
+   * 用一份已有的 `/bootstrap` 载荷灌状态（**不发请求**）。
+   *
+   * 用途：壳（`Console.vue`）与设置台各自已经在拉 `/bootstrap`（`useRuntimeInfo` 15s 轮询），
+   * 数据台视图读的同一份数据没必要再打一次；解析规则与 `refresh()` 完全一致
+   * （`refresh()` 现在就是「取一次 + hydrate」）。
+   *
+   * :param payload: 裸载荷或 `{success, data}` 信封都认。
+   * :return: 是否成功灌入（信封 `success === false` 时返回 `false` 并把文案写进 `error`）。
+   */
+  async function hydrate(payload: unknown): Promise<boolean> {
+    const envelope =
+      payload && typeof payload === 'object' && 'data' in (payload as Record<string, unknown>)
+        ? (payload as Record<string, any>)
+        : null
+    if (envelope && envelope.success === false) {
+      error.value = textOf(envelope) || 'bootstrap 失败'
+      return false
+    }
+    const data = ((envelope ? envelope.data : payload) || {}) as BootstrapPayload
+
+    if (typeof data.enabled === 'boolean') enabled.value = data.enabled
+
+    const nextSites = listOf<SiteOption>(data.sites)
+    if (nextSites?.length) sites.value = nextSites
+    const nextFavs = listOf<FavActor>(data.favs)
+    if (nextFavs) favs.value = nextFavs
+    const nextSubs = listOf<Subscription>(data.subs)
+    if (nextSubs) subs.value = nextSubs
+    const nextTasks = listOf<SearchTask>(data.tasks)
+    if (nextTasks) tasks.value = nextTasks
+    const nextQueue = listOf<QueueItem>(data.queue)
+    if (nextQueue) queue.value = nextQueue
+    const nextNotices = listOf<NoticeItem>(data.notices)
+    if (nextNotices) notices.value = nextNotices
+    const nextKnown = listOf<string>(data.known)
+    if (nextKnown) known.value = new Set(nextKnown.map(item => String(item)))
+    if (data.defaultRule && typeof data.defaultRule === 'object') {
+      ruleRaw.value = data.defaultRule
+      rule.value = toRule(data.defaultRule)
+    }
+
+    await ensureSites()
+    error.value = ''
+    booted.value = true
+    const now = new Date()
+    updatedAt.value = [now.getHours(), now.getMinutes(), now.getSeconds()]
+      .map(part => String(part).padStart(2, '0'))
+      .join(':')
+    return true
+  }
+
   // ---------- 刷新 ----------
   /**
    * 拉 `plugin/bootstrap` 灌满全部状态。
    *
    * 失败时**保留**已有数据（老实现同样只是记 `S.bootError` 并不清空），
    * 供界面继续显示上一份快照并提示错误。
-   *
-   * :param hydrateRule: 为 `false` 时不动 `rule`（设置台正在编辑草稿的场景）。
    */
-  async function refresh(options: { hydrateRule?: boolean } = {}): Promise<boolean> {
+  async function refresh(): Promise<boolean> {
     if (loading.value) return false
     loading.value = true
     try {
@@ -214,36 +267,7 @@ export function usePluginStore(api: PluginApi) {
         error.value = outcome.message || 'bootstrap 失败'
         return false
       }
-      const payload = (outcome.res.data ?? outcome.res) as BootstrapPayload
-      if (typeof payload.enabled === 'boolean') enabled.value = payload.enabled
-
-      const nextSites = listOf<SiteOption>(payload.sites)
-      if (nextSites?.length) sites.value = nextSites
-      const nextFavs = listOf<FavActor>(payload.favs)
-      if (nextFavs) favs.value = nextFavs
-      const nextSubs = listOf<Subscription>(payload.subs)
-      if (nextSubs) subs.value = nextSubs
-      const nextTasks = listOf<SearchTask>(payload.tasks)
-      if (nextTasks) tasks.value = nextTasks
-      const nextQueue = listOf<QueueItem>(payload.queue)
-      if (nextQueue) queue.value = nextQueue
-      const nextNotices = listOf<NoticeItem>(payload.notices)
-      if (nextNotices) notices.value = nextNotices
-      const nextKnown = listOf<string>(payload.known)
-      if (nextKnown) known.value = new Set(nextKnown.map(item => String(item)))
-      if (options.hydrateRule !== false && payload.defaultRule && typeof payload.defaultRule === 'object') {
-        ruleRaw.value = payload.defaultRule
-        rule.value = toRule(payload.defaultRule)
-      }
-
-      await ensureSites()
-      error.value = ''
-      booted.value = true
-      const now = new Date()
-      updatedAt.value = [now.getHours(), now.getMinutes(), now.getSeconds()]
-        .map(part => String(part).padStart(2, '0'))
-        .join(':')
-      return true
+      return await hydrate(outcome.res)
     } finally {
       loading.value = false
     }
@@ -522,6 +546,8 @@ export function usePluginStore(api: PluginApi) {
     downloading,
     // 动作
     refresh,
+    /** 用壳已经拉到的 `/bootstrap` 载荷灌状态（不发请求，S6 站点搜索视图靠它拿 `rule.sites`）。 */
+    hydrate,
     refreshTasks,
     ensureSites,
     runCheck,

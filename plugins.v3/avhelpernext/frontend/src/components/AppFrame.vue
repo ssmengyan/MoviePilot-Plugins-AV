@@ -9,6 +9,9 @@ import { computed } from 'vue'
  *   在无尾斜杠时会被解析成 `/…/app.js`（少一层），模块直接 404。
  * - 高度沿用现有实现的 `78vh`（设计文档 §7 风险：改 `calc(100vh-…)` 需真机调）。
  * - `border: 0` 去 iframe 默认边框。
+ * - 查询串同时带 `v`（版本，破缓存）与 `view`（栏目 key）：被嵌应用 `ui/app.js` 启动时读一次
+ *   `?view=`，命中白名单就落在对应栏目（S6 过渡期，让左栏点击"打开就落在那一栏"）。
+ *   用 `URLSearchParams` 拼，顺序固定 `v` → `view`，值与 key 都做 encode。
  */
 const props = withDefaults(
   defineProps<{
@@ -23,9 +26,11 @@ const props = withDefaults(
 )
 
 const src = computed(() => {
-  const base = `/api/v1/plugin/${props.pluginId}/ui/`
-  const query = props.version ? `?v=${encodeURIComponent(props.version)}` : ''
-  return `${base}${query}`
+  const params = new URLSearchParams()
+  if (props.version) params.set('v', props.version)
+  if (props.sectionKey) params.set('view', props.sectionKey)
+  const query = params.toString()
+  return `/api/v1/plugin/${props.pluginId}/ui/${query ? `?${query}` : ''}`
 })
 </script>
 
