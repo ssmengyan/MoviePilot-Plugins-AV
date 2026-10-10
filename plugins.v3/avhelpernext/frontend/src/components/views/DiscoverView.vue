@@ -1,143 +1,33 @@
 <script lang="ts">
 /**
- * 发现榜单的**模块级**状态：榜单缓存 / 详情缓存 / 后台预热队列
- * （老实现 `ui/views/discover.js` 的 `PRE` / `prefetchDetail` / `pumpPrefetch` /
- * `prefetchCards`，以及 `ui/core/state.js` 里的全局 `CACHE` 与 `S.period` / `S.kind`）。
+ * 发现榜单的**模块级**状态：榜单缓存 / 后台详情预热。
  *
- * **为什么本文件比前五个视图多一个普通 `<script>` 块**：
- * `<script setup>` 里的顶层变量会落进 `setup()`，随组件卸载一起丢掉（`Console.vue` 的
- * `<component :is>` 没有 keep-alive，切到别的栏目就是卸载）。而老实现的 `CACHE` 是
- * **模块级全局对象**：
+ * **为什么这些不能写在 `<script setup>` 里**：那里的顶层变量会落进 `setup()`，
+ * 随组件卸载一起丢掉（`Console.vue` 的 `<component :is>` 没有 keep-alive，切到别的栏目就是卸载）；
+ * 而老实现的 `CACHE` / `S.period` / `S.kind` 是**模块级全局对象**：
  * - 榜单缓存在，切走再回「发现榜单」不重抓榜单（javdb 有站点限流，这条是纪律不是优化）；
- * - 详情缓存在，后台预热的结果才留得住（下一轮详情抽屉直接读 `cachedDetail()`）；
- * - `S.period` / `S.kind` 在，切走再回来还停在你上次看的那一档（老 S 是全局的）。
- * 所以这三样都放这里（真·模块作用域），并按老实现的名字导出。
- */
-import { reactive, ref } from 'vue'
-import { unwrap, type PluginApi } from '../../composables/usePluginApi'
-
-/** 每屏后台预热前几张：老 `PREFETCH_N = 6`（调大 = 点开更快、后台开销更多）。 */
-export const PREFETCH_N = 6
-
-/** 榜单里的一部片（后端 `_movie()`；与 `common/NumCard.vue` 的 `CardMovie` 同 shape）。 */
-export interface RankMovie {
-  number?: string
-  title?: string
-  thumb?: string
-  date?: string
-  /** 分钟数（后端是 int，0/空表示没解析到）。 */
-  duration?: number | string
-  cnsub?: boolean
-  uncensored?: boolean
-  /** 磁力条数。 */
-  magnets?: number
-  actor?: string
-  /** javdb 内部 id（打开详情时回传，能省一次「番号 → id」往返）。 */
-  id?: string
-  /** 已入库（Emby 命中）时是对象。 */
-  lib?: { id?: string; name?: string; path?: string; url?: string } | null
-}
-
-/**
- * 榜单缓存条目：老 `put('rank:'+period+':'+kind, {data}|{error})` 的同形状。
- * **错误条目没有 `data`**（老实现同样只塞 `{error}`）：工具条的「n 部」就是靠这个不显示。
- */
-export interface RankEntry {
-  error: string
-  data?: RankMovie[]
-}
-
-/** 详情缓存条目：老 `put('detail:'+number, {data, t})`，键不含前缀（取用时用番号）。 */
-export interface DetailEntry {
-  data: Record<string, any>
-  t: number
-}
-
-/** 榜单缓存：键 `rank:<period>:<kind>`，跨栏目切换存活（老 `CACHE`）。 */
-export const rankCache = reactive(new Map<string, RankEntry>())
-
-/** 详情缓存：键 = 番号（老 `CACHE['detail:'+number]`）；下一轮详情抽屉直接读它。 */
-export const detailCache = reactive(new Map<string, DetailEntry>())
-
-/**
- * 当前榜单周期：老 `S.period`（默认 `week`，全局存活，切栏目回来不变）。
- * `<script setup>` 的模板绑定只能在 setup 里声明，所以那里再取一个 `period` 计算属性。
- */
-export const periodState = ref('week')
-/** 当前榜单分类：老 `S.kind`（默认 `censored`）。 */
-export const kindState = ref('censored')
-
-/** 读预热/详情缓存（老 `cached('detail:' + number)`）。 */
-export function cachedDetail(number: unknown): DetailEntry | undefined {
-  const key = String(number ?? '')
-  return key ? detailCache.get(key) : undefined
-}
-
-/**
- * 后台预热队列：老 `PRE = {queue:[], busy:false}`。
- * **串行 1 条**——同一时间只起一个 `/detail` 请求，不并发压多个 javdb 子进程。
- */
-const PRE: { queue: Array<{ number: string; id: string }>; busy: boolean } = { queue: [], busy: false }
-
-/**
- * 排一张卡片的详情进预热队列（老 `prefetchDetail(num, id)`）。
+ * - 详情缓存在（`composables/detailCache.ts`），后台预热的结果才留得住（详情抽屉直接读它）；
+ * - `period` / `kind` 在，切走再回来还停在你上次看的那一档（老 `S` 是全局的）。
  *
- * 三条纪律与老实现逐条一致：
- * 1. 命中 `detailCache` 直接跳过（切周期/切分类来回看不重复抓）；
- * 2. 已在队列里不重复排队；
- * 3. 只是**排队**，真正抓取由 `pumpPrefetch` 串行执行。
+ * **S6-7 起真身搬到 `composables/discoverCache.ts`**：详情抽屉的骨架要照老 `findMovie(number)`
+ * 遍历「所有列表缓存」找榜单里那张卡片，它得读同一份 `rankCache`；让抽屉反向从视图模块 import
+ * 会在 `views/DiscoverView.vue ↔ detail/DetailDrawer.vue` 之间绕一圈。这里只做一次转出，
+ * 视图内部的引用一律不改名。
  */
-export function prefetchDetail(api: PluginApi | null, number: unknown, id?: unknown): void {
-  const num = String(number ?? '')
-  if (!api || typeof api.get !== 'function' || !num) return
-  if (detailCache.has(num)) return
-  if (PRE.queue.some(item => item.number === num)) return
-  PRE.queue.push({ number: num, id: String(id ?? '') })
-  void pumpPrefetch(api)
-}
-
-/**
- * 串行取详情（老 `pumpPrefetch()`）：
- * 取队首 → 命中缓存就再抽下一个 → 否则发一次 `GET plugin/detail?number=&id=` → 完成后继续。
- * **失败不写任何条目**（老实现 `if (r.ok) put(...)` + `.catch(() => {})`），
- * 留给真正打开详情时报错重试。
- */
-async function pumpPrefetch(api: PluginApi): Promise<void> {
-  if (PRE.busy) return
-  const job = PRE.queue.shift()
-  if (!job) return
-  if (detailCache.has(job.number)) {
-    void pumpPrefetch(api)
-    return
-  }
-  PRE.busy = true
-  try {
-    // 老 `apiUrl()` 会把空值参数丢掉，所以 id 为空时不带这一段。
-    const params: Record<string, string> = { number: job.number }
-    if (job.id) params.id = job.id
-    const payload: any = unwrap(await api.get('plugin/detail', { params }))
-    if (payload && typeof payload === 'object' && payload.success === false) return
-    detailCache.set(job.number, { data: (payload as Record<string, any>) || {}, t: Date.now() })
-  } catch {
-    /* 预热失败静默（老实现 `.catch(() => {})`） */
-  } finally {
-    PRE.busy = false
-    void pumpPrefetch(api)
-  }
-}
-
-/**
- * 渲染后预热前 n 张（老 `prefetchCards(root, n)`：连点带滑也只取靠前的 n 张）。
- * 老实现是从 DOM 里取 `.card`，这里直接取同一个数组——列表顺序就是卡片顺序。
- */
-export function prefetchCards(
-  api: PluginApi | null,
-  movies: RankMovie[] | null | undefined,
-  n: number = PREFETCH_N,
-): void {
-  ;(movies || []).slice(0, n).forEach(movie => prefetchDetail(api, movie?.number, movie?.id))
-}
+export {
+  PREFETCH_N,
+  rankCache,
+  periodState,
+  kindState,
+  prefetchDetail,
+  prefetchCards,
+  detailCache,
+  putDetail,
+} from '../../composables/discoverCache'
+export type { RankMovie, RankEntry } from '../../composables/discoverCache'
+/* `detailCache` / `putDetail` 的真身在 `composables/detailCache.ts`，由 discoverCache 转出。 */
 </script>
+
 
 <script setup lang="ts">
 /**
@@ -192,6 +82,18 @@ import EmptyState from '../common/EmptyState.vue'
 import ErrorState from '../common/ErrorState.vue'
 import NumCard from '../common/NumCard.vue'
 import { errorText, hostToast, type PluginApi } from '../../composables/usePluginApi'
+import {
+  PREFETCH_N,
+  detailCache,
+  kindState,
+  periodState,
+  prefetchCards,
+  prefetchDetail,
+  putDetail,
+  rankCache,
+  unwrap,
+} from '../../composables/discoverCache'
+import type { RankEntry, RankMovie } from '../../composables/discoverCache'
 import type { PluginStore } from '../../composables/usePluginStore'
 
 const props = withDefaults(

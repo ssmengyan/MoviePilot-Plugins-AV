@@ -41,23 +41,25 @@
  * - 不加轮询：老演员页没有任何定时器。
  *
  * 与老实现的行为差异（都在下面各自位置有注释）：
- * 1. **点作品卡片**：老实现 `openMovie(num,id)` 打开「影片详情」抽屉 —— 抽屉属于 discover/detail 那一批
- *    （设计文档 §6.1 排在最后），本轮还没有原生实现；这里只给一句 `t.info` 说明番号与去向，
- *    等 detail 迁移后把 `openFilm()` 换成 `emit('open-movie', …)` 即可；
- * 2. **订阅演员成功后不跳页**：老实现 `S.view='subs'; render()`。宿主合同（`switch` / `close` / `save` /
+ * 1. **订阅演员成功后不跳页**：老实现 `S.view='subs'; render()`。宿主合同（`switch` / `close` / `save` /
  *    `layout` / `action`）里没有"把数据台切到某一栏"的事件，要跳页得给壳加一个新事件 —— 本轮不扩合同，
  *    改为 `t.info` 指路「在「订阅」栏里可以看到它」；
- * 3. 老实现"弹窗开着时下面那层先不重绘"是 innerHTML 重建的权宜：Vue 里底层列表是响应式的，
+ * 2. 老实现"弹窗开着时下面那层先不重绘"是 innerHTML 重建的权宜：Vue 里底层列表是响应式的，
  *    收藏成功会立刻反映到弹窗背后的「我的演员」网格（弹窗盖着，不打架）；
- * 4. 未搬：`preload()` / `prefetchCards()` / `prefetchDetail()` 三条预热（图片与详情缓存的网络预热，
- *    属于 discover/detail 的机器）；`actorAvatarOf` 里 `cached('actor:'+name)` 那一档来自未迁移的搜索弹窗。
+ * 3. 未搬：`preload()` / `prefetchCards()` / `prefetchDetail()` 三条预热（图片与详情缓存的网络预热，
+ *    属于 discover/detail 的机器）；`actorAvatarOf` 里 `cached('actor:'+name)` 那一档来自搜索弹窗
+ *    —— 搜索弹窗已原生化（`detail/SearchDialog.vue`），但那份缓存键属于老 `CACHE`，未搬。
+ *
+ * **S6-7 收口**：`openFilm()` 已从"一句 t.info"换成 `emit('openMovie', {number, id})`
+ * （壳接详情抽屉），并新增 `focusActor` prop 承接"详情/搜索里点演员 → 打开作品史"。
  */
-import { computed, nextTick, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import ActorRow from '../common/ActorRow.vue'
 import EmptyState from '../common/EmptyState.vue'
 import ErrorState from '../common/ErrorState.vue'
 import Thumb from '../common/Thumb.vue'
 import { errorText, hostToast, type PluginApi } from '../../composables/usePluginApi'
+import { cssUrl } from '../../composables/cssUrl'
 import type { PluginStore } from '../../composables/usePluginStore'
 import type { FavActor } from '../../composables/storeTypes'
 
@@ -75,13 +77,30 @@ const props = withDefaults(
     api?: PluginApi | null
     /** 宿主 toast（`moviepilot:toast` 注入），拿不到时静默降级。 */
     toast?: unknown
+    /**
+     * 从别处（详情抽屉的演员行 / 搜索结果）指定要打开的作品史。
+     *
+     * 老实现 `openActor(name)`（`ui/views/actors.js`）由 `views/detail.js` 与 `views/search.js`
+     * 直接调用，会顺手把 `S.view = 'actors'`、重置年份与展开态，再 `render()`。
+     * 壳（`Console.vue`）负责前一半（切栏目 + 每次递增 `:key` 重挂本组件），
+     * 后一半在这里：`watch(focusActor, …, {immediate:true})` → `openActor(name)`。
+     *
+     * 用"每次重挂"而不是"只改 prop"：`focusActor` 相同时（已经在看 A，再点一次 A）prop 不变，
+     * watch 不会触发，而老实现会重新画一遍。
+     */
+    focusActor?: string
   }>(),
-  { pluginId: '', api: null, toast: null },
+  { pluginId: '', api: null, toast: null, focusActor: '' },
 )
 
 const emit = defineEmits<{
   /** 收藏 / 取消收藏 / 订阅成功：请壳刷新右栏「运行概况」（收藏演员计数只有 `/bootstrap` 读得到）。 */
   (event: 'refreshSide'): void
+  /**
+   * 点作品卡片：老 `openMovie(num, id)` 打开「影片详情」抽屉（S6-7 已原生化）。
+   * 与发现榜单同一个事件名与载荷，壳统一接成 `DetailDrawer`。
+   */
+  (event: 'openMovie', payload: { number: string; id: string }): void
 }>()
 
 const t = hostToast(props.toast as any)
@@ -460,11 +479,6 @@ async function checkActor(): Promise<void> {
 
 // ---------- 作品卡片 ----------
 
-/** 作品史封面走 CSS 背景（模糊底衬），URL 要转义掉会破坏 `url()` 的字符（老 `cssUrl` 逐字照抄）。 */
-function cssUrl(value: unknown): string {
-  return String(value || '').replace(/["'()\\\s]/g, char => encodeURIComponent(char))
-}
-
 /** `.pic` 的内联 `--bg`（有封面才给，与老实现 `mv.thumb ? ' style="--bg:url(...)"' : ''` 一致）。 */
 function picStyle(mv: ActorMovie): Record<string, string> | undefined {
   if (!mv.thumb) return undefined
@@ -478,12 +492,13 @@ function filmKey(mv: ActorMovie, index: number): string {
 
 /**
  * 点作品卡片：老 `openMovie(num, id)` 打开「影片详情」抽屉。
- * 抽屉（`views/detail.js`）排在 §6.1 的最后一批，本轮没有原生实现 → 先说清番号和去向（差异 1）。
+ * S6-7 之前抽屉还没原生化，这里只给一句 `t.info`；现在把番号与 javdb id 交给壳
+ * （事件名与载荷和 `DiscoverView` 完全一致，壳只接一处）。
  */
 function openFilm(mv: ActorMovie): void {
   const num = String(mv.number || '')
-  t.info('影片详情抽屉还没搬进原生视图')
-  t.info(num ? `先记下番号：${num}` : '这条记录没有番号')
+  if (!num) return
+  emit('openMovie', { number: num, id: String(mv.id || '') })
 }
 
 // ---------- 演员榜挑选弹窗 ----------
@@ -573,6 +588,23 @@ async function pickAdd(row: FavActor): Promise<void> {
     addingName.value = ''
   }
 }
+
+// ---------- 外部指定演员（详情抽屉 / 搜索结果 → 壳下传） ----------
+
+/**
+ * 老实现 `openActor(name)` 由 `views/detail.js` 与 `views/search.js` 直接调用：重置年份与
+ * 展开态、抓作品史、页面滚回顶部。壳负责"切到「我的演员」栏"，这里负责余下的同一段行为。
+ *
+ * `immediate: true`：壳每次都用新的 `:key` 重挂本组件，`focusActor` 在挂载那一刻就已经有值，
+ * 不带 immediate 的话那次 watch 根本不会跑。
+ */
+watch(
+  () => props.focusActor,
+  name => {
+    if (name) openActor(name)
+  },
+  { immediate: true },
+)
 </script>
 
 <template>

@@ -26,6 +26,8 @@ import TasksView from './views/TasksView.vue'
 import SubsView from './views/SubsView.vue'
 import ActorsView from './views/ActorsView.vue'
 import DiscoverView from './views/DiscoverView.vue'
+import DetailDrawer from './detail/DetailDrawer.vue'
+import SearchDialog from './detail/SearchDialog.vue'
 import { usePluginStore } from '../composables/usePluginStore'
 import { takePendingSettingsSection } from '../composables/settingsJump'
 
@@ -91,6 +93,24 @@ const running = ref(false)
 const version = ref('')
 /** 「清空通知」请求在跑（确认框关闭后到请求结束之间的按钮态）。 */
 const noticeClearing = ref(false)
+
+/**
+ * 详情抽屉（S6-7）与顶栏搜索（同批）：两者都是**跨栏目**的弹层，所以由壳持有状态，
+ * 视图只发事件（`@open-movie` / `@open-actor`）。
+ * - `drawerOpen` / `drawerNumber` / `drawerId`：老 `#drawer` 的开关与 `CURSOR.number` / `CURSOR.id`；
+ * - `searchOpen` / `query` / `searchDialog`：老 `#qInput` / `#qBtn` 与 `doSearch` 的弹窗；
+ * - `actorFocus` / `actorNonce`：老 `openActor(name)` 的落点（切到「我的演员」栏并打开 ta）。
+ */
+const drawerOpen = ref(false)
+/** 抽屉当前番号（老 `CURSOR.number`）：声明式下传，抽屉内部再走 `openMovie` 那套守卫。 */
+const drawerNumber = ref('')
+/** 抽屉当前 javdb id（老 `CURSOR.id`）：同一部片重开时复用，换片才清。 */
+const drawerId = ref('')
+const searchOpen = ref(false)
+const searchDialog = ref<InstanceType<typeof SearchDialog> | null>(null)
+const query = ref('')
+const actorFocus = ref('')
+const actorNonce = ref(0)
 
 const isSettings = computed(() => props.mode === 'settings')
 
@@ -195,14 +215,48 @@ function pick(item: SectionItem): void {
  * 「发现榜单」点卡片：老实现 `openMovie(number, id)` 打开「影片详情」抽屉
  * （`ui/views/detail.js`：预览图 + 磁力 + 长图补图 + 灯箱）。
  *
- * 抽屉是 §6.1 里 discover 之后的最后一块，**本轮先接成一句临时提示**（不静默吞掉点击，
- * 也不假装打开了什么）。下一轮做完抽屉后，把这两行换成真实调用即可——事件载荷
- * `{ number, id }` 就是老 `openMovie(num, id)` 的两个入参，届时无需改 `DiscoverView`。
+ * S6-7 之前这里是一句临时提示；现在换成真实调用：番号与 id 由壳声明式下传，
+ * 抽屉内部的 watch 照着老 `openMovie` 的四步走（换片清 `CURSOR.id` → 写 id →
+ * 标记「刚打开」→ `paintDetail`）。
  */
 function onOpenMovie(payload: { number?: string; id?: string }): void {
   const number = String(payload?.number || '')
-  toast.info('详情抽屉将在下一步迁移')
-  toast.info(number ? `先记下番号：${number}` : '这条记录没有番号')
+  if (!number) return
+  drawerNumber.value = number
+  drawerId.value = String(payload?.id || '')
+  drawerOpen.value = true
+}
+
+/**
+ * 详情抽屉 / 搜索结果里点了演员：老实现 `closeAll(); openActor(name)`。
+ *
+ * 壳这边做三件事：关掉抽屉与搜索弹窗、切到「我的演员」栏、把演员名交给 `ActorsView`。
+ * `actorNonce` 每次自增并参与 `ActorsView` 的 `:key`：老 `openActor` 无论当前在哪一栏
+ * 都会重新画一遍作品史；而"已经在看 A、再点一次 A"这种同值场景，只靠 prop 变化
+ * 是触发不了的（Vue 不会为同一个值再跑一次 watch），换 key 重挂才真的等价。
+ */
+function openActorFromOverlay(name: string): void {
+  const target = String(name || '')
+  if (!target) return
+  drawerOpen.value = false
+  searchOpen.value = false
+  actorFocus.value = target
+  actorNonce.value += 1
+  section.value = 'actors'
+}
+
+/** 顶栏搜索：老 `#qBtn.onclick` / `#qInput` 的 Enter（`doSearch($('#qInput').value)`）。 */
+function runSearch(): void {
+  const kw = String(query.value || '').trim()
+  if (!kw) return
+  searchOpen.value = true
+  searchDialog.value?.search(kw)
+}
+
+/** 搜索结果里点影片：老 `closeAll(); openMovie(el.dataset.num, el.dataset.id || '')`。 */
+function onSearchPickMovie(payload: { number?: string; id?: string }): void {
+  searchOpen.value = false
+  onOpenMovie(payload)
 }
 
 async function loadVersion(): Promise<void> {
@@ -353,6 +407,22 @@ onBeforeUnmount(() => {
 
       <v-spacer />
 
+      <!-- 顶栏搜索（老 `ui/index.html` 的 `#qInput` / `#qBtn`）：占位符与按钮文案逐字照抄 -->
+      <div class="avh-searchbox">
+        <v-text-field
+          v-model="query"
+          density="compact"
+          variant="outlined"
+          hide-details
+          single-line
+          autocomplete="off"
+          placeholder="搜索番号 / 演员（如 SSIS-001）…"
+          class="avh-searchbox__input"
+          @keydown.enter="runSearch"
+        />
+        <v-btn color="primary" variant="flat" size="small" @click="runSearch">搜索</v-btn>
+      </div>
+
       <v-btn
         color="primary"
         variant="flat"
@@ -436,13 +506,16 @@ onBeforeUnmount(() => {
           <component
             :is="nativeView"
             v-if="nativeView && framePluginId"
+            :key="section === 'actors' ? `actors:${actorNonce}` : section"
             :store="store"
             :plugin-id="framePluginId"
             :api="currentApi()"
             :toast="injectedToast"
+            :focus-actor="section === 'actors' ? actorFocus : ''"
             @switch="emit('switch')"
             @refresh-side="refreshRuntime()"
             @open-movie="onOpenMovie"
+            @open-actor="openActorFromOverlay"
           />
           <AppFrame
             v-else-if="framePluginId"
@@ -615,6 +688,35 @@ onBeforeUnmount(() => {
         </v-card>
       </aside>
     </div>
+
+    <!--
+      跨栏目的两个弹层（S6-7）：挂在壳的根节点上，切栏目不会把已经打开的详情抽屉/搜索结果弄丢
+      （老实现里 `#drawer` / `#modal` / `#lb` 就在 `ui/index.html` 的根层级上）。
+    -->
+    <DetailDrawer
+      v-if="framePluginId"
+      :open="drawerOpen"
+      :number="drawerNumber"
+      :id="drawerId"
+      :store="store"
+      :plugin-id="framePluginId"
+      :api="currentApi()"
+      :toast="injectedToast"
+      @close="drawerOpen = false"
+      @open-actor="openActorFromOverlay"
+      @refresh-side="refreshRuntime()"
+    />
+
+    <SearchDialog
+      v-if="framePluginId"
+      ref="searchDialog"
+      :open="searchOpen"
+      :plugin-id="framePluginId"
+      :api="currentApi()"
+      @close="searchOpen = false"
+      @open-movie="onSearchPickMovie"
+      @open-actor="openActorFromOverlay"
+    />
   </div>
 </template>
 
@@ -636,6 +738,21 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* 顶栏搜索（老 `.searchbox`：输入框 + 紧贴的「搜索」按钮，占位符同款） */
+.avh-searchbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 380px;
+  min-width: 200px;
+  margin-right: 12px;
+}
+
+.avh-searchbox__input {
+  flex: 1 1 auto;
+  min-width: 120px;
 }
 
 .avh-body {
