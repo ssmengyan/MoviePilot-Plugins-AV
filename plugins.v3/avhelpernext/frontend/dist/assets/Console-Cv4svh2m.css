@@ -135,14 +135,14 @@
 }
 
 /* 对齐老 `.q`（调用方内联 `padding:0;overflow:hidden`） */
-.avh-cand[data-v-22ec0c69] {
+.avh-cand[data-v-c8aa0824] {
   overflow: hidden;
   margin-bottom: 10px;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
   border-radius: 10px;
   background: rgb(var(--v-theme-surface));
 }
-.avh-cand__head[data-v-22ec0c69] {
+.avh-cand__head[data-v-c8aa0824] {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -152,34 +152,34 @@
 }
 
 /* `.tposter`：48×64 小封面 */
-.avh-cand__poster[data-v-22ec0c69] {
+.avh-cand__poster[data-v-c8aa0824] {
   width: 48px;
   height: 64px;
   flex: none;
   border-radius: 6px;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
 }
-.avh-cand__no[data-v-22ec0c69] {
+.avh-cand__no[data-v-c8aa0824] {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.2px;
 }
-.avh-cand__hint[data-v-22ec0c69] {
+.avh-cand__hint[data-v-c8aa0824] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-cand__origin[data-v-22ec0c69] {
+.avh-cand__origin[data-v-c8aa0824] {
   margin-top: 3px;
 }
-.avh-cand__spacer[data-v-22ec0c69] {
+.avh-cand__spacer[data-v-c8aa0824] {
   flex: 1;
 }
-.avh-cand__table[data-v-22ec0c69] {
+.avh-cand__table[data-v-c8aa0824] {
   width: 100%;
   border-collapse: collapse;
   font-size: 12.5px;
 }
-.avh-cand__table th[data-v-22ec0c69] {
+.avh-cand__table th[data-v-c8aa0824] {
   padding: 8px 10px;
   text-align: left;
   font-weight: 500;
@@ -187,44 +187,44 @@
   color: rgba(var(--v-theme-on-surface), 0.5);
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.12);
 }
-.avh-cand__table td[data-v-22ec0c69] {
+.avh-cand__table td[data-v-c8aa0824] {
   padding: 9px 10px;
   vertical-align: middle;
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
 }
 
 /* 行语义：best 绿底、dead 淡化、bt 深一档（老 `tr.best/tr.dead/tr.bt`） */
-.avh-cand__table tr.best td[data-v-22ec0c69] {
+.avh-cand__table tr.best td[data-v-c8aa0824] {
   background: rgba(var(--v-theme-success), 0.14);
 }
-.avh-cand__table tr.dead td[data-v-22ec0c69] {
+.avh-cand__table tr.dead td[data-v-c8aa0824] {
   opacity: 0.42;
 }
-.avh-cand__table tr.bt td[data-v-22ec0c69] {
+.avh-cand__table tr.bt td[data-v-c8aa0824] {
   background: rgba(var(--v-theme-on-surface), 0.05);
 }
-.avh-cand__table tr.has-sub td[data-v-22ec0c69] {
+.avh-cand__table tr.has-sub td[data-v-c8aa0824] {
   border-bottom: 0;
 }
-.avh-cand__sub td[data-v-22ec0c69] {
+.avh-cand__sub td[data-v-c8aa0824] {
   padding: 0 10px 9px;
 }
-.avh-cand__ttl[data-v-22ec0c69] {
+.avh-cand__ttl[data-v-c8aa0824] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 11.5px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-cand__btnote[data-v-22ec0c69] {
+.avh-cand__btnote[data-v-c8aa0824] {
   padding: 6px 10px;
 }
-.avh-cand__empty[data-v-22ec0c69] {
+.avh-cand__empty[data-v-c8aa0824] {
   padding: 10px;
 }
 
 /* `.tag` 系列（老 `app.css` 同名规则；底色走主题语义色） */
-.avh-tag[data-v-22ec0c69] {
+.avh-tag[data-v-c8aa0824] {
   display: inline-block;
   margin-right: 4px;
   padding: 1px 6px;
@@ -233,42 +233,42 @@
   border: 1px solid rgba(var(--v-theme-on-surface), 0.16);
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-tag--on[data-v-22ec0c69] {
+.avh-tag--on[data-v-c8aa0824] {
   border-color: rgba(var(--v-theme-success), 0.45);
   background: rgba(var(--v-theme-success), 0.18);
   color: rgb(var(--v-theme-on-surface));
 }
-.avh-tag--uc[data-v-22ec0c69] {
+.avh-tag--uc[data-v-c8aa0824] {
   border-color: rgba(var(--v-theme-secondary), 0.5);
   background: rgba(var(--v-theme-secondary), 0.2);
   color: rgb(var(--v-theme-on-surface));
 }
-.avh-tag--free[data-v-22ec0c69] {
+.avh-tag--free[data-v-c8aa0824] {
   border-color: rgba(var(--v-theme-warning), 0.5);
   background: rgba(var(--v-theme-warning), 0.18);
   color: rgb(var(--v-theme-on-surface));
 }
-.avh-tag--pref[data-v-22ec0c69] {
+.avh-tag--pref[data-v-c8aa0824] {
   border-color: rgba(var(--v-theme-primary), 0.5);
   background: rgba(var(--v-theme-primary), 0.22);
   color: rgb(var(--v-theme-on-surface));
 }
 
 /* `.score` 档位色（hi=成功、mid=警告、lo=中性） */
-.avh-score[data-v-22ec0c69] {
+.avh-score[data-v-c8aa0824] {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-.avh-score--hi[data-v-22ec0c69] {
+.avh-score--hi[data-v-c8aa0824] {
   color: rgb(var(--v-theme-success));
 }
-.avh-score--mid[data-v-22ec0c69] {
+.avh-score--mid[data-v-c8aa0824] {
   color: rgb(var(--v-theme-warning));
 }
-.avh-score--lo[data-v-22ec0c69] {
+.avh-score--lo[data-v-c8aa0824] {
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-cand__dl[data-v-22ec0c69] {
+.avh-cand__dl[data-v-c8aa0824] {
   white-space: nowrap;
 }
 
@@ -352,55 +352,152 @@
   background: rgba(var(--v-theme-on-surface), 0.04);
 }
 
-.avh-console[data-v-d5ddb4c4] {
+/* 对齐 `app.css` 的 `.toolbar` / `.hint` / `.spacer` */
+.avh-downloads__toolbar[data-v-6fcb37c0] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.avh-downloads__hint[data-v-6fcb37c0] {
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.5);
+}
+.avh-downloads__spacer[data-v-6fcb37c0] {
+  flex: 1;
+}
+
+/* 对齐 `.q`：卡片底色 + 描边 + 10px 圆角 */
+.avh-q[data-v-6fcb37c0] {
+  padding: 12px;
+  margin-bottom: 10px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+  border-radius: 10px;
+  background: rgba(var(--v-theme-on-surface), 0.04);
+}
+
+/* 对齐 `.qhd` */
+.avh-q__hd[data-v-6fcb37c0] {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+/* 对齐 `.tposter`：48×64 小封面 */
+.avh-q__poster[data-v-6fcb37c0] {
+  width: 48px;
+  height: 64px;
+  flex: none;
+  border-radius: 6px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+}
+
+/* 老实现的内联 `flex:1;min-width:0` */
+.avh-q__main[data-v-6fcb37c0] {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 对齐 `.qhd .qn` */
+.avh-q__no[data-v-6fcb37c0] {
+  font-size: 14px;
+  font-weight: 600;
+}
+.avh-q__hint[data-v-6fcb37c0] {
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.5);
+}
+.avh-q__meta[data-v-6fcb37c0] {
+  margin-top: 3px;
+}
+.avh-q__path[data-v-6fcb37c0] {
+  margin-top: 2px;
+}
+
+/* 对齐 `.qhd .right` */
+.avh-q__right[data-v-6fcb37c0] {
+  margin-left: auto;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* 对齐 `.bar` / `.bar i` / `.bar.done i`（老实现是 --acc2 → --acc 的渐变） */
+.avh-bar[data-v-6fcb37c0] {
+  height: 7px;
+  border-radius: 99px;
+  overflow: hidden;
+  background: rgba(var(--v-theme-on-surface), 0.12);
+}
+.avh-bar i[data-v-6fcb37c0] {
+  display: block;
+  width: 0;
+  height: 100%;
+  transition: width 0.3s;
+  background: linear-gradient(
+    90deg,
+    rgba(var(--v-theme-primary), 0.6),
+    rgb(var(--v-theme-primary))
+  );
+}
+.avh-bar--done i[data-v-6fcb37c0] {
+  background: linear-gradient(
+    90deg,
+    rgba(var(--v-theme-success), 0.6),
+    rgb(var(--v-theme-success))
+  );
+}
+
+.avh-console[data-v-4f63147e] {
   display: flex;
   flex-direction: column;
   min-height: 0;
   background: rgb(var(--v-theme-surface));
   color: rgb(var(--v-theme-on-surface));
 }
-.avh-topbar[data-v-d5ddb4c4] {
+.avh-topbar[data-v-4f63147e] {
   flex: 0 0 auto;
   padding-inline: 0;
 }
-.avh-title[data-v-d5ddb4c4] {
+.avh-title[data-v-4f63147e] {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.avh-body[data-v-d5ddb4c4] {
+.avh-body[data-v-4f63147e] {
   display: flex;
   align-items: stretch;
   min-height: 0;
   padding: 12px;
   gap: 4px;
 }
-.avh-nav[data-v-d5ddb4c4] {
+.avh-nav[data-v-4f63147e] {
   flex: 0 0 200px;
   max-width: 200px;
   overflow-y: auto;
 }
-.avh-content[data-v-d5ddb4c4] {
+.avh-content[data-v-4f63147e] {
   flex: 1 1 auto;
   min-width: 0;
   overflow: auto;
   padding-inline: 12px;
 }
-.avh-side[data-v-d5ddb4c4] {
+.avh-side[data-v-4f63147e] {
   flex: 0 0 264px;
   max-width: 264px;
   overflow-y: auto;
 }
-.avh-overview[data-v-d5ddb4c4] {
+.avh-overview[data-v-4f63147e] {
   position: sticky;
   top: 0;
 }
 @media (max-width: 1100px) {
-.avh-body[data-v-d5ddb4c4] {
+.avh-body[data-v-4f63147e] {
     flex-wrap: wrap;
 }
-.avh-nav[data-v-d5ddb4c4],
-  .avh-side[data-v-d5ddb4c4] {
+.avh-nav[data-v-4f63147e],
+  .avh-side[data-v-4f63147e] {
     flex: 1 1 auto;
     max-width: none;
 }

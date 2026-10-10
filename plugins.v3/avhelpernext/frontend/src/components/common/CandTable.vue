@@ -30,7 +30,7 @@
  */
 import { computed, ref } from 'vue'
 import Thumb from './Thumb.vue'
-import { scoreLevel } from './common'
+import { filledThumbs, scoreLevel } from './common'
 import type { Candidate, SearchTask } from '../../composables/storeTypes'
 
 const props = withDefaults(
@@ -147,6 +147,19 @@ function clearPending(site?: string): void {
 }
 
 defineExpose({ clearPending })
+
+/**
+ * 封面地址：任务自带优先，其次用 `queueThumb` 后台补回来的那张。
+ *
+ * 老实现是 `applyThumb()` 直接把结果回写进 `S.task.siteTask` 再重绘；
+ * 这里改成读共享的 `filledThumbs`，所以**任何**用 CandTable 的视图
+ * （站点搜索、任务页）都能拿到补图，不必各自回写。
+ */
+const poster = computed(() => {
+  const own = String(props.task?.thumb || '')
+  if (own) return own
+  return String(filledThumbs.value[String(props.task?.number || '')] || '')
+})
 </script>
 
 <template>
@@ -155,7 +168,7 @@ defineExpose({ clearPending })
       <Thumb
         class="avh-cand__poster"
         variant="tposter"
-        :src="task.thumb"
+        :src="poster"
         alt="无图"
         :plugin-id="pluginId"
       />

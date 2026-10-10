@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
 import AppFrame from './AppFrame.vue'
 import { DEFAULT_MAX_WIDTH, type ConfigProps } from './contract'
 import { consoleEmits } from './emitContract'
@@ -21,6 +21,7 @@ import LibraryPanel from './settings/LibraryPanel.vue'
 import RuntimePanel from './settings/RuntimePanel.vue'
 import AboutPanel from './settings/AboutPanel.vue'
 import SiteSearchView from './views/SiteSearchView.vue'
+import DownloadsView from './views/DownloadsView.vue'
 import { usePluginStore } from '../composables/usePluginStore'
 
 /** 壳只有两种模式：`data` = 数据台（iframe），`settings` = 设置台（七个栏目）。 */
@@ -56,6 +57,22 @@ const DATA_SECTIONS: SectionItem[] = [
 
 const pluginId = computed(() => props.pluginId || props.sourcePluginId || '')
 
+/**
+ * 数据台**已原生化**的栏目 → 视图组件（S6 增量替换，设计文档 §6.1）。
+ *
+ * 不在这张表里的栏目仍由 `AppFrame` 承载被嵌应用（`ui/`）：一次只迁一个视图，
+ * 出问题就把该栏目从这里删掉回退成 iframe，不需要回滚整包。
+ * **后续把 tasks / subs / actors / discover 搬过来时，往这里加一行即可。**
+ *
+ * 所有原生视图共用同一组 props（`store` / `pluginId` / `api` / `toast`）；
+ * `@switch` 与 `@refresh-side` 也统一绑在 `<component>` 上——没有声明这两个事件的
+ * 视图只是收不到回调（它们本来就不发），不影响行为。
+ */
+const NATIVE_VIEWS: Record<string, Component> = {
+  sitesearch: SiteSearchView,
+  downloads: DownloadsView,
+}
+
 /** iframe 必须用实例 id（普通插件 = pluginId；分身共享同一份联邦产物）。 */
 const framePluginId = computed(() => props.pluginId || props.sourcePluginId || '')
 
@@ -70,6 +87,9 @@ const isSettings = computed(() => props.mode === 'settings')
 const activeSection = computed<SectionItem>(
   () => SETTINGS_SECTIONS.find(item => item.key === section.value) || SETTINGS_SECTIONS[0]!,
 )
+
+/** 当前栏目有没有原生视图：`null` → 内容区走 iframe（设置台栏目的 key 不在 `NATIVE_VIEWS` 里）。 */
+const nativeView = computed<Component | null>(() => NATIVE_VIEWS[section.value] || null)
 
 /** 宿主要求复用的统一 toast（官方指南 §5.8）；拿不到时静默降级，不自建 Toast。 */
 const injectedToast = inject<any>('moviepilot:toast', null)
@@ -370,9 +390,10 @@ onBeforeUnmount(() => {
       <!-- 内容区 -->
       <section class="avh-content">
         <template v-if="!isSettings">
-          <!-- S6 增量替换：已原生化的栏目走 Vue 组件，其余仍由 iframe 承载被嵌应用。 -->
-          <SiteSearchView
-            v-if="section === 'sitesearch' && framePluginId"
+          <!-- S6 增量替换：已原生化的栏目走 Vue 组件（见 NATIVE_VIEWS），其余仍由 iframe 承载被嵌应用。 -->
+          <component
+            :is="nativeView"
+            v-if="nativeView && framePluginId"
             :store="store"
             :plugin-id="framePluginId"
             :api="currentApi()"
