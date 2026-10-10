@@ -6181,7 +6181,20 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
         const res = await currentApi().get(`plugin/page/${framePluginId.value}`);
         const payload = res && typeof res === "object" && "data" in res ? res.data : res;
         const value = payload?.plugin_version;
-        if (typeof value === "string" && value) version.value = value;
+        if (typeof value === "string" && value) {
+          version.value = value;
+          return;
+        }
+      } catch {
+      }
+      try {
+        const remotes = await currentApi().get("plugin/remotes?token=moviepilot");
+        const list = Array.isArray(remotes) ? remotes : remotes?.data ?? [];
+        const mine = (Array.isArray(list) ? list : []).find(
+          (item) => String(item?.id || "").toLowerCase() === framePluginId.value.toLowerCase()
+        );
+        const matched = /[?&]v=([^&]+)/.exec(String(mine?.url || ""));
+        if (matched) version.value = decodeURIComponent(matched[1]);
       } catch {
       }
     }
@@ -6776,6 +6789,6 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
   }
 });
 
-const Console = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-fe66b9e3"]]);
+const Console = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-c9e246e4"]]);
 
 export { Console as C, consoleEmits as c };

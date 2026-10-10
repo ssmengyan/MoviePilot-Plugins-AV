@@ -265,9 +265,25 @@ async function loadVersion(): Promise<void> {
     const res: any = await currentApi().get(`plugin/page/${framePluginId.value}`)
     const payload = res && typeof res === 'object' && 'data' in res ? res.data : res
     const value = payload?.plugin_version
-    if (typeof value === 'string' && value) version.value = value
+    if (typeof value === 'string' && value) {
+      version.value = value
+      return
+    }
   } catch {
-    // 版本号拿不到就不显示，不影响界面其余部分。
+    // 拿不到就走下面的兜底；都不行就不显示版本号，不影响界面其余部分。
+  }
+  // 兜底：宿主 `plugin/page` 只返回 {render_mode, page}，不带插件版本；
+  // 而 `plugin/remotes` 的入口 URL 上挂着 `?v=<plugin_version>`（宿主自己拼的），从那里取。
+  try {
+    const remotes: any = await currentApi().get('plugin/remotes?token=moviepilot')
+    const list = Array.isArray(remotes) ? remotes : (remotes?.data ?? [])
+    const mine = (Array.isArray(list) ? list : []).find(
+      (item: any) => String(item?.id || '').toLowerCase() === framePluginId.value.toLowerCase(),
+    )
+    const matched = /[?&]v=([^&]+)/.exec(String(mine?.url || ''))
+    if (matched) version.value = decodeURIComponent(matched[1])
+  } catch {
+    // 静默：版本号只是装饰。
   }
 }
 
