@@ -46,20 +46,28 @@
  *    改为 `t.info` 指路「在「订阅」栏里可以看到它」；
  * 2. 老实现"弹窗开着时下面那层先不重绘"是 innerHTML 重建的权宜：Vue 里底层列表是响应式的，
  *    收藏成功会立刻反映到弹窗背后的「我的演员」网格（弹窗盖着，不打架）；
- * 3. 未搬：`preload()` / `prefetchCards()` / `prefetchDetail()` 三条预热（图片与详情缓存的网络预热，
- *    属于 discover/detail 的机器）；`actorAvatarOf` 里 `cached('actor:'+name)` 那一档来自搜索弹窗
+ * 3. **预热（S6-8 补齐）**：老实现里有三条"抢跑"，本视图的处理是 ——
+ *    - **作品史详情抢跑**（搬）：老 `renderActorDetail` 末尾的 `prefetchCards(m, PREFETCH_N)`
+ *      （前 6 部）与每行 `el.onmouseenter = () => prefetchDetail(num, id)` → 本文件用
+ *      共用的 `composables/prefetchDetail.ts` 的预热器（串行 1 条 / 限量 6 / 命中
+ *      `detailCache` 跳过），换演员或卸载即 `flush()`（队里没跑的丢掉、在飞的那条作废不落地）；
+ *    - **头像预热**（搬）：老 `preload(S.favs.map(a => a.avatar))` → 同名手法的
+ *      `warmImage()`，按老语义跳过空地址（见下面那条 watch 的注释）；
+ *    - **封面预热**（故意不搬）：老 `preload(shown.map(x => x.thumb))`，理由见下面那段注释。
+ * 4. 未搬：`actorAvatarOf` 里 `cached('actor:'+name)` 那一档来自搜索弹窗
  *    —— 搜索弹窗已原生化（`detail/SearchDialog.vue`），但那份缓存键属于老 `CACHE`，未搬。
  *
  * **S6-7 收口**：`openFilm()` 已从"一句 t.info"换成 `emit('openMovie', {number, id})`
  * （壳接详情抽屉），并新增 `focusActor` prop 承接"详情/搜索里点演员 → 打开作品史"。
  */
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import ActorRow from '../common/ActorRow.vue'
 import EmptyState from '../common/EmptyState.vue'
 import ErrorState from '../common/ErrorState.vue'
 import Thumb from '../common/Thumb.vue'
 import { errorText, hostToast, type PluginApi } from '../../composables/usePluginApi'
 import { cssUrl } from '../../composables/cssUrl'
+import { PREFETCH_N, createDetailPrefetcher, warmImage } from '../../composables/prefetchDetail'
 import type { PluginStore } from '../../composables/usePluginStore'
 import type { FavActor } from '../../composables/storeTypes'
 
@@ -501,6 +509,92 @@ function openFilm(mv: ActorMovie): void {
   emit('openMovie', { number: num, id: String(mv.id || '') })
 }
 
+// ---------- 详情抢跑 / 头像预热（老 `renderActorDetail` 末尾那三行） ----------
+
+/**
+ * 作品史详情的后台抢跑（老 `prefetchCards(m, PREFETCH_N)` ＋ 每行
+ * `el.onmouseenter = () => prefetchDetail(num, id)`）。
+ *
+ * 队列纪律全在 `composables/prefetchDetail.ts`（与发现榜单**同一套**）：
+ * 串行 1 条 / 限量 `PREFETCH_N` / 命中 `detailCache` 跳过 / 已在飞不重复发；
+ * 这里只负责"什么时候排"和"什么时候取消"。
+ *
+ * **一份队列一个组件实例**（`createDetailPrefetcher()` 在 `setup` 里建）：
+ * 壳用 `:key="actors:${actorNonce}"` 挂本视图（详情抽屉里点演员会 `actorNonce++`），
+ * 换演员时是"旧实例卸载 + 新实例挂载"。队列若放模块级，旧实例卸载时的 `flush()`
+ * 会把新实例刚排进去的作品史任务一起清掉。
+ */
+const prefetcher = createDetailPrefetcher(() => props.api)
+
+/** 鼠标进入某一行作品：老 `onmouseenter` 抢跑（点下去时多半已经在路上）。 */
+function prefetchFilm(mv: ActorMovie): void {
+  prefetcher.enqueue(mv.number, mv.id)
+}
+
+/**
+ * 作品史列表变化时补一轮抢跑：老实现每次 `renderActorDetail` 末尾都跑一次
+ * `prefetchCards(m, PREFETCH_N)`（前 6 部）。这里的 `shown` 就是当时铺出来的那批
+ * （折叠时前 12 部，抢跑仍只取前 6 部）；切年份 tab 会重算 → 重新排一轮，
+ * 已在缓存里的那些会被 `enqueue` 静默跳过。
+ *
+ * 老实现预热的是**全部** `shown`，这里同样把 `shown` 交出去（`enqueueMany` 自己截前 N）。
+ */
+watch(
+  shown,
+  list => prefetcher.enqueueMany(list, PREFETCH_N),
+  { immediate: true },
+)
+
+/**
+ * 换演员 / 离开视图：把在途与排队的抢跑**作废**。
+ *
+ * 老实现没有这一步（它靠"缓存按番号存、旧响应落地也无所谓"），但作品史的抢跑是
+ * "为当前这个人准备的"：换人之后旧任务既占串行位、又会白起 javdb 子进程。
+ * `flush()` 之后队里没跑的丢掉；正在飞的那条回来时会被代数闸门拦下、**不写进 `detailCache`**。
+ *
+ * 为什么不在 `openActor` / `backToList` 里先调一次：`actor` 的 watch 是 `pre` 刷新的，
+ * 这两个函数同步设完 `actor` 就立刻 `loadPage()`（异步），flush 与 `pageCache` 的写入
+ * 不在同一时刻，放在 watch 里才和"界面真的换了人"同一拍。
+ */
+watch(actor, () => prefetcher.flush())
+onUnmounted(() => prefetcher.flush())
+
+/**
+ * 封面预热：老 `preload(shown.map(x => x.thumb))` —— **故意不搬**（任务里允许，理由如下，实测过）。
+ *
+ * 1. **老实现确实有事可做，但新实现的事已经由 `<Thumb lazy>` 干了**：真机实测
+ *    （`?mode=real`，1440×960，某位演员 12 部作品）首屏只看得到前 6 张，后 6 张要滚下去；
+ *    老实现把它们全拉一遍，图确实"滚到就有"。新实现每张封面都是 `<Thumb lazy>`，
+ *    滚到那一刻才开始取 —— 用户看到的差别是"滚过去会不会白一下"，不是"能不能看"。
+ * 2. **会跟详情抢跑抢连接位（这条是决定性的）**：详情预热是**串行 1 条**、每条要起一个
+ *    javdb 子进程（老实现注释：不并发压多个子进程），抢跑的全部价值就是"点开详情秒开"；
+ *    封面预热会把浏览器对同站的连接位分走。不该为了"滚过去不白一下"去挤"点开要等几秒"。
+ * 3. **预热的是原始地址、真正用的可能是代理**：`Thumb` 直连失败会回落到插件 `/img` 代理；
+ *    老地址多半带 `images.projectjav.com`（该图床对 Referer 挑剔），直连 403 时预热等于白发一次请求。
+ *
+ * 真要恢复，就该连"代理地址"一起预热（那需要把 `Thumb` 的回落链也抽成小件），不是照抄一行。
+ */
+
+/**
+ * 头像预热：老 `renderActors` 末尾的 `preload(S.favs.map(a => a.avatar))`。
+ *
+ * **与老实现的差异（有意）**：老实现预热的是 `S.favs` 里的原字段；这里预热的是
+ * `favAvatar(item)` —— 即画在卡片上的那个地址（老实现要先 `actorAvatarOf` 回落，
+ * 收藏里 `avatar` 为空时它画的和预热的根本不是同一个 URL）。空地址照样跳过（老 `preload` 的 `if (u)`）。
+ *
+ * `watch(…, {immediate:true})` 而不是只在新收藏进来时预热：落回链（收藏 → 演员榜 → 档案页）
+ * 是"晚一步才有地址"的，`favAvatar` 变了再补一次，才对得上老实现"每次 `renderActors` 都跑一遍"。
+ *
+ * 实测备注（`?mode=real`，2026-10-10）：真机 8 位收藏的 `favs[].avatar` **都非空**
+ * （各 ~97–98 字符的代理地址），所以这一条在真机上是真的有事可做：
+ * 8 条 `new Image()`、8 个头像地址各被请求 1 次（与 `<Thumb>` 的取图去重，没有重复请求）。
+ */
+watch(
+  () => favs.value.map(item => favAvatar(item)).join('\n'),
+  () => favs.value.forEach(item => warmImage(favAvatar(item))),
+  { immediate: true },
+)
+
 // ---------- 演员榜挑选弹窗 ----------
 
 const pickerOpen = ref(false)
@@ -693,6 +787,7 @@ watch(
               class="avh-film"
               :title="mv.title || mv.number || ''"
               @click="openFilm(mv)"
+              @mouseenter="prefetchFilm(mv)"
             >
               <div class="avh-film__pic" :style="picStyle(mv)">
                 <Thumb

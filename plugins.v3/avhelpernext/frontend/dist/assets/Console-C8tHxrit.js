@@ -3408,6 +3408,139 @@ function cssUrl(value) {
   return String(value || "").replace(/["'()\\\s]/g, (char) => encodeURIComponent(char));
 }
 
+const {reactive: reactive$2} = await importShared('vue');
+
+const detailCache = reactive$2(/* @__PURE__ */ new Map());
+const longState = reactive$2(/* @__PURE__ */ new Map());
+function cachedDetail(number) {
+  const key = String(number ?? "");
+  return key ? detailCache.get(key) : void 0;
+}
+function putDetail(number, data) {
+  const key = String(number ?? "");
+  if (!key) return;
+  detailCache.set(key, { data: data || {}, t: Date.now(), error: "" });
+}
+function putDetailError(number, error) {
+  const key = String(number ?? "");
+  if (!key) return;
+  detailCache.set(key, { data: {}, t: Date.now(), error });
+}
+function dropDetail(number) {
+  const key = String(number ?? "");
+  if (key) detailCache.delete(key);
+}
+function setLongUrl(number, url) {
+  const entry = cachedDetail(number);
+  if (entry && entry.data) entry.data.longimage = url;
+}
+async function fetchLongUrl(api, number, force = false) {
+  if (!api || typeof api.get !== "function") return { ok: false, message: "宿主请求器不可用" };
+  const params = { number };
+  if (force) params.force = 1;
+  try {
+    const raw = await api.get("plugin/longimage", { params });
+    const payload = raw && typeof raw === "object" && "data" in raw ? raw.data : raw;
+    if (payload && typeof payload === "object" && payload.success === false) {
+      return { ok: false, message: String(payload.message || payload.detail || "") };
+    }
+    const url = String(payload && (payload.url || payload.longimage) || "");
+    return { ok: true, url };
+  } catch (err) {
+    const payload = err?.payload || err?.response?.data;
+    const message = String(payload?.message || payload?.detail || err?.message || "请稍后重试");
+    return { ok: false, message };
+  }
+}
+
+const PREFETCH_N = 6;
+function warmImage(url) {
+  const src = String(url ?? "");
+  if (!src) return;
+  const image = new Image();
+  image.decoding = "async";
+  image.src = src;
+}
+const NUMBER_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const inFlight = /* @__PURE__ */ new Set();
+function createDetailPrefetcher(api) {
+  const queue = { jobs: [], busy: false, gen: 0, req: null };
+  function getApi() {
+    const value = api();
+    return value && typeof value.get === "function" ? value : null;
+  }
+  async function pump() {
+    if (queue.busy) return;
+    let job = queue.jobs.shift();
+    while (job && (cachedDetail(job.number) || inFlight.has(job.number))) job = queue.jobs.shift();
+    if (!job) return;
+    const client = getApi();
+    if (!client) {
+      queue.jobs = [];
+      return;
+    }
+    const gen = queue.gen;
+    const controller = new AbortController();
+    const req = { controller, promise: null };
+    queue.busy = true;
+    queue.req = req;
+    inFlight.add(job.number);
+    req.promise = (async () => {
+      try {
+        const params = { number: job.number };
+        if (job.id) params.id = job.id;
+        const payload = unwrap(
+          await client.get("plugin/detail", { params, signal: controller.signal })
+        );
+        if (gen !== queue.gen) return;
+        if (payload && typeof payload === "object" && payload.success === false) return;
+        putDetail(job.number, payload || {});
+      } catch {
+      } finally {
+        inFlight.delete(job.number);
+        if (queue.req === req) {
+          queue.req = null;
+          queue.busy = false;
+        }
+        void pump();
+      }
+    })();
+  }
+  function enqueue(number, id) {
+    const num = String(number ?? "").trim();
+    if (!num || !NUMBER_RE.test(num)) return;
+    if (cachedDetail(num)) return;
+    if (queue.jobs.some((job) => job.number === num)) return;
+    if (inFlight.has(num)) return;
+    queue.jobs.push({ number: num, id: String(id ?? "") });
+    void pump();
+  }
+  function flush() {
+    queue.jobs = [];
+    queue.gen += 1;
+    const req = queue.req;
+    if (!req) {
+      queue.busy = false;
+      return;
+    }
+    queue.busy = true;
+    try {
+      req.controller.abort();
+    } catch {
+    }
+    const resume = () => void pump();
+    Promise.resolve(req.promise).then(resume, resume);
+  }
+  return {
+    enqueue,
+    enqueueMany(movies, n = PREFETCH_N) {
+      (movies || []).slice(0, n).forEach((movie) => enqueue(movie?.number, movie?.id));
+    },
+    flush,
+    idle: () => !queue.busy
+  };
+}
+
 const {defineComponent:_defineComponent$7} = await importShared('vue');
 
 const {createTextVNode:_createTextVNode$5,resolveComponent:_resolveComponent$6,withCtx:_withCtx$6,createVNode:_createVNode$5,createElementVNode:_createElementVNode$7,openBlock:_openBlock$7,createElementBlock:_createElementBlock$7,createCommentVNode:_createCommentVNode$7,createBlock:_createBlock$6,toDisplayString:_toDisplayString$7,normalizeClass:_normalizeClass$4,renderList:_renderList$5,Fragment:_Fragment$5,normalizeStyle:_normalizeStyle$1} = await importShared('vue');
@@ -3442,7 +3575,7 @@ const _hoisted_18$1 = {
 const _hoisted_19$1 = ["onClick"];
 const _hoisted_20$1 = { class: "avh-filmyears__n" };
 const _hoisted_21$1 = { class: "avh-films" };
-const _hoisted_22$1 = ["title", "onClick"];
+const _hoisted_22$1 = ["title", "onClick", "onMouseenter"];
 const _hoisted_23$1 = { class: "avh-film__ft" };
 const _hoisted_24$1 = { class: "avh-film__fn" };
 const _hoisted_25$1 = {
@@ -3470,7 +3603,7 @@ const _hoisted_33$1 = {
   class: "avh-hint"
 };
 const _hoisted_34$1 = { class: "avh-actors avh-actors--pick" };
-const {computed: computed$6,nextTick: nextTick$2,reactive: reactive$2,ref: ref$8,watch: watch$5} = await importShared('vue');
+const {computed: computed$6,nextTick: nextTick$2,onUnmounted,reactive: reactive$1,ref: ref$8,watch: watch$5} = await importShared('vue');
 const FILM_FOLD = 12;
 const ACTOR_LIMIT = 0;
 const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
@@ -3487,7 +3620,7 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
     const props = __props;
     const emit = __emit;
     const t = hostToast(props.toast);
-    const pageCache = reactive$2(/* @__PURE__ */ new Map());
+    const pageCache = reactive$1(/* @__PURE__ */ new Map());
     const rankCache = { error: "", data: null };
     async function apiGet(path, params) {
       const api = props.api;
@@ -3716,6 +3849,22 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
       if (!num) return;
       emit("openMovie", { number: num, id: String(mv.id || "") });
     }
+    const prefetcher = createDetailPrefetcher(() => props.api);
+    function prefetchFilm(mv) {
+      prefetcher.enqueue(mv.number, mv.id);
+    }
+    watch$5(
+      shown,
+      (list2) => prefetcher.enqueueMany(list2, PREFETCH_N),
+      { immediate: true }
+    );
+    watch$5(actor, () => prefetcher.flush());
+    onUnmounted(() => prefetcher.flush());
+    watch$5(
+      () => favs.value.map((item) => favAvatar(item)).join("\n"),
+      () => favs.value.forEach((item) => warmImage(favAvatar(item))),
+      { immediate: true }
+    );
     const pickerOpen = ref$8(false);
     const pickerLoading = ref$8(false);
     const pickerError = ref$8("");
@@ -3927,7 +4076,8 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
                     key: filmKey(mv, index),
                     class: "avh-film",
                     title: mv.title || mv.number || "",
-                    onClick: ($event) => openFilm(mv)
+                    onClick: ($event) => openFilm(mv),
+                    onMouseenter: ($event) => prefetchFilm(mv)
                   }, [
                     _createElementVNode$7("div", {
                       class: "avh-film__pic",
@@ -3952,7 +4102,7 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
                         mv.lib ? (_openBlock$7(), _createElementBlock$7("span", _hoisted_27$1, "已入库")) : _createCommentVNode$7("", true)
                       ])
                     ])
-                  ], 8, _hoisted_22$1);
+                  ], 40, _hoisted_22$1);
                 }), 128))
               ]),
               list.value.length > FILM_FOLD ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_28$1, [
@@ -4091,7 +4241,7 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
   }
 });
 
-const ActorsView = /* @__PURE__ */ _export_sfc(_sfc_main$7, [["__scopeId", "data-v-a876d5f1"]]);
+const ActorsView = /* @__PURE__ */ _export_sfc(_sfc_main$7, [["__scopeId", "data-v-3777d56e"]]);
 
 const {defineComponent:_defineComponent$6} = await importShared('vue');
 
@@ -4176,88 +4326,21 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
 
 const NumCard = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-c5f8fb27"]]);
 
-const {reactive: reactive$1} = await importShared('vue');
-
-const detailCache = reactive$1(/* @__PURE__ */ new Map());
-const longState = reactive$1(/* @__PURE__ */ new Map());
-function cachedDetail(number) {
-  const key = String(number ?? "");
-  return key ? detailCache.get(key) : void 0;
-}
-function putDetail(number, data) {
-  const key = String(number ?? "");
-  if (!key) return;
-  detailCache.set(key, { data: data || {}, t: Date.now(), error: "" });
-}
-function putDetailError(number, error) {
-  const key = String(number ?? "");
-  if (!key) return;
-  detailCache.set(key, { data: {}, t: Date.now(), error });
-}
-function dropDetail(number) {
-  const key = String(number ?? "");
-  if (key) detailCache.delete(key);
-}
-function setLongUrl(number, url) {
-  const entry = cachedDetail(number);
-  if (entry && entry.data) entry.data.longimage = url;
-}
-async function fetchLongUrl(api, number, force = false) {
-  if (!api || typeof api.get !== "function") return { ok: false, message: "宿主请求器不可用" };
-  const params = { number };
-  if (force) params.force = 1;
-  try {
-    const raw = await api.get("plugin/longimage", { params });
-    const payload = raw && typeof raw === "object" && "data" in raw ? raw.data : raw;
-    if (payload && typeof payload === "object" && payload.success === false) {
-      return { ok: false, message: String(payload.message || payload.detail || "") };
-    }
-    const url = String(payload && (payload.url || payload.longimage) || "");
-    return { ok: true, url };
-  } catch (err) {
-    const payload = err?.payload || err?.response?.data;
-    const message = String(payload?.message || payload?.detail || err?.message || "请稍后重试");
-    return { ok: false, message };
-  }
-}
-
 const {reactive,ref: ref$7} = await importShared('vue');
-const PREFETCH_N = 6;
 const rankCache = reactive(/* @__PURE__ */ new Map());
 const periodState = ref$7("week");
 const kindState = ref$7("censored");
-const PRE = { queue: [], busy: false };
+const rankPrefetcher = createDetailPrefetcher(() => hostApi);
+let hostApi = null;
 function prefetchDetail(api, number, id) {
-  const num = String(number ?? "");
-  if (!api || typeof api.get !== "function" || !num) return;
-  if (detailCache.has(num)) return;
-  if (PRE.queue.some((item) => item.number === num)) return;
-  PRE.queue.push({ number: num, id: String(id ?? "") });
-  void pumpPrefetch(api);
-}
-async function pumpPrefetch(api) {
-  if (PRE.busy) return;
-  const job = PRE.queue.shift();
-  if (!job) return;
-  if (detailCache.has(job.number)) {
-    void pumpPrefetch(api);
-    return;
-  }
-  PRE.busy = true;
-  try {
-    const params = { number: job.number };
-    if (job.id) params.id = job.id;
-    const payload = unwrap(await api.get("plugin/detail", { params }));
-    if (payload && typeof payload === "object" && payload.success === false) return;
-    putDetail(job.number, payload || {});
-  } catch {
-  } finally {
-    PRE.busy = false;
-    void pumpPrefetch(api);
-  }
+  if (!api || typeof api.get !== "function") return;
+  hostApi = api;
+  rankPrefetcher.enqueue(number, id);
 }
 function prefetchCards(api, movies, n = PREFETCH_N) {
-  (movies || []).slice(0, n).forEach((movie) => prefetchDetail(api, movie?.number, movie?.id));
+  if (!api || typeof api.get !== "function") return;
+  hostApi = api;
+  rankPrefetcher.enqueueMany(movies, n);
 }
 
 const {defineComponent:_defineComponent$5} = await importShared('vue');
@@ -4486,7 +4569,7 @@ const _sfc_main$5 = /* @__PURE__ */ _defineComponent$5({
   }
 });
 
-const DiscoverView = /* @__PURE__ */ _export_sfc(_sfc_main$5, [["__scopeId", "data-v-cbe32a8e"]]);
+const DiscoverView = /* @__PURE__ */ _export_sfc(_sfc_main$5, [["__scopeId", "data-v-29ff5987"]]);
 
 const {defineComponent:_defineComponent$4} = await importShared('vue');
 

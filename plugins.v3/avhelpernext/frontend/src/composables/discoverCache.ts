@@ -15,11 +15,16 @@
  * 与详情缓存一样，各自落在一个 composable 里，两边都从那儿取。
  */
 import { reactive, ref } from 'vue'
-import { unwrap, type PluginApi } from './usePluginApi'
-import { detailCache, putDetail } from './detailCache'
+import type { PluginApi } from './usePluginApi'
+import { PREFETCH_N, createDetailPrefetcher } from './prefetchDetail'
 
-/** 每屏后台预热前几张：老 `PREFETCH_N = 6`（调大 = 点开更快、后台开销更多）。 */
-export const PREFETCH_N = 6
+/**
+ * 每屏后台预热前几张：老 `PREFETCH_N = 6`（调大 = 点开更快、后台开销更多）。
+ *
+ * 真身搬到 `composables/prefetchDetail.ts` 了（详情抢跑的队列纪律现在由「发现榜单」与
+ * 「演员作品史」**共用**）；从这里转出一手，是为了让视图只认一个模块。
+ */
+export { PREFETCH_N } from './prefetchDetail'
 
 /** 榜单里的一部片（后端 `_movie()`；与 `common/NumCard.vue` 的 `CardMovie` 同 shape）。 */
 export interface RankMovie {
@@ -72,56 +77,37 @@ export { cachedDetail, detailCache, putDetail } from './detailCache'
 export { unwrap } from './usePluginApi'
 
 /**
- * 后台预热队列：老 `PRE = {queue:[], busy:false}`。
- * **串行 1 条**——同一时间只起一个 `/detail` 请求，不并发压多个 javdb 子进程。
+ * 详情抢跑的队列（老 `PRE = {queue:[], busy:false}`）。
+ *
+ * **真身在 `composables/prefetchDetail.ts`**：`S6-7` 之后「演员作品史」也要同一套纪律
+ * （串行 1 条 / 限量 `PREFETCH_N` / 命中缓存跳过 / 换演员即在途作废），所以抽成
+ * `createDetailPrefetcher()`；发现榜单这份仍然是**模块级单例** —— 老 `PRE` 也是全局的，
+ * 切栏目、组件卸载都不该把它清掉（那些在途结果照样能进 `detailCache`，抽屉直接受益）。
  */
-const PRE: { queue: Array<{ number: string; id: string }>; busy: boolean } = { queue: [], busy: false }
+const rankPrefetcher = createDetailPrefetcher(() => hostApi)
+
+/**
+ * 发现榜单当前用的宿主请求器。
+ *
+ * `prefetchDetail.ts` 是模块级的、拿不到 Vue 的 props（与老实现里模块级的 `apiGet` 同构），
+ * 所以这里只记"最近一次传进来的那个"：`prefetchDetail(api, …)` / `prefetchCards(api, …)`
+ * 每次都会更新它，语义与老实现一致（同一场会话里只有一套宿主请求器）。
+ */
+let hostApi: PluginApi | null = null
 
 /**
  * 排一张卡片的详情进预热队列（老 `prefetchDetail(num, id)`）。
  *
- * 三条纪律与老实现逐条一致：
+ * 四条纪律（前三条与老实现逐条一致，第四条是演员页带出来的）：
  * 1. 命中 `detailCache` 直接跳过（切周期/切分类来回看不重复抓）；
  * 2. 已在队列里不重复排队；
- * 3. 只是**排队**，真正抓取由 `pumpPrefetch` 串行执行。
+ * 3. 只是**排队**，真正抓取由 `pumpPrefetch` 串行执行；
+ * 4. 别的视图（演员作品史）正在抓同一个番号时也不重复发。
  */
 export function prefetchDetail(api: PluginApi | null, number: unknown, id?: unknown): void {
-  const num = String(number ?? '')
-  if (!api || typeof api.get !== 'function' || !num) return
-  if (detailCache.has(num)) return
-  if (PRE.queue.some(item => item.number === num)) return
-  PRE.queue.push({ number: num, id: String(id ?? '') })
-  void pumpPrefetch(api)
-}
-
-/**
- * 串行取详情（老 `pumpPrefetch()`）：
- * 取队首 → 命中缓存就再抽下一个 → 否则发一次 `GET plugin/detail?number=&id=` → 完成后继续。
- * **失败不写任何条目**（老实现 `if (r.ok) put(...)` + `.catch(() => {})`），
- * 留给真正打开详情时报错重试。
- */
-async function pumpPrefetch(api: PluginApi): Promise<void> {
-  if (PRE.busy) return
-  const job = PRE.queue.shift()
-  if (!job) return
-  if (detailCache.has(job.number)) {
-    void pumpPrefetch(api)
-    return
-  }
-  PRE.busy = true
-  try {
-    // 老 `apiUrl()` 会把空值参数丢掉，所以 id 为空时不带这一段。
-    const params: Record<string, string> = { number: job.number }
-    if (job.id) params.id = job.id
-    const payload: any = unwrap(await api.get('plugin/detail', { params }))
-    if (payload && typeof payload === 'object' && payload.success === false) return
-    putDetail(job.number, (payload as Record<string, any>) || {})
-  } catch {
-    /* 预热失败静默（老实现 `.catch(() => {})`） */
-  } finally {
-    PRE.busy = false
-    void pumpPrefetch(api)
-  }
+  if (!api || typeof api.get !== 'function') return
+  hostApi = api
+  rankPrefetcher.enqueue(number, id)
 }
 
 /**
@@ -133,5 +119,7 @@ export function prefetchCards(
   movies: RankMovie[] | null | undefined,
   n: number = PREFETCH_N,
 ): void {
-  ;(movies || []).slice(0, n).forEach(movie => prefetchDetail(api, movie?.number, movie?.id))
+  if (!api || typeof api.get !== 'function') return
+  hostApi = api
+  rankPrefetcher.enqueueMany(movies, n)
 }

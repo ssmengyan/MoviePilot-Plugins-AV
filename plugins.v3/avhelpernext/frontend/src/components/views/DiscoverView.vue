@@ -13,6 +13,11 @@
  * 遍历「所有列表缓存」找榜单里那张卡片，它得读同一份 `rankCache`；让抽屉反向从视图模块 import
  * 会在 `views/DiscoverView.vue ↔ detail/DetailDrawer.vue` 之间绕一圈。这里只做一次转出，
  * 视图内部的引用一律不改名。
+ *
+ * **S6-8 起预热的队列纪律搬到 `composables/prefetchDetail.ts`**：演员作品史要的是同一套
+ * （串行 1 条 / 限量 / 命中缓存跳过 / 换演员即在途作废），抽成 `createDetailPrefetcher()`；
+ * 发现榜单这份仍是模块级单例（老 `PRE` 也是全局的），`discoverCache` 继续按原签名转出
+ * `prefetchDetail` / `prefetchCards` / `PREFETCH_N`，所以本视图**一行都不用改**。
  */
 export {
   PREFETCH_N,

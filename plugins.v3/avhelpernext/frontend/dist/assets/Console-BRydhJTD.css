@@ -639,23 +639,23 @@
 }
 
 /* 对齐 `app.css` 的 `.toolbar` / `.hint` / `.spacer` */
-.avh-actors__toolbar[data-v-a876d5f1] {
+.avh-actors__toolbar[data-v-3777d56e] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 14px;
 }
-.avh-hint[data-v-a876d5f1] {
+.avh-hint[data-v-3777d56e] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-actors__spacer[data-v-a876d5f1] {
+.avh-actors__spacer[data-v-3777d56e] {
   flex: 1;
 }
 
 /* 对齐 `.loading`：弱化色、居中、上下留白 */
-.avh-loading[data-v-a876d5f1] {
+.avh-loading[data-v-3777d56e] {
   padding: 44px 20px;
   text-align: center;
   font-size: 13px;
@@ -663,22 +663,22 @@
 }
 
 /* 对齐 `.actors`（挑选弹窗那份按老实现收窄到 120px） */
-.avh-actors[data-v-a876d5f1] {
+.avh-actors[data-v-3777d56e] {
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
 }
-.avh-actors--pick[data-v-a876d5f1] {
+.avh-actors--pick[data-v-3777d56e] {
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
 }
 
 /* 老实现的内联 `margin-bottom:12px` */
-.avh-actorpick__tip[data-v-a876d5f1] {
+.avh-actorpick__tip[data-v-3777d56e] {
   margin-bottom: 12px;
 }
 
 /* 对齐 `.profile`：横向卡片，头像 132×132（12px 圆角，不是圆形） */
-.avh-profile[data-v-a876d5f1] {
+.avh-profile[data-v-3777d56e] {
   display: flex;
   gap: 18px;
   flex-wrap: wrap;
@@ -688,31 +688,31 @@
   border-radius: 10px;
   background: rgba(var(--v-theme-on-surface), 0.04);
 }
-.avh-profile__av[data-v-a876d5f1] {
+.avh-profile__av[data-v-3777d56e] {
   width: 132px;
   height: 132px;
   flex: none;
   overflow: hidden;
   border-radius: 12px;
 }
-.avh-profile__main[data-v-a876d5f1] {
+.avh-profile__main[data-v-3777d56e] {
   flex: 1;
   min-width: 240px;
 }
-.avh-profile__name[data-v-a876d5f1] {
+.avh-profile__name[data-v-3777d56e] {
   margin: 0 0 4px;
   font-size: 20px;
   font-weight: 600;
   line-height: 1.3;
 }
-.avh-profile__zh[data-v-a876d5f1] {
+.avh-profile__zh[data-v-3777d56e] {
   font-size: 14px;
   font-weight: 400;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
 
 /* 对齐 `.kv`：`作品 12` 这种键值对，键比正文更淡 */
-.avh-kv[data-v-a876d5f1] {
+.avh-kv[data-v-3777d56e] {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 14px;
@@ -720,13 +720,13 @@
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.7);
 }
-.avh-kv b[data-v-a876d5f1] {
+.avh-kv b[data-v-3777d56e] {
   font-weight: 400;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
 
 /* 对齐 `.acts` */
-.avh-acts[data-v-a876d5f1] {
+.avh-acts[data-v-3777d56e] {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -734,7 +734,7 @@
 }
 
 /* 对齐 `.secttl`：12px、弱化色、字距 .4px */
-.avh-secttl[data-v-a876d5f1] {
+.avh-secttl[data-v-3777d56e] {
   margin: 20px 0 8px;
   font-size: 12px;
   letter-spacing: 0.4px;
@@ -742,13 +742,13 @@
 }
 
 /* 对齐 `.filmyears`：胶囊按钮，选中的那颗走主色 */
-.avh-filmyears[data-v-a876d5f1] {
+.avh-filmyears[data-v-3777d56e] {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
   margin: 0 0 12px;
 }
-.avh-filmyears button[data-v-a876d5f1] {
+.avh-filmyears button[data-v-3777d56e] {
   padding: 3px 11px;
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
@@ -757,24 +757,24 @@
   border-radius: 999px;
   cursor: pointer;
 }
-.avh-filmyears__on[data-v-a876d5f1] {
+.avh-filmyears__on[data-v-3777d56e] {
   color: rgb(var(--v-theme-on-primary)) !important;
   background: rgb(var(--v-theme-primary)) !important;
   border-color: rgb(var(--v-theme-primary)) !important;
 }
-.avh-filmyears__n[data-v-a876d5f1] {
+.avh-filmyears__n[data-v-3777d56e] {
   opacity: 0.65;
 }
 
 /* 对齐 `.films` */
-.avh-films[data-v-a876d5f1] {
+.avh-films[data-v-3777d56e] {
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(auto-fill, minmax(216px, 1fr));
 }
 
 /* 对齐 `.film` */
-.avh-film[data-v-a876d5f1] {
+.avh-film[data-v-3777d56e] {
   overflow: hidden;
   cursor: pointer;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
@@ -782,19 +782,19 @@
   background: rgba(var(--v-theme-on-surface), 0.04);
   transition: 0.15s;
 }
-.avh-film[data-v-a876d5f1]:hover {
+.avh-film[data-v-3777d56e]:hover {
   border-color: rgb(var(--v-theme-primary));
   transform: translateY(-2px);
 }
 
 /* 对齐 `.film .pic` + `.pic::before`（同图模糊底，横竖混排也不裁切） */
-.avh-film__pic[data-v-a876d5f1] {
+.avh-film__pic[data-v-3777d56e] {
   position: relative;
   aspect-ratio: 3 / 4;
   overflow: hidden;
   background: rgba(var(--v-theme-on-surface), 0.12);
 }
-.avh-film__pic[data-v-a876d5f1]::before {
+.avh-film__pic[data-v-3777d56e]::before {
   content: '';
   position: absolute;
   inset: -10px;
@@ -806,22 +806,22 @@
 }
 
 /* 封面本体压在模糊底之上；`variant="film"` 已把 `object-fit` 定成 contain */
-.avh-film__pic[data-v-a876d5f1] .avh-thumb {
+.avh-film__pic[data-v-3777d56e] .avh-thumb {
   position: absolute;
   inset: 0;
   z-index: 1;
   background: transparent;
 }
-.avh-film__ft[data-v-a876d5f1] {
+.avh-film__ft[data-v-3777d56e] {
   padding: 8px 10px 10px;
 }
-.avh-film__fn[data-v-a876d5f1] {
+.avh-film__fn[data-v-3777d56e] {
   font-size: 13px;
   font-weight: 700;
 }
 
 /* 对齐 `.ftt`：两行截断 */
-.avh-film__ftt[data-v-a876d5f1] {
+.avh-film__ftt[data-v-3777d56e] {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -831,7 +831,7 @@
   line-height: 1.35;
   color: rgba(var(--v-theme-on-surface), 0.7);
 }
-.avh-film__fd[data-v-a876d5f1] {
+.avh-film__fd[data-v-3777d56e] {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -842,7 +842,7 @@
 
 /* `.tag` / `.tag.on` / `.tag.lib` 的等价样式（老 `app.css` 同名规则；
    `ActorRow` 里那份是 scoped，作用不到作品史的标签上，所以这里再写一份） */
-.avh-tag[data-v-a876d5f1] {
+.avh-tag[data-v-3777d56e] {
   display: inline-block;
   padding: 1px 6px;
   font-size: 10.5px;
@@ -850,19 +850,19 @@
   border: 1px solid rgba(var(--v-theme-on-surface), 0.16);
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-tag--on[data-v-a876d5f1] {
+.avh-tag--on[data-v-3777d56e] {
   border-color: rgba(var(--v-theme-success), 0.45);
   background: rgba(var(--v-theme-success), 0.18);
   color: rgb(var(--v-theme-on-surface));
 }
-.avh-tag--lib[data-v-a876d5f1] {
+.avh-tag--lib[data-v-3777d56e] {
   border-color: rgba(var(--v-theme-primary), 0.5);
   background: rgba(var(--v-theme-primary), 0.22);
   color: rgb(var(--v-theme-on-surface));
 }
 
 /* 对齐 `.morebar` */
-.avh-morebar[data-v-a876d5f1] {
+.avh-morebar[data-v-3777d56e] {
   display: flex;
   justify-content: center;
   margin-top: 16px;
@@ -957,25 +957,25 @@
 }
 
 /* 对齐 `.toolbar`：一行放两组 tabs + 计数 + 右侧按钮 */
-.avh-discover__toolbar[data-v-cbe32a8e] {
+.avh-discover__toolbar[data-v-29ff5987] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 14px;
 }
-.avh-discover__spacer[data-v-cbe32a8e] {
+.avh-discover__spacer[data-v-29ff5987] {
   flex: 1;
 }
 
 /* 对齐 `.hint` */
-.avh-discover__hint[data-v-cbe32a8e] {
+.avh-discover__hint[data-v-29ff5987] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
 
 /* 对齐 `.loading`（首屏那句与榜单那句共用） */
-.avh-discover__loading[data-v-cbe32a8e] {
+.avh-discover__loading[data-v-29ff5987] {
   padding: 44px 20px;
   text-align: center;
   font-size: 13px;
@@ -983,7 +983,7 @@
 }
 
 /* 对齐 `.tabs`：胶囊容器 + 选中那颗走主色（写法照演员页的 `.avh-filmyears`） */
-.avh-tabs[data-v-cbe32a8e] {
+.avh-tabs[data-v-29ff5987] {
   display: flex;
   gap: 4px;
   padding: 3px;
@@ -991,7 +991,7 @@
   border-radius: 8px;
   background: rgba(var(--v-theme-on-surface), 0.04);
 }
-.avh-tabs button[data-v-cbe32a8e] {
+.avh-tabs button[data-v-29ff5987] {
   padding: 4px 12px;
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
@@ -1000,13 +1000,13 @@
   border-radius: 6px;
   cursor: pointer;
 }
-.avh-tabs__on[data-v-cbe32a8e] {
+.avh-tabs__on[data-v-29ff5987] {
   color: rgb(var(--v-theme-on-primary)) !important;
   background: rgb(var(--v-theme-primary)) !important;
 }
 
 /* 对齐 `.grid`：`repeat(auto-fill,minmax(172px,1fr))`，卡片本体是 `NumCard` */
-.avh-discover__grid[data-v-cbe32a8e] {
+.avh-discover__grid[data-v-29ff5987] {
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
