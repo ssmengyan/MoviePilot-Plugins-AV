@@ -71,6 +71,11 @@ def _cache_path(url: str) -> str:
     return os.path.join(CACHE_DIR, digest + ".jpg")
 
 
+def cached(url: str) -> bool:
+    """这张图是否已经在本地缓存里（预热时用来跳过已缓存的那部分，不读文件内容）。"""
+    return bool(url) and os.path.exists(_cache_path(url))
+
+
 def _headers(url: str) -> Dict[str, str]:
     """按 host 组装请求头（主要是 Referer：projectjav 图床认这个）。"""
     host = urllib.parse.urlparse(url).hostname or ""

@@ -1,4 +1,4 @@
-﻿import { computed, reactive, ref, shallowRef, type ComputedRef, type Ref } from 'vue'
+import { computed, reactive, ref, shallowRef, type ComputedRef, type Ref } from 'vue'
 import {
   errorText,
   hostToast,
@@ -63,8 +63,14 @@ export interface UseSettingsDraftOptions {
   initialConfig?: PluginConfig | null
   /** 宿主 toast 原始注入对象（拿不到就传 null，静默降级）。 */
   toast?: HostToast | null
-  /** `emit('save', cfg)`：保存第 2 步交给宿主 PUT。 */
-  onSaveHost: (config: PluginConfig) => void
+  /**
+   * 保存第 2 步（宿主配置）。
+   *
+   * 允许返回 Promise：宿主接了 `save` 时它就是同步的一发 `emit`；
+   * 数据台弹窗里宿主没接 `save`，那边是自己 `PUT plugin/<id>`，**失败必须能报出来**，
+   * 所以这一步是 await 的（抛异常 → 走下面 catch → toast「保存失败」并且不报成功）。
+   */
+  onSaveHost: (config: PluginConfig) => void | Promise<void>
 }
 
 export interface UseSettingsDraft {
@@ -81,6 +87,14 @@ export interface UseSettingsDraft {
   dirty: ComputedRef<boolean>
   /** 是否真的拿到了插件开关状态（`initialConfig.enabled` / `/bootstrap.enabled` 至少一个）。 */
   enabledKnown: ComputedRef<boolean>
+  /**
+   * 宿主配置是否已经读到过**真实值**（`initialConfig` 非空，或调用方用 `GET plugin/<id>` 补过一次）。
+   *
+   * 这一位是**保存第 2 步的前置条件**：宿主配置走的是整份覆盖的 `PUT plugin/<id>`，
+   * 拿一份全空的草稿去 PUT 会把 `enabled` / `proxy` 一起写没（2026-10-11 真机踩过：
+   * 数据台弹窗里宿主**不传** `initialConfig`，一保存就把插件关了、代理也清了）。
+   */
+  hostLoaded: Ref<boolean>
   /** 顶条「保存修改」按钮文案（含 `● 未保存` 标记）。 */
   saveButtonLabel: ComputedRef<string>
   /** 「两栏只填一半」这类跨栏校验提示；空串表示没问题。 */
@@ -94,6 +108,8 @@ export interface UseSettingsDraft {
   sectionDirty: (key: string) => boolean
   load: () => Promise<void>
   applyBootstrap: (data: BootstrapLike | null) => void
+  /** 用宿主配置（`GET plugin/<id>` 的存储值）补一次基准；用户已经改过就不覆盖。 */
+  hydrateHost: (conf: PluginConfig | null | undefined) => void
   save: () => Promise<boolean>
   reset: () => void
   resetRule: () => void
@@ -128,6 +144,16 @@ export function useSettingsDraft(options: UseSettingsDraftOptions): UseSettingsD
   const checkInfo = ref<CheckInfo | null>(null)
   /** `/bootstrap` 给过的 enabled（`null` = 没给过）；用于判断开关状态是否真实可信。 */
   const bootstrapEnabled = ref<boolean | null>(null)
+  /**
+   * 宿主配置是否读到过真实值。
+   *
+   * `initialConfig` 非空（宿主 `./Config` 入口会传 `get_form()` 的 model）即为真；
+   * 数据台入口（`./Page`）宿主**不传**这个 prop，必须由调用方 `GET plugin/<id>` 后
+   * 用 `hydrateHost()` 补上 —— 在补上之前**不允许**提交宿主配置（见 `hostLoaded` 的说明）。
+   */
+  const hostLoaded = ref(
+    Boolean(options.initialConfig && Object.keys(options.initialConfig as object).length > 0),
+  )
 
   const loading = ref(false)
   const saving = ref(false)
@@ -168,6 +194,28 @@ export function useSettingsDraft(options: UseSettingsDraftOptions): UseSettingsD
 
   hydrateHostFromProps()
 
+  /**
+   * 用宿主配置（`GET plugin/<id>` 的存储值）补一次基准。
+   *
+   * 只在「用户还没改过任何宿主字段」时采纳：否则会把用户正在编辑的内容盖掉，
+   * 而且脏标记的基准也会被悄悄挪走。拿不到配置（请求失败）时保持原状，
+   * `hostLoaded` 仍为 false → 保存第 2 步会被上层挡下（宁可不提交，也不写空）。
+   */
+  function hydrateHost(conf: PluginConfig | null | undefined): void {
+    if (!conf || typeof conf !== 'object') return
+    if (hostDirty.value) return
+    const next: HostConfigDraft = {
+      enabled: conf.enabled === true,
+      proxy: str(conf.proxy),
+      emby_host: str(conf.emby_host),
+      emby_apikey: str(conf.emby_apikey),
+    }
+    hostHydrated = true
+    Object.assign(hostConfig, next)
+    hostBase.value = { ...next }
+    hostLoaded.value = true
+  }
+
   /** 把 `/bootstrap` 里的只读字段灌进草稿（不覆盖用户已经改过的规则）。 */
   function applyBootstrap(data: BootstrapLike | null): void {
     if (!data || typeof data !== 'object') return
@@ -204,8 +252,10 @@ export function useSettingsDraft(options: UseSettingsDraftOptions): UseSettingsD
       rule.value = toRuleState(data.defaultRule)
     }
 
-    if (!hostHydrated && typeof data.enabled === 'boolean') {
-      hostHydrated = true
+    if (!hostLoaded.value && typeof data.enabled === 'boolean') {
+      // 宿主配置整份还没读到（数据台入口的常态，`GET plugin/<id>` 还在飞或失败了）：
+      // 先把 `/bootstrap` 的 enabled 显示出来，免得把开关画成"假的关"。
+      // 它只够显示 —— `hostLoaded` 仍是 false，第 2 步保存照样会被挡下，不会拿它去 PUT。
       hostBase.value = { ...hostConfig, enabled: data.enabled }
       hostConfig.enabled = data.enabled
     }
@@ -263,7 +313,10 @@ export function useSettingsDraft(options: UseSettingsDraftOptions): UseSettingsD
 
   /** 开关状态是否来自真实数据（两边都没给就提示一句，别让人以为「关着」是真状态）。 */
   const enabledKnown = computed(
-    () => typeof options.initialConfig?.enabled === 'boolean' || bootstrapEnabled.value !== null,
+    () =>
+      hostLoaded.value
+      || typeof options.initialConfig?.enabled === 'boolean'
+      || bootstrapEnabled.value !== null,
   )
 
   const validation = computed(() => embyHalfFilled(hostConfig))
@@ -295,16 +348,17 @@ export function useSettingsDraft(options: UseSettingsDraftOptions): UseSettingsD
         ruleBase.value = { ...rule.value }
       }
 
-      // 第 2 步：宿主配置交给宿主 PUT。文本字段去掉首尾空白。
+      // 第 2 步：宿主配置（宿主接了 save 就交给宿主 PUT，没接就由调用方自己 PUT）。
+      // 先提交、**成功之后**才挪基准：提交失败时「● 未保存」必须留着，否则用户以为存上了。
       const host: HostConfigDraft = {
         enabled: hostConfig.enabled,
         proxy: str(hostConfig.proxy).trim(),
         emby_host: str(hostConfig.emby_host).trim(),
         emby_apikey: str(hostConfig.emby_apikey).trim(),
       }
+      await options.onSaveHost({ ...host })
       Object.assign(hostConfig, host)
       hostBase.value = { ...host }
-      options.onSaveHost({ ...host })
 
       t.success('已保存')
       return true
@@ -380,6 +434,7 @@ export function useSettingsDraft(options: UseSettingsDraftOptions): UseSettingsD
     hostDirty,
     dirty,
     enabledKnown,
+    hostLoaded,
     saveButtonLabel,
     validation,
     loading,
@@ -390,6 +445,7 @@ export function useSettingsDraft(options: UseSettingsDraftOptions): UseSettingsD
     sectionDirty,
     load,
     applyBootstrap,
+    hydrateHost,
     save,
     reset,
     resetRule,

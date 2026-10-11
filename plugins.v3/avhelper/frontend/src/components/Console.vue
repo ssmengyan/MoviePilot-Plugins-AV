@@ -2,10 +2,9 @@
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
 import AppFrame from './AppFrame.vue'
 import { DEFAULT_MAX_WIDTH, type ConfigProps } from './contract'
-import { consoleEmits } from './emitContract'
+import { CONSOLE_EMIT_NAMES } from './emitContract'
 import {
   bindPluginApi,
-  errorText,
   hostToast,
   type PluginApi,
   type PluginConfig,
@@ -34,7 +33,12 @@ import { usePluginStore } from '../composables/usePluginStore'
 import { countUnread } from '../composables/noticesSeen'
 import { takePendingSettingsSection } from '../composables/settingsJump'
 
-/** 壳只有两种模式：`data` = 数据台（iframe），`settings` = 设置台（七个栏目）。 */
+/**
+ * 壳只有两种**入口模式**，决定设置窗口的初始开合：
+ * - `data`     = 插件详情弹窗（`./Page`）：先看数据台，设置窗口默认关着；
+ * - `settings` = 插件配置弹窗（`./Config`）：一进来就把设置窗口打开，数据台仍画在它后面
+ *   —— 关掉设置窗口就露出数据台，不再有"关掉设置就整个界面消失"的第三条路。
+ */
 type ConsoleMode = 'data' | 'settings'
 
 /**
@@ -54,7 +58,13 @@ const props = withDefaults(defineProps<ConfigProps & { mode?: ConsoleMode }>(), 
   mode: 'data',
 })
 
-const emit = defineEmits(consoleEmits())
+/**
+ * 事件必须用**字符串数组**声明（见 `emitContract.ts` 里记的真机根因）：
+ * 写成 `defineEmits(consoleEmits())` 会编译出 `emits: <函数>`，Vue 认不出来，
+ * 五个事件退化成 fallthrough attrs 后一次点击双发 —— 那正是"设置弹窗叠两层、
+ * 关一次关不掉、再关整个界面消失"的来源。
+ */
+const emit = defineEmits(CONSOLE_EMIT_NAMES)
 
 const DATA_SECTIONS: SectionItem[] = [
   { key: 'discover', title: '发现榜单', icon: 'mdi-chart-line' },
@@ -91,8 +101,20 @@ const NATIVE_VIEWS: Record<string, Component> = {
 /** iframe 必须用实例 id（普通插件 = pluginId；分身共享同一份联邦产物）。 */
 const framePluginId = computed(() => props.pluginId || props.sourcePluginId || '')
 
-const section = ref<string>(props.mode === 'settings' ? SETTINGS_SECTIONS[0]!.key : DATA_SECTIONS[0]!.key)
-const running = ref(false)
+/**
+ * 数据台与设置窗口**各存一份栏目**：设置是盖在数据台之上的独立窗口，
+ * 关掉它数据台的栏目不该被改动（老实现两个 Console 实例本来就是各存一份）。
+ */
+const section = ref<string>(DATA_SECTIONS[0]!.key)
+const settingsSection = ref<string>(SETTINGS_SECTIONS[0]!.key)
+/**
+ * 设置窗口开合。
+ *
+ * 2026-10-11 起设置是**本组件内的独立窗口**（`<v-dialog>`），不再走宿主的
+ * Page ⇄ Config 互换 —— 那条路只有一个结局：宿主换弹窗时把数据台一起关掉，
+ * 于是"关掉设置"要么停在设置页（叠了两层时），要么整个界面消失（最后一层也关了）。
+ */
+const settingsOpen = ref(props.mode === 'settings')
 const version = ref('')
 /** 「清空通知」请求在跑（确认框关闭后到请求结束之间的按钮态）。 */
 const noticeClearing = ref(false)
@@ -171,10 +193,17 @@ async function clearNoticesFromDrawer(): Promise<void> {
   }
 }
 
-const isSettings = computed(() => props.mode === 'settings')
+/**
+ * 这个 Console 是不是宿主「插件配置」弹窗里那一个（`./Config`，`mode === 'settings'`）。
+ *
+ * 只影响一件事：宿主配置（`enabled` / `proxy` / …）该由谁 PUT ——
+ * 宿主的 `PluginConfigDialog` 自己接了 `save` 事件，而 `PluginDataDialog` 没接（见 `saveHostConfig`）。
+ */
+const settingsEntry = computed(() => props.mode === 'settings')
 
-const activeSection = computed<SectionItem>(
-  () => SETTINGS_SECTIONS.find(item => item.key === section.value) || SETTINGS_SECTIONS[0]!,
+/** 设置窗口当前栏目（`settingsSection` 的归一结果；key 不认识时回落第一栏）。 */
+const activeSetting = computed<SectionItem>(
+  () => SETTINGS_SECTIONS.find(item => item.key === settingsSection.value) || SETTINGS_SECTIONS[0]!,
 )
 
 /** 当前栏目有没有原生视图：`null` → 内容区走 iframe（设置台栏目的 key 不在 `NATIVE_VIEWS` 里）。 */
@@ -270,12 +299,13 @@ const dataSections = computed<(SectionItem & { badge: NavBadge | null })[]>(() =
   DATA_SECTIONS.map(item => ({ ...item, badge: navBadges.value[item.key] ?? null })),
 )
 
-/** 设置台草稿：脏标记与保存顺序都在这里（设计文档 §5）。 */
+/** 设置草稿：脏标记与保存顺序都在这里（设计文档 §5）。 */
 const draft = useSettingsDraft({
   api: currentApi(),
   initialConfig: props.initialConfig,
   toast: injectedToast,
-  onSaveHost: (config: PluginConfig) => emit('save', config),
+  // 第 2 步（宿主配置）由 `saveHostConfig` 按入口选路：宿主接 save 就交给宿主，不接就自己 PUT。
+  onSaveHost: saveHostConfig,
 })
 
 /**
@@ -292,6 +322,7 @@ const {
   checkInfo,
   dirty,
   enabledKnown,
+  hostLoaded,
   saveButtonLabel,
   validation,
   loading: draftLoading,
@@ -302,6 +333,7 @@ const {
   sectionDirty,
   load: loadDraft,
   applyBootstrap,
+  hydrateHost,
   save: saveDraft,
   loadNotices,
   cleanCache: cleanCacheDraft,
@@ -310,9 +342,7 @@ const {
 /** `/bootstrap` 轮询结果灌进草稿：站点清单、缓存占用、限流信息只有它有。 */
 watch(bootstrap, value => applyBootstrap(value), { immediate: true })
 
-const activeNavKey = computed(() =>
-  isSettings.value ? section.value : `data:${section.value}`,
-)
+const activeNavKey = computed(() => `data:${section.value}`)
 
 /** 草稿还没就绪时（`/rule` 在飞）为 null，面板按需隐藏/回显空值。 */
 const ruleView = computed<RuleState | null>(() => ruleDraft.value)
@@ -325,6 +355,10 @@ function patchRule(patch: Partial<RuleState>): void {
 
 function pick(item: SectionItem): void {
   section.value = item.key
+}
+
+function pickSetting(item: SectionItem): void {
+  settingsSection.value = item.key
 }
 
 /**
@@ -414,28 +448,6 @@ function messageOf(res: any): string {
   return ''
 }
 
-/** 顶条「运行一次」：`POST /check`（受限流，按钮转圈后 toast 结果）。 */
-async function runCheck(): Promise<void> {
-  if (running.value) return
-  running.value = true
-  try {
-    const res: any = await currentApi().post(`plugin/check`, {})
-    const payload = res && typeof res === 'object' && 'data' in res ? res.data : res
-    const message = messageOf(res) || messageOf(payload)
-    if (payload?.limited) {
-      toast.warning(message || '已达限流上限，本次未执行检查')
-    } else {
-      const hits = Array.isArray(payload?.notices) ? payload.notices.length : null
-      toast.success(message || (hits === null ? '检查完成' : `检查完成：新增 ${hits} 条通知`))
-    }
-    await refreshRuntime()
-  } catch (err) {
-    toast.error(errorText(err))
-  } finally {
-    running.value = false
-  }
-}
-
 /**
  * 顶条「保存修改」（仅设置台）：严格按设计文档 §5 —— 草稿层先 `POST /rule`，
  * 失败就 toast 报错并**不**把宿主配置交出去（弹窗不关）；成功后才 `emit('save')`。
@@ -494,41 +506,110 @@ function closePanel(): void {
 }
 
 /**
- * 左栏底部那颗「打开数据台 / 打开设置台」。
+ * 打开设置窗口（左栏底部那颗「⚙ 打开设置台」，以及「站点搜索 → 改范围」「订阅 → 改规则」）。
  *
- * 宿主的 `switch` 是**叠加**而不是替换：数据台里 `switch` 会开一个设置弹窗盖在主界面之上
- * （关掉它就回到主界面，这是期望行为）；但设置台里再 `switch` 会再叠一层主界面 ——
- * 用户实测的"主界面 + 设置 + 主界面"三层就是这么来的。
- * 所以设置台这一侧改成 `close`：关掉设置弹窗，自然露出下面那层数据台，层数封顶 2。
+ * 设置是**本组件内的独立窗口**：打开只是把数据台之上的那一层盖上来，数据台本身不卸载、
+ * 不换弹窗，所以关掉它必然回到数据台 —— 这正是用户要的"关掉设置就回主界面"。
+ *
+ * 顺带办两件事：① 读一次「落到哪一栏」的一次性便签（`settingsJump.ts`）；
+ * ② 首次打开时把设置草稿拉起来（`/rule` + `/notices`，都在本机、很快）。
  */
-function switchConsole(): void {
-  if (isSettings.value) {
-    emit('close')
+function openSettings(): void {
+  applyPendingSection()
+  ensureDraft()
+  settingsOpen.value = true
+}
+
+/**
+ * 设置草稿只在**第一次打开设置窗口**时拉一次（`/rule` + `/notices`）：
+ * 数据台弹窗里的用户可能根本不进设置，那两次请求就不该发。
+ *
+ * 顺带补一次**宿主配置真实值**：宿主 `./Page`（数据台弹窗）**不传** `initialConfig`，
+ * 而宿主配置是整份覆盖的 `PUT plugin/<id>` —— 拿空草稿去 PUT 会把 `enabled` / `proxy`
+ * 一起写没。2026-10-11 真机就是这么把插件关掉、代理也清空的（详见 `hostLoaded` 的说明）。
+ * `./Config` 入口（宿主传了 `initialConfig`）不需要这一步：`hostLoaded` 一开始就是 true。
+ */
+let draftLoaded = false
+function ensureDraft(): void {
+  if (draftLoaded) return
+  draftLoaded = true
+  void loadHostConfig()
+  void loadDraft()
+}
+
+/** 读一次宿主保存的插件配置（宿主路由 `GET plugin/<实例id>`），给草稿补上基准值。 */
+async function loadHostConfig(): Promise<void> {
+  if (hostLoaded.value) return
+  const api = rawApi()
+  if (!api.get || !pluginId.value) return
+  try {
+    const res: any = await api.get(`plugin/${pluginId.value}`, { feedback: 'silent' })
+    const payload = res && typeof res === 'object' && 'data' in res ? res.data : res
+    hydrateHost(payload)
+  } catch {
+    // 拿不到就保持 hostLoaded=false：保存时第 2 步会被挡下（宁可报错，也不写空配置）。
+  }
+}
+
+function closeSettings(): void {
+  settingsOpen.value = false
+}
+
+/**
+ * 保存宿主配置（`enabled` / `proxy` / `emby_host` / `emby_apikey`）：按入口分两条路。
+ *
+ * - **配置弹窗侧**（`mode === 'settings'`，用户从插件卡片的「设置」菜单进来）：
+ *   交给宿主 —— 宿主的 `PluginConfigDialog` 接了 `save`，它自己 `PUT plugin/<id>`，
+ *   并顺带刷新插件卡与侧栏导航；
+ * - **数据台侧**（`mode === 'data'`，用户点开插件详情后在里面进设置）：
+ *   宿主**没接** `save` —— MP v3.1.4 前端产物实测，`PluginDataDialog` 的 vue 分支只绑了
+ *   `action` / `layout` / `switch` / `close`，所以这一步得我们按同一条宿主路由自己 PUT。
+ *   路径固定 `plugin/<实例id>`：宿主只在**分身**场景才重写 `plugin/<源id>`，
+ *   而我们这里写的就是实例 id，普通安装与分身都对得上（详见 `api/pluginInstance.ts`）。
+ *
+ * **前置条件**：必须已经读到过宿主配置（`hostLoaded`）。`PUT plugin/<id>` 是整份覆盖，
+ * 草稿里那四个字段就是配置的全部内容；基准没读到就提交等于把配置清空 —— 直接抛错，
+ * 让草稿层的 catch 提示「保存失败」，脏标记留着，用户重开设置窗口再试。
+ */
+async function saveHostConfig(config: PluginConfig): Promise<void> {
+  if (settingsEntry.value) {
+    emit('save', config)
     return
   }
-  emit('switch')
+  if (!hostLoaded.value) {
+    throw new Error('尚未读到插件配置，本次未提交宿主配置（请关掉设置窗口重开一次再保存）')
+  }
+  const api = rawApi()
+  if (!api.put || !pluginId.value) {
+    throw new Error('宿主不支持保存插件配置（缺少 PUT 能力）')
+  }
+  const res: any = await api.put(`plugin/${pluginId.value}`, config, { feedback: 'silent' })
+  const payload = res && typeof res === 'object' && 'data' in res ? res.data : res
+  if (payload?.success === false) {
+    throw new Error(messageOf(payload) || '插件配置保存失败')
+  }
 }
 
 watch(
   () => props.mode,
   (mode) => {
-    section.value = mode === 'settings' ? SETTINGS_SECTIONS[0]!.key : DATA_SECTIONS[0]!.key
+    // 同一个实例被宿主复用、mode 从 data 变到 settings（或反过来）时，跟着把设置窗口开合一次。
+    if (mode === 'settings') openSettings()
+    else closeSettings()
   },
 )
 
 /**
- * 设置台落点：数据台里点「改范围 / 改规则」时，先写一张一次性便签（`settingsJump.ts`），
- * 再 `emit('switch')`。宿主只互换 Page/Config 两个弹窗、**不带载荷**，两个 Console 实例
- * 又不共享 `section`，所以只能靠这张同源便签把设置台定位到对应栏目。
+ * 设置窗口落点：数据台里点「改范围 / 改规则」时，视图先写一张一次性便签
+ * （`settingsJump.ts` 的 `requestSettingsSection`）再发 `switch`，这里在**打开窗口前**取走它。
  *
- * 读后即删（一次有效）；便签为空或栏目名不认识时保持默认第一栏。
+ * 便签机制保留原样：它本来就是"跨实例传一次落点"的办法，现在虽然同一个 Console 就能定位，
+ * 但视图那侧不必改（少动一处就少一处回归面）；读后即删，便签为空或栏目名不认识就停在当前栏。
  */
 function applyPendingSection(): void {
-  if (props.mode !== 'settings') return
   const pending = takePendingSettingsSection()
-  if (pending && SETTINGS_SECTIONS.some(item => item.key === pending)) section.value = pending
+  if (pending && SETTINGS_SECTIONS.some(item => item.key === pending)) settingsSection.value = pending
 }
-applyPendingSection()
 
 onMounted(() => {
   // 设计文档 §3：弹窗宽度由 `layout` 事件声明（宿主默认 80rem）。
@@ -536,9 +617,8 @@ onMounted(() => {
   runtime.start()
   void loadVersion()
   if (props.mode === 'settings') {
-    // 再取一次：便签可能在 setup 之后才写入（同一实例被复用的情况）。
-    applyPendingSection()
-    void loadDraft()
+    // 配置弹窗入口：一进来就把设置窗口打开（便签在这时也再取一次，覆盖 setup 后才写入的情况）。
+    openSettings()
   }
 })
 
@@ -550,19 +630,26 @@ onBeforeUnmount(() => {
 <template>
   <div class="avh-console">
     <v-toolbar density="comfortable" color="surface" class="avh-topbar">
-      <v-icon icon="mdi-movie-open-star" color="primary" class="ms-2" />
-      <v-toolbar-title class="avh-title">
-        <span class="text-h6">AV 资源助手</span>
-        <span v-if="version" class="text-caption text-medium-emphasis">v{{ version }}</span>
-        <v-chip
-          v-if="overview.enabled === false"
-          size="x-small"
-          color="warning"
-          variant="tonal"
-        >已停用</v-chip>
-      </v-toolbar-title>
-
-      <v-spacer />
+      <!--
+        顶栏 = **三段式**：左块（图标 + 标题 + 版本 + 「已停用」chip）/ 中间搜索框 / 右块（🔔 + 关闭）。
+        为什么改：原来是「标题 + `<v-spacer>` + 搜索框 + 一串按钮」，右侧按钮越多，搜索框就被推得越靠右
+        —— 真机实测它与工具条的几何中心差 53~177px。现在左右两块都是 `flex: 1 1 0`
+        （flex-basis 为 0、grow 相同 → 严格等宽），搜索框是固定基准宽的第三段，
+        于是它必然落在工具条几何中心，与右块有几颗按钮无关。
+      -->
+      <div class="avh-topbar__left">
+        <v-icon icon="mdi-movie-open-star" color="primary" class="ms-2" />
+        <v-toolbar-title class="avh-title">
+          <span class="text-h6">AV 资源助手</span>
+          <span v-if="version" class="text-caption text-medium-emphasis">v{{ version }}</span>
+          <v-chip
+            v-if="overview.enabled === false"
+            size="x-small"
+            color="warning"
+            variant="tonal"
+          >已停用</v-chip>
+        </v-toolbar-title>
+      </div>
 
       <!-- 顶栏搜索（老 `ui/index.html` 的 `#qInput` / `#qBtn`）：占位符与按钮文案逐字照抄 -->
       <div class="avh-searchbox">
@@ -580,52 +667,47 @@ onBeforeUnmount(() => {
         <v-btn color="primary" variant="flat" size="small" @click="runSearch">搜索</v-btn>
       </div>
 
-      <!--
-        🔔 通知（老 `ui/index.html` 顶条最右那颗 `#bellBtn`：`<button class="ghost" id="bellBtn">🔔 通知
-        <span class="bellbadge zero" id="bellCount">0</span></button>`）。
-        位置与老实现一致：搜索框右侧、破坏性/主操作按钮之前。
-        角标：未读为 0 时**整颗不画**（等价老 `.bellbadge.zero{display:none}`），
-        计数逻辑与老 `noticeUnread()` 一致（`time` 晚于已读位点的条数）。
-      -->
-      <v-btn
-        variant="text"
-        class="avh-bell me-2"
-        title="通知"
-        @click="openNotify"
-      >
-        🔔 通知
-        <span v-if="notifyUnread() > 0" class="avh-bellbadge">{{ notifyUnread() }}</span>
-      </v-btn>
+      <!-- 右块：与左块严格等宽的第三段，内容右对齐 —— 两块等宽才是搜索框居中的前提。 -->
+      <div class="avh-topbar__right">
+        <!--
+          🔔 通知（老 `ui/index.html` 顶条最右那颗 `#bellBtn`：`<button class="ghost" id="bellBtn">🔔 通知
+          <span class="bellbadge zero" id="bellCount">0</span></button>`）。
+          位置与老实现一致：搜索框右侧、破坏性/主操作按钮之前。
+          角标：未读为 0 时**整颗不画**（等价老 `.bellbadge.zero{display:none}`），
+          计数逻辑与老 `noticeUnread()` 一致（`time` 晚于已读位点的条数）。
+        -->
+        <v-btn
+          variant="text"
+          class="avh-bell"
+          title="通知"
+          @click="openNotify"
+        >
+          🔔 通知
+          <span v-if="notifyUnread() > 0" class="avh-bellbadge">{{ notifyUnread() }}</span>
+        </v-btn>
 
-      <v-btn
-        color="primary"
-        variant="flat"
-        prepend-icon="mdi-play"
-        :loading="running"
-        class="me-2"
-        @click="runCheck"
-      >运行一次</v-btn>
+        <!-- 顶栏**没有**「运行一次」：用户明确要求删掉 —— 功能冗余（「订阅」栏自带「检查一次」、
+             「我的演员」栏自带「检查她」，都在各自视图里，未受影响），而且它占着顶栏右端、
+             把搜索框挤离几何中心。随它一起删掉的还有 `runCheck()` 与 `running` ref。 -->
 
-      <v-btn
-        v-if="isSettings"
-        :color="dirty ? 'warning' : 'primary'"
-        :variant="dirty ? 'flat' : 'tonal'"
-        prepend-icon="mdi-content-save"
-        :loading="draftSaving"
-        class="me-2"
-        @click="saveAll"
-      >{{ saveButtonLabel }}</v-btn>
+        <!-- 「保存修改」也不在这里：它跟着设置窗口走（见下面那个 v-dialog 的顶条），
+             数据台本身没有可保存的东西。 -->
 
-      <v-btn variant="text" prepend-icon="mdi-close" class="me-2" @click="closePanel">关闭</v-btn>
+        <v-btn variant="text" prepend-icon="mdi-close" class="me-2" @click="closePanel">关闭</v-btn>
+      </div>
     </v-toolbar>
 
     <v-divider />
 
     <div class="avh-body">
-      <!-- 左栏：栏目导航 -->
+      <!--
+        左栏：上 = 滚动区（栏目列表 + 运行概况），下 = 钉底的设置入口。
+        运行概况原本是内容区右侧独立的一栏（`<aside class="avh-side">`，白占 264px、还把内容区挤窄），
+        现在搬进这里：窄栏里它照样完整可读，内容区则拿到整宽。
+      -->
       <nav class="avh-nav">
-        <v-list density="compact" nav :selected="[activeNavKey]" mandatory>
-          <template v-if="!isSettings">
+        <div class="avh-nav__scroll">
+          <v-list density="compact" nav :selected="[activeNavKey]" mandatory>
             <v-list-subheader>数据台</v-list-subheader>
             <!--
               数量角标（老 `nav .pill`）：`#append` 插槽画在标题右侧，与老 `<button>文字<span class="pill">`
@@ -647,68 +729,123 @@ onBeforeUnmount(() => {
                 >{{ item.badge.count }}</span>
               </template>
             </v-list-item>
-          </template>
+          </v-list>
 
-          <template v-else>
-            <v-list-subheader>设置台</v-list-subheader>
-            <v-list-item
-              v-for="item in SETTINGS_SECTIONS"
-              :key="item.key"
-              :value="item.key"
-              :prepend-icon="item.icon"
-              :title="item.title"
-              @click="pick(item)"
-            >
-              <template #append>
-                <v-icon
-                  v-if="sectionDirty(item.key)"
-                  icon="mdi-circle"
-                  size="8"
-                  color="warning"
-                  title="本栏有未保存改动"
-                />
+          <!-- 运行概况（挂载后取 /bootstrap，每 15s 轮询，页面不可见时暂停）。
+               卡片本身没变，只按 216px 窄栏收紧了内边距与标题档位，见 `.avh-overview` 样式。 -->
+          <v-card variant="outlined" class="avh-overview mt-2">
+            <v-card-item>
+              <template #prepend>
+                <v-icon icon="mdi-gauge" color="primary" />
               </template>
-            </v-list-item>
-          </template>
-        </v-list>
+              <v-card-title class="text-body-2 font-weight-medium">运行概况</v-card-title>
+              <v-card-subtitle v-if="updatedAt" class="text-caption">更新于 {{ updatedAt }}</v-card-subtitle>
+            </v-card-item>
 
-        <!-- 数据台 ⇄ 设置台。
-             宿主的 `switch` **不是替换而是再叠一层**弹窗：数据台点「打开设置台」= 设置叠在主界面之上
-             （关掉设置就回到主界面，符合预期）；但在设置台里再 `switch` 会叠出第三层主界面
-             （用户实测：主界面 + 设置 + 主界面）。所以设置台这一侧改用 `close`，
-             直接关掉设置弹窗、露出下面那层数据台 —— 层数永远不超过 2。 -->
+            <v-card-text>
+              <v-list density="compact" class="pa-0">
+                <v-list-item class="px-0">
+                  <v-list-item-title class="text-body-2">订阅</v-list-item-title>
+                  <template #append>
+                    <span class="text-body-2 font-weight-medium">{{ overview.subs === null ? '—' : overview.subs }}</span>
+                  </template>
+                </v-list-item>
+                <v-list-item class="px-0">
+                  <v-list-item-title class="text-body-2">待确认任务</v-list-item-title>
+                  <template #append>
+                    <span class="text-body-2 font-weight-medium">{{ overview.awaitTasks === null ? '—' : overview.awaitTasks }}</span>
+                  </template>
+                </v-list-item>
+                <v-list-item class="px-0">
+                  <v-list-item-title class="text-body-2">下载中</v-list-item-title>
+                  <template #append>
+                    <span class="text-body-2 font-weight-medium">{{ overview.downloading === null ? '—' : overview.downloading }}</span>
+                  </template>
+                </v-list-item>
+                <v-list-item class="px-0">
+                  <v-list-item-title class="text-body-2">收藏演员</v-list-item-title>
+                  <template #append>
+                    <span class="text-body-2 font-weight-medium">{{ overview.favorites === null ? '—' : overview.favorites }}</span>
+                  </template>
+                </v-list-item>
+                <v-list-item class="px-0">
+                  <v-list-item-title class="text-body-2">通知</v-list-item-title>
+                  <template #append>
+                    <span class="text-body-2 font-weight-medium">{{ overview.notices === null ? '—' : overview.notices }}</span>
+                  </template>
+                </v-list-item>
+
+                <v-divider class="my-2" />
+
+                <v-list-item class="px-0">
+                  <v-list-item-title class="text-body-2">缓存</v-list-item-title>
+                  <template #append>
+                    <span class="text-body-2 text-medium-emphasis">{{ overview.cacheSize }}</span>
+                  </template>
+                </v-list-item>
+                <v-list-item class="px-0">
+                  <v-list-item-title class="text-body-2">下次检查</v-list-item-title>
+                  <template #append>
+                    <span class="text-body-2 text-medium-emphasis">{{ overview.nextCheck }}</span>
+                  </template>
+                </v-list-item>
+              </v-list>
+
+              <v-btn
+                block
+                size="small"
+                variant="text"
+                prepend-icon="mdi-refresh"
+                :loading="runtimeLoading"
+                class="mt-2"
+                @click="refreshRuntime()"
+              >刷新</v-btn>
+
+              <v-alert
+                v-if="runtimeError"
+                type="warning"
+                variant="tonal"
+                density="compact"
+                class="mt-2 text-caption"
+              >{{ runtimeError }}</v-alert>
+            </v-card-text>
+          </v-card>
+        </div>
+
+        <!-- 设置唯一入口：打开本组件内的设置窗口（不是宿主弹窗互换）。
+             设置窗口里**没有**「打开数据台」那颗按钮 —— 关掉窗口本来就回到这里。
+             它钉在左栏最底部（`.avh-nav__switch` 的 `margin-top: auto`）：滚动区怎么滚都不动它。 -->
         <v-btn
           block
           size="small"
           variant="text"
-          :prepend-icon="isSettings ? 'mdi-view-dashboard-outline' : 'mdi-cog-outline'"
-          class="mt-2"
-          @click="switchConsole"
-        >{{ isSettings ? '打开数据台' : '打开设置台' }}</v-btn>
+          prepend-icon="mdi-cog-outline"
+          class="avh-nav__switch"
+          @click="openSettings"
+        >打开设置</v-btn>
       </nav>
 
       <v-divider vertical />
 
       <!-- 内容区 -->
       <section class="avh-content">
-        <template v-if="!isSettings">
-          <!-- S6 增量替换：已原生化的栏目走 Vue 组件（见 NATIVE_VIEWS），六栏现在全在这里。 -->
-          <component
-            :is="nativeView"
-            v-if="nativeView && framePluginId"
-            :key="section === 'actors' ? `actors:${actorNonce}` : section"
-            :store="store"
-            :plugin-id="framePluginId"
-            :api="currentApi()"
-            :toast="injectedToast"
-            :focus-actor="section === 'actors' ? actorFocus : ''"
-            @switch="emit('switch')"
-            @refresh-side="refreshRuntime()"
-            @open-movie="onOpenMovie"
-            @open-actor="openActorFromOverlay"
-          />
-          <AppFrame
-            v-else-if="framePluginId"
+        <!-- S6 增量替换：已原生化的栏目走 Vue 组件（见 NATIVE_VIEWS），六栏现在全在这里。 -->
+        <component
+          :is="nativeView"
+          v-if="nativeView && framePluginId"
+          :key="section === 'actors' ? `actors:${actorNonce}` : section"
+          :store="store"
+          :plugin-id="framePluginId"
+          :api="currentApi()"
+          :toast="injectedToast"
+          :focus-actor="section === 'actors' ? actorFocus : ''"
+          @switch="openSettings"
+          @refresh-side="refreshRuntime()"
+          @open-movie="onOpenMovie"
+          @open-actor="openActorFromOverlay"
+        />
+        <AppFrame
+          v-else-if="framePluginId"
             :plugin-id="framePluginId"
             :section-key="section"
             :version="version"
@@ -716,168 +853,157 @@ onBeforeUnmount(() => {
           <v-alert v-else type="warning" variant="tonal">
             宿主没有传入 pluginId，无法定位内嵌应用。
           </v-alert>
-        </template>
-
-        <template v-else>
-          <v-alert
-            v-if="draftError"
-            type="warning"
-            variant="tonal"
-            density="compact"
-            class="text-caption mb-3"
-          >{{ draftError }}</v-alert>
-
-          <!-- 规则草稿还没到位时才出骨架（`/rule` 在飞）。它是独立的，不参与下面的
-               v-if/v-else-if 链：否则「常规」「通知」这些不依赖规则的栏目会被一起挡住。 -->
-          <v-skeleton-loader v-if="draftLoading && !ruleView" type="article" class="mb-3" />
-
-          <GeneralPanel
-            v-if="section === 'general'"
-            :config="hostConfig"
-            :enabled-known="enabledKnown"
-            @patch="(patch: any) => Object.assign(hostConfig, patch)"
-          />
-
-          <SitesPanel
-            v-else-if="section === 'sites'"
-            :sites="ruleView?.sites || []"
-            :pref-sites="ruleView?.prefSites || []"
-            :options="sites"
-            :loaded="sitesLoaded"
-            @update:sites="(value: string[]) => patchRule({ sites: value })"
-            @update:pref-sites="(value: string[]) => patchRule({ prefSites: value })"
-          />
-
-          <RulePanel
-            v-else-if="section === 'rule' && ruleView"
-            :rule="ruleView"
-            :policy-min-interval="checkInfo?.minIntervalMin || 0"
-            :site-scope-count="ruleView.sites.length"
-            @patch="patchRule"
-          />
-
-          <NotifyPanel
-            v-else-if="section === 'notify'"
-            :notices="notices"
-            :loading="noticeLoading"
-            :clearing="noticeClearing"
-            @clear="clearNotices"
-            @reload="loadNotices"
-          />
-
-          <LibraryPanel
-            v-else-if="section === 'library'"
-            :config="hostConfig"
-            :validation="validation"
-            @patch="(patch: any) => Object.assign(hostConfig, patch)"
-          />
-
-          <RuntimePanel
-            v-else-if="section === 'runtime'"
-            :cache-text="cacheText"
-            :check="checkInfo"
-            :cleaning="cacheCleaning"
-            :loading="runtimeLoading"
-            @clean="cleanCache"
-            @refresh="refreshRuntime()"
-          />
-
-          <AboutPanel
-            v-else-if="section === 'about'"
-            :version="version"
-            :plugin-id="props.pluginId"
-            :source-plugin-id="props.sourcePluginId"
-          />
-
-          <v-alert v-else type="info" variant="tonal">
-            未知栏目：{{ activeSection.title }}
-          </v-alert>
-        </template>
       </section>
+    </div>
 
-      <v-divider vertical />
+    <!--
+      设置窗口（2026-10-11 重构）：**本组件内的独立弹窗**，盖在数据台之上。
 
-      <!-- 右栏：运行概况（挂载后取 /bootstrap，每 15s 轮询，页面不可见时暂停） -->
-      <aside class="avh-side">
-        <v-card variant="outlined" class="avh-overview">
-          <v-card-item>
-            <template #prepend>
-              <v-icon icon="mdi-gauge" color="primary" />
-            </template>
-            <v-card-title class="text-subtitle-1">运行概况</v-card-title>
-            <v-card-subtitle v-if="updatedAt">更新于 {{ updatedAt }}</v-card-subtitle>
-          </v-card-item>
+      为什么不再走宿主的 Page ⇄ Config 互换：
+      - 宿主换弹窗时会把数据台那个弹窗一起关掉（`PluginDataDialog` 的 `closeOn` 含 `switch`），
+        于是"关掉设置"只能要么停在设置页、要么整个界面消失 —— 用户实测的两个症状都出自这里；
+      - 弹窗层次由宿主栈决定，一旦同名事件被转发两次（`defineEmits` 写法踩过的坑，见
+        `emitContract.ts`）就会叠出两层一模一样的设置弹窗，第一下"关闭"看起来毫无反应。
 
-          <v-card-text class="pt-0">
-            <v-list density="compact" class="pa-0">
-              <v-list-item class="px-0">
-                <v-list-item-title class="text-body-2">订阅</v-list-item-title>
-                <template #append>
-                  <span class="text-body-2 font-weight-medium">{{ overview.subs === null ? '—' : overview.subs }}</span>
-                </template>
-              </v-list-item>
-              <v-list-item class="px-0">
-                <v-list-item-title class="text-body-2">待确认任务</v-list-item-title>
-                <template #append>
-                  <span class="text-body-2 font-weight-medium">{{ overview.awaitTasks === null ? '—' : overview.awaitTasks }}</span>
-                </template>
-              </v-list-item>
-              <v-list-item class="px-0">
-                <v-list-item-title class="text-body-2">下载中</v-list-item-title>
-                <template #append>
-                  <span class="text-body-2 font-weight-medium">{{ overview.downloading === null ? '—' : overview.downloading }}</span>
-                </template>
-              </v-list-item>
-              <v-list-item class="px-0">
-                <v-list-item-title class="text-body-2">收藏演员</v-list-item-title>
-                <template #append>
-                  <span class="text-body-2 font-weight-medium">{{ overview.favorites === null ? '—' : overview.favorites }}</span>
-                </template>
-              </v-list-item>
-              <v-list-item class="px-0">
-                <v-list-item-title class="text-body-2">通知</v-list-item-title>
-                <template #append>
-                  <span class="text-body-2 font-weight-medium">{{ overview.notices === null ? '—' : overview.notices }}</span>
-                </template>
-              </v-list-item>
+      现在这一层的开合完全由本组件掌握：**任何**关闭方式（右上 ×、ESC、点遮罩）
+      都只是 `settingsOpen = false`，数据台一直在下面，必然回到主界面。
+      窗口里也**没有**「打开数据台」按钮 —— 关掉就是数据台。
+    -->
+    <v-dialog v-model="settingsOpen" max-width="1120" scrollable>
+      <v-card class="avh-settings">
+        <v-toolbar density="comfortable" color="surface" class="avh-settings__bar">
+          <v-icon icon="mdi-cog-outline" color="primary" class="ms-2" />
+          <v-toolbar-title class="text-h6">设置</v-toolbar-title>
 
-              <v-divider class="my-2" />
+          <v-spacer />
 
-              <v-list-item class="px-0">
-                <v-list-item-title class="text-body-2">缓存</v-list-item-title>
+          <!-- 保存按钮跟着设置窗口走：数据台没有可保存的东西 -->
+          <v-btn
+            :color="dirty ? 'warning' : 'primary'"
+            :variant="dirty ? 'flat' : 'tonal'"
+            prepend-icon="mdi-content-save"
+            :loading="draftSaving"
+            class="me-2"
+            @click="saveAll"
+          >{{ saveButtonLabel }}</v-btn>
+
+          <v-btn
+            variant="text"
+            icon="mdi-close"
+            title="关闭设置（回到数据台）"
+            class="me-2"
+            @click="closeSettings"
+          />
+        </v-toolbar>
+
+        <v-divider />
+
+        <div class="avh-settings__body">
+          <!-- 左栏：设置七栏 -->
+          <nav class="avh-settings__nav">
+            <v-list density="compact" nav :selected="[settingsSection]" mandatory>
+              <v-list-item
+                v-for="item in SETTINGS_SECTIONS"
+                :key="item.key"
+                :value="item.key"
+                :prepend-icon="item.icon"
+                :title="item.title"
+                @click="pickSetting(item)"
+              >
                 <template #append>
-                  <span class="text-body-2 text-medium-emphasis">{{ overview.cacheSize }}</span>
-                </template>
-              </v-list-item>
-              <v-list-item class="px-0">
-                <v-list-item-title class="text-body-2">下次检查</v-list-item-title>
-                <template #append>
-                  <span class="text-body-2 text-medium-emphasis">{{ overview.nextCheck }}</span>
+                  <v-icon
+                    v-if="sectionDirty(item.key)"
+                    icon="mdi-circle"
+                    size="8"
+                    color="warning"
+                    title="本栏有未保存改动"
+                  />
                 </template>
               </v-list-item>
             </v-list>
+          </nav>
 
-            <v-btn
-              block
-              size="small"
-              variant="text"
-              prepend-icon="mdi-refresh"
-              :loading="runtimeLoading"
-              class="mt-2"
-              @click="refreshRuntime()"
-            >刷新</v-btn>
+          <v-divider vertical />
 
+          <!-- 右栏：当前设置栏 -->
+          <section class="avh-settings__content">
             <v-alert
-              v-if="runtimeError"
+              v-if="draftError"
               type="warning"
               variant="tonal"
               density="compact"
-              class="mt-2 text-caption"
-            >{{ runtimeError }}</v-alert>
-          </v-card-text>
-        </v-card>
-      </aside>
-    </div>
+              class="text-caption mb-3"
+            >{{ draftError }}</v-alert>
+
+            <!-- 规则草稿还没到位时才出骨架（`/rule` 在飞）。它是独立的，不参与下面的
+                 v-if/v-else-if 链：否则「常规」「通知」这些不依赖规则的栏目会被一起挡住。 -->
+            <v-skeleton-loader v-if="draftLoading && !ruleView" type="article" class="mb-3" />
+
+            <GeneralPanel
+              v-if="settingsSection === 'general'"
+              :config="hostConfig"
+              :enabled-known="enabledKnown"
+              @patch="(patch: any) => Object.assign(hostConfig, patch)"
+            />
+
+            <SitesPanel
+              v-else-if="settingsSection === 'sites'"
+              :sites="ruleView?.sites || []"
+              :pref-sites="ruleView?.prefSites || []"
+              :options="sites"
+              :loaded="sitesLoaded"
+              @update:sites="(value: string[]) => patchRule({ sites: value })"
+              @update:pref-sites="(value: string[]) => patchRule({ prefSites: value })"
+            />
+
+            <RulePanel
+              v-else-if="settingsSection === 'rule' && ruleView"
+              :rule="ruleView"
+              :policy-min-interval="checkInfo?.minIntervalMin || 0"
+              :site-scope-count="ruleView.sites.length"
+              @patch="patchRule"
+            />
+
+            <NotifyPanel
+              v-else-if="settingsSection === 'notify'"
+              :notices="notices"
+              :loading="noticeLoading"
+              :clearing="noticeClearing"
+              @clear="clearNotices"
+              @reload="loadNotices"
+            />
+
+            <LibraryPanel
+              v-else-if="settingsSection === 'library'"
+              :config="hostConfig"
+              :validation="validation"
+              @patch="(patch: any) => Object.assign(hostConfig, patch)"
+            />
+
+            <RuntimePanel
+              v-else-if="settingsSection === 'runtime'"
+              :cache-text="cacheText"
+              :check="checkInfo"
+              :cleaning="cacheCleaning"
+              :loading="runtimeLoading"
+              @clean="cleanCache"
+              @refresh="refreshRuntime()"
+            />
+
+            <AboutPanel
+              v-else-if="settingsSection === 'about'"
+              :version="version"
+              :plugin-id="props.pluginId"
+              :source-plugin-id="props.sourcePluginId"
+            />
+
+            <v-alert v-else type="info" variant="tonal">
+              未知栏目：{{ activeSetting.title }}
+            </v-alert>
+          </section>
+        </div>
+      </v-card>
+    </v-dialog>
 
     <!--
       跨栏目的三个弹层（S6-7 详情/搜索，S6-8 通知）：挂在壳的根节点上，切栏目不会把已经打开的
@@ -927,7 +1053,16 @@ onBeforeUnmount(() => {
 .avh-console {
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  /*
+   * 固定高度：宿主弹窗是**按内容量尺寸**的，根盒子不定高时「发现榜单」能长到 5562px、
+   * 其它栏目只有 501~645px，于是切栏目弹窗忽大忽小。78vh 是本项目既有口径
+   * （`AppFrame.vue` 里 iframe 的高度），**不用** `calc(100vh - …)`（改它需要真机调，设计文档 §7）。
+   * `min-height` 兜住矮视口，`overflow: hidden` 让多出来的内容由内部滚动消化（内容区本来就
+   * 是 `overflow: auto`），根盒子从此不再长高 —— 任何栏目下弹窗外框都一样大。
+   */
+  height: 78vh;
+  min-height: 520px;
+  overflow: hidden;
   background: rgb(var(--v-theme-surface));
   color: rgb(var(--v-theme-on-surface));
 }
@@ -937,20 +1072,43 @@ onBeforeUnmount(() => {
   padding-inline: 0;
 }
 
+/* 三段式顶栏的左块：与右块等宽（flex-basis 0）、内容左对齐。
+   `min-width: 0` + `overflow: hidden` 让它在窄弹窗里先被压缩，把宽度让给中间的搜索框。 */
+.avh-topbar__left {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 右块：与左块严格等宽 + 内容右对齐 —— 两块等宽，夹在中间的搜索框才落在工具条几何中心。 */
+.avh-topbar__right {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
 .avh-title {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-/* 顶栏搜索（老 `.searchbox`：输入框 + 紧贴的「搜索」按钮，占位符同款） */
+/* 顶栏搜索（老 `.searchbox`：输入框 + 紧贴的「搜索」按钮，占位符同款）。
+   三段式里的中段：grow 0 / basis 420px → 固定基准宽，被两侧等宽块顶到几何中心；
+   窄弹窗里可一路缩到 200px（工具条本身是 nowrap 的 flex，始终单行不换行）。 */
 .avh-searchbox {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex: 0 1 380px;
+  flex: 0 1 420px;
   min-width: 200px;
-  margin-right: 12px;
+  margin-right: 0;
 }
 
 .avh-searchbox__input {
@@ -1009,15 +1167,45 @@ onBeforeUnmount(() => {
 .avh-body {
   display: flex;
   align-items: stretch;
+  /* 根盒子定高后，这一层必须自己吃掉剩余高度：原来是 `flex: 0 1 auto`，
+     内容一多它就把根盒子撑高、再被根盒子的 `overflow: hidden` 裁掉一节。 */
+  flex: 1 1 auto;
   min-height: 0;
   padding: 12px;
   gap: 4px;
 }
 
+/* 左栏：上 = 滚动区（栏目列表 + 运行概况），下 = 钉底的设置入口。
+   216px = 原右栏 264px 的收窄版：概况整块搬进来后，内容区反而拿到了整宽。 */
 .avh-nav {
-  flex: 0 0 200px;
-  max-width: 200px;
+  flex: 0 0 216px;
+  max-width: 216px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+/* 左栏滚动区：`min-height: 0` 不能省 —— flex 子项默认 `min-height: auto` 会拒绝收缩，
+   内容一多就把左栏顶出根盒子。滚动条只出现在这里，底部那颗按钮永远留在栏底。 */
+.avh-nav__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+}
+
+/* 栏目行高收到 34px（Vuetify 默认 40）：左栏多装了「运行概况」整张卡片，
+   6 行栏目 + 卡片 + 底部按钮要在 78vh 减去工具栏的高度里全部装下 ——
+   实测 34px 正好让左栏在 1440×900 下不需要滚动（更矮的窗口仍由 `__scroll` 兜底）。 */
+.avh-nav__scroll > .v-list .v-list-item {
+  min-height: 34px;
+}
+
+/* 「打开设置」：`margin-top: auto` 把它钉在左栏最底部，`flex: 0 0 auto` 保证它不被滚动区挤压。
+   位置/样式是本轮唯一改动 —— 它的 `@click="openSettings"` 与文案一字未改。 */
+.avh-nav__switch {
+  margin-top: auto;
+  flex: 0 0 auto;
 }
 
 .avh-content {
@@ -1027,15 +1215,93 @@ onBeforeUnmount(() => {
   padding-inline: 12px;
 }
 
-.avh-side {
-  flex: 0 0 264px;
-  max-width: 264px;
+/*
+ * 运行概况（原右栏卡片，现挂左栏列表下方）：卡片内边距收紧、标题降一档，
+ * 让 7 行信息（订阅 / 待确认任务 / 下载中 / 收藏演员 / 通知 / 缓存 / 下次检查）
+ * + 分割线 + 「刷新」在 216px 窄栏里也完整显示。
+ * 这里**没有** `position: sticky`（右栏那版有）：卡片现在是滚动区里的最后一项，
+ * sticky 只会让它在滚动时浮到顶部盖住栏目列表（outlined 卡片还是透明底，会糊在一起）。
+ */
+.avh-overview :deep(.v-card-item) {
+  padding: 8px 10px 4px;
+}
+
+/* 标题图标与文字之间默认 8px，窄栏里收到 6px */
+.avh-overview :deep(.v-card-item__prepend) {
+  padding-inline-end: 6px;
+}
+
+.avh-overview :deep(.v-card-text) {
+  padding: 4px 10px 8px;
+}
+
+/* 行高从 40px 收到 ~25px：7 行 + 分割线才装得进窄栏。
+   只压 `padding-block` 没用（内容行高仍撑着），所以 `min-height` 也归零，
+   由「标题行 21px + 上下各 2px」决定行高 —— 216px 窄栏里 7 行刚好排满。 */
+.avh-overview :deep(.v-list-item) {
+  min-height: 0;
+  padding-block: 2px;
+}
+
+.avh-overview :deep(.v-list-item-title) {
+  line-height: 1.3;
+}
+
+/* 标题列（1fr，长标题仍是 ellipsis）与数值列之间留一点缝，别贴在一起 */
+.avh-overview :deep(.v-list-item__content) {
+  padding-inline-end: 6px;
+}
+
+/* 数值一律不换行：「待确认任务 12」这类行一折行，7 行就把窄栏撑散了 */
+.avh-overview :deep(.v-list-item__append) {
+  white-space: nowrap;
+}
+
+/*
+ * 设置窗口：窗口自身占满 `v-dialog` 的 `max-width`（1120px），
+ * 左栏固定 190px、右栏自适应并各自滚动 —— 与数据台同一套排布，只是换成了独立窗口。
+ */
+.avh-settings {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* 与数据台同一口径的固定高度：设置窗口的尺寸也不再随栏目跳。
+     这里**只加高度、不动结构**，内部两栏（`__nav` / `__content` 本来就是 `overflow: auto`）
+     照旧各自滚动。
+
+     ⚠️ 必须写 `min-height`，**不能写 `height`**（2026-10-11 实测）：`v-dialog scrollable` 会给
+     卡片加一条 `max-height: 100%`，而外层 `.v-overlay__content` 的高度是"按内容算"的 ——
+     卡片上写死的 `height: 78vh` 会被那条 `max-height:100%`（解析成卡片自己的内容高）夹回去，
+     实测 7 栏里只有内容最高的两栏超过 520px，其余全停在内容高度（405/460/520）。
+     `min-height` 的优先级高于 `max-height`，内容被撑到 78vh，那条 `100%` 也跟着变成 78vh。 */
+  min-height: 78vh;
+}
+
+.avh-settings__bar {
+  flex: 0 0 auto;
+  padding-inline: 0;
+}
+
+.avh-settings__body {
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
+  padding: 12px;
+  gap: 4px;
+}
+
+.avh-settings__nav {
+  flex: 0 0 190px;
+  max-width: 190px;
   overflow-y: auto;
 }
 
-.avh-overview {
-  position: sticky;
-  top: 0;
+.avh-settings__content {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+  padding-inline: 12px;
+  max-height: 68vh;
 }
 
 @media (max-width: 1100px) {
@@ -1043,8 +1309,17 @@ onBeforeUnmount(() => {
     flex-wrap: wrap;
   }
 
-  .avh-nav,
-  .avh-side {
+  /* 窄屏降级：左栏不再钉 216px，交给 flex 分配（`.avh-side` 已随右栏一起删除） */
+  .avh-nav {
+    flex: 1 1 auto;
+    max-width: none;
+  }
+
+  .avh-settings__body {
+    flex-wrap: wrap;
+  }
+
+  .avh-settings__nav {
     flex: 1 1 auto;
     max-width: none;
   }

@@ -1,5 +1,5 @@
 import { importShared } from './__federation_fn_import-JrT3xvdd.js';
-import { C as Console, c as consoleEmits } from './Console-C1Y9yR7G.js';
+import { C as CONSOLE_EMIT_NAMES, a as Console } from './Console-6zk0Jpo8.js';
 
 const {defineComponent:_defineComponent} = await importShared('vue');
 
@@ -14,7 +14,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
     nativeSubscribe: { type: [Function, null], default: null },
     show_switch: { type: Boolean, default: true }
   },
-  emits: consoleEmits(),
+  emits: CONSOLE_EMIT_NAMES,
   setup(__props, { emit: __emit }) {
     const emit = __emit;
     return (_ctx, _cache) => {

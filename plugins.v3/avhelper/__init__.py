@@ -17,6 +17,7 @@ import asyncio
 import hashlib
 import json
 import mimetypes
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -74,6 +75,14 @@ FAIL_TTL = 120             # 抓取失败后的负缓存：这段时间内不再
 CACHE_MAX_GB = 60          # 缓存总量上限（超出按最旧淘汰）
 CACHE_SIZE_TTL = 60        # 缓存体积的内存缓存时长（秒）：前端 15 秒轮询一次，不能每次 rglob 整个目录
 ONCE_JOB_ID = "subcheck_now"
+# 启动预热（§8.2）：MP/插件启动时先把「发现榜单」首屏要用的数据与封面落进缓存，
+# 用户第一次打开插件时直接命中缓存，不必现抓 javdb、也不必现拉几十张封面。
+WARM_RANK_PERIODS = ("week", "day", "month")   # 预热哪几档（默认分类，见 WARM_KIND）
+WARM_KIND = "censored"     # 只预热默认分类；无码/FC2 换过去时按需抓（各约 1.5 秒）
+WARM_IMAGE_LIMIT = 60      # 每档榜单最多预热多少张封面（榜单本身约 60 条）
+WARM_IMAGE_GAP = 0.05      # 封面之间的间隔（秒）：串行 + 轻微间隔，别在启动瞬间打满 NAS 代理
+WARM_MIN_INTERVAL = 900    # 两次预热的最小间隔（秒）：reload/改配置会重跑 init_plugin，别重复抓
+WARM_KV_KEY = "warmup_at"  # 上次预热完成时间（防抖用）
 
 
 def num_key(number: Any) -> str:
@@ -136,7 +145,7 @@ class AVHelper(_PluginBase):
     plugin_name = "AV 资源助手"
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
     plugin_icon = "Moviepilot_A.png"
-    plugin_version = "0.3.0"
+    plugin_version = "0.3.1"
     plugin_label = "发现"
     plugin_author = "local"
     plugin_config_prefix = "avhelper_"
@@ -155,6 +164,8 @@ class AVHelper(_PluginBase):
     _emby_lib: Optional[emby.EmbyLibrary] = None
     _emby_sig: Optional[Tuple[str, str]] = None
     _cache_size_cache: Tuple[float, int] = (0.0, 0)   # (取样时间, 字节数)：缓存体积的内存缓存
+    _warm_thread: Optional[threading.Thread] = None   # 启动预热线程（守护线程，见 warm_up）
+    _warm_stop: Optional[threading.Event] = None      # 当前这次预热的停机信号（每次新建一份）
 
     # ---------- 生命周期 ----------
 
@@ -178,13 +189,17 @@ class AVHelper(_PluginBase):
         self._emby_lib = None
         self._emby_sig = None
         self._client = JavdbClient(proxy=self._proxy)
+        self.start_warm_up()
 
     def get_state(self) -> bool:
         """获取插件启用状态。"""
         return self._enabled
 
     def stop_service(self) -> None:
-        """释放后台资源：取消挂起的“立即检查”任务，宿主会自动摘除 cron 服务。"""
+        """释放后台资源：取消挂起的“立即检查”任务、让启动预热收手（宿主会自动摘除 cron 服务）。"""
+        if self._warm_stop is not None:
+            self._warm_stop.set()
+        self._warm_thread = None
         try:
             remove_plugin_once_job(self.__class__.__name__, ONCE_JOB_ID)
         except Exception:
@@ -628,6 +643,80 @@ class AVHelper(_PluginBase):
         else:
             self._cache_write(fail_key, {"at": time.strftime("%Y-%m-%d %H:%M:%S")}, FAIL_TTL)
         return data
+
+    # ---------- 启动预热 ----------
+
+    def start_warm_up(self) -> bool:
+        """启动后台首屏预热；宿主启动不被拖住。
+
+        为什么要它：界面关掉再打开时，组件里的内存缓存（榜单 / 详情）会随弹窗卸载，
+        真正能留下来的只有后端这几份文件缓存；而它们在 TTL 到点后又是「第一次打开才现抓」，
+        首屏就要多等一次 javdb 抓取（约 1.5 秒）＋几十张封面逐张走代理（冷图最长约半分钟）。
+        MP 启动时先把这一摊做掉，用户第一次打开插件就是纯缓存读取。
+
+        只在插件启用时跑，并且带 `WARM_MIN_INTERVAL` 防抖（reload / 改配置都会重跑
+        `init_plugin`，没必要每次重抓一遍）；真正干活的是守护线程 `warm_up`。
+        """
+        if not self._enabled:
+            return False
+        thread = self._warm_thread
+        if thread is not None and thread.is_alive():
+            return False
+        try:
+            last = float(self.store.kv_get(WARM_KV_KEY) or 0)
+        except (TypeError, ValueError):
+            last = 0.0
+        if last and time.time() - last < WARM_MIN_INTERVAL:
+            return False
+        # 停机信号按「这一次预热」新建并交给线程持有：`stop_service` 置位的是它自己那一份，
+        # 不会误伤后来重载起的新线程（那是 2026-10-11 之前 `_warm_stop` 用类属性时的隐患）。
+        stop = threading.Event()
+        self._warm_stop = stop
+        self._warm_thread = threading.Thread(
+            target=self.warm_up, args=(stop,), name="avhelper-warmup", daemon=True,
+        )
+        self._warm_thread.start()
+        return True
+
+    def warm_up(self, stop: threading.Event) -> None:
+        """预热首屏数据与封面（守护线程里跑，全程 best-effort，绝不向外抛）。"""
+        try:
+            # 缓存体积：先算一次，让首个 /bootstrap 直击 60 秒内存缓存（rglob 上万文件是它的大头）
+            self.cache_size(force=True)
+            for period in WARM_RANK_PERIODS:
+                if stop.is_set():
+                    return
+                self._warm_rank(period, stop)
+            if stop.is_set():
+                return
+            # 演员榜：「我的演员」栏的候选列表，同样吃 TTL_RANK 缓存
+            self._cached("actors", TTL_RANK, lambda: self.cli().actors_rank())
+            self.store.kv_set(WARM_KV_KEY, int(time.time()))
+            logger.info(f"AVHelper 首屏预热完成：榜单 {'/'.join(WARM_RANK_PERIODS)}（{WARM_KIND}）与封面")
+        except Exception as error:            # 预热失败不影响任何功能，只是首屏回到原来的开销
+            logger.error(f"AVHelper 首屏预热失败：{error}")
+
+    def _warm_rank(self, period: str, stop: threading.Event) -> None:
+        """预热一档榜单：数据 + 番号封面索引 + 首屏封面图片 + Emby 索引。"""
+        data = self._cached(
+            f"rank:{period}:{WARM_KIND}", TTL_RANK,
+            lambda: self.cli().rankings(period=period, kind=WARM_KIND),
+        )
+        if not isinstance(data, dict):
+            return
+        movies = [m for m in (data.get("movies") or []) if isinstance(m, dict)]
+        self.remember_thumbs(movies)
+        if movies:
+            # 顺手做一次归一化：Emby 索引是懒建的（5 分钟内存缓存），首屏「已入库」标记要用
+            self._movie(movies[0])
+        for raw in movies[:WARM_IMAGE_LIMIT]:
+            if stop.is_set():
+                return
+            url = str(raw.get("thumb_url") or raw.get("cover_url") or "")
+            if not url or imgproxy.cached(url):
+                continue
+            imgproxy.fetch(url, proxy=self._proxy)
+            time.sleep(WARM_IMAGE_GAP)
 
     def _detail_pair(self, number: str, mid: str = "") -> Tuple[Optional[Dict], Optional[Dict]]:
         """取「详情 + 磁力」，能合并就合并成一次子进程调用。
