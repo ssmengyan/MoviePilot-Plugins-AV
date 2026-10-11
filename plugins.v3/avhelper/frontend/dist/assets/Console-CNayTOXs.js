@@ -718,7 +718,7 @@ const _sfc_main$p = /* @__PURE__ */ _defineComponent$p({
               _createVNode$l(_component_v_text_field, {
                 "model-value": props.config.data_root,
                 label: "数据目录",
-                placeholder: "留空 = 插件数据目录下的 cache",
+                placeholder: "留空 = MP 插件数据目录（/config/plugins/AVHelper）",
                 hint: "SQLite 台账、JSON 缓存与图片缓存同根。改这里等于换一套数据，旧数据不会自动搬过去。",
                 "persistent-hint": "",
                 variant: "outlined",
@@ -736,7 +736,7 @@ const _sfc_main$p = /* @__PURE__ */ _defineComponent$p({
   }
 });
 
-const GeneralPanel = /* @__PURE__ */ _export_sfc(_sfc_main$p, [["__scopeId", "data-v-b5a5bdb2"]]);
+const GeneralPanel = /* @__PURE__ */ _export_sfc(_sfc_main$p, [["__scopeId", "data-v-0c3f0ccd"]]);
 
 const {defineComponent:_defineComponent$o} = await importShared('vue');
 

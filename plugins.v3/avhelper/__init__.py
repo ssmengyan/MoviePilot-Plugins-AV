@@ -34,7 +34,7 @@ from app.sdk.plugin import _PluginBase
 from app.sdk.scheduler import add_plugin_once_job, remove_plugin_once_job
 
 from . import emby, imgproxy, longshot, paths, scoring
-from .client import JavdbClient
+from .client import JavdbClient, mask, reset as reset_javdb_state
 from .notify import Notifier
 from .ratelimit import RateLimiter
 from .store import PLUGIN_SOURCES, Store
@@ -154,6 +154,8 @@ class AVHelper(_PluginBase):
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
     plugin_icon = ("https://raw.githubusercontent.com/ssmengyan/"
                    "MoviePilot-Plugins-AV/main/icons/avhelper.png")
+    # 版本：本分支的 0.5.0 覆盖 main 的 0.4.1（0.4.1 的站点换票修复已随本轮合并进来，
+    # 两条 changelog 都留在 package.v3.json 的 history 里）
     plugin_version = "0.5.0"
     plugin_label = "发现"
     plugin_author = "ssmengyan"
@@ -209,8 +211,33 @@ class AVHelper(_PluginBase):
         self._emby_lib = None
         self._emby_sig = None
         self._client = JavdbClient(bin_path=self._javdb_bin or None, proxy=self._proxy)
+        # 失败冷却挂在 client 模块级：改完代理重跑 init_plugin 时一并清零，
+        # 否则「改完代理点重试」还要再等满 1 小时，等于告诉用户没修好
+        reset_javdb_state()
+        # 启动留一条可查的状态行：远程用户报「榜单加载不出来」时，这一行就能区分
+        # 「二进制没下下来」（未就绪）和「二进制在但抓不到」（就绪 + 后面的失败原因）
+        logger.info(f"AVHelper 启动：数据根 {paths.data_root()}；javdb {paths.javdb_bin()}"
+                    f"（{'可执行' if paths.javdb_ready() else '不存在'}）；"
+                    f"代理 {mask(self._proxy) if self._proxy else '未配置（直连）'}")
+        # 清掉上次留的抓取失败负缓存：刚改完代理/换完网络，第一次打开就该真抓一次，
+        # 而不是继续吃 120 秒前的旧结论（进程内的 1 小时冷却会随 reload 一起归零）
+        self.drop_fail_cache()
         self.start_javdb_bootstrap()
         self.start_warm_up()
+
+    def drop_fail_cache(self) -> int:
+        """删掉所有 `fail:` 负缓存（启动/reload/存配置时调用），返回清掉的条数。"""
+        try:
+            stale = [str(row.get("key") or "") for row in self.store.cache_all()
+                     if str(row.get("key") or "").startswith("fail:")]
+            for key in stale:
+                self._cache_forget(key)
+            if stale:
+                logger.info(f"AVHelper 清掉 {len(stale)} 条上次的抓取失败负缓存，本次重抓")
+            return len(stale)
+        except Exception as error:
+            logger.warning(f"AVHelper 清理失败负缓存出错：{error}")
+            return 0
 
     def get_state(self) -> bool:
         """获取插件启用状态。"""
@@ -333,7 +360,7 @@ class AVHelper(_PluginBase):
                             {"component": "VCol", "props": {"cols": 12, "md": 6},
                              "content": [{"component": "VTextField",
                                           "props": {"model": "data_root", "label": "数据目录（可留空）",
-                                                    "placeholder": "留空 = 插件数据目录下的 cache"}}]},
+                                                    "placeholder": "留空 = MP 插件数据目录（/config/plugins/AVHelper）"}}]},
                         ],
                     },
                     {
@@ -693,8 +720,28 @@ class AVHelper(_PluginBase):
             self._cache_write(key, data, ttl)
             self._cache_forget(fail_key)
         else:
-            self._cache_write(fail_key, {"at": time.strftime("%Y-%m-%d %H:%M:%S")}, FAIL_TTL)
+            # 原因一并落盘：进程重启后 `client` 的内存记录会清空，失败原因不能跟着丢
+            self._cache_write(fail_key, {"at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                         "reason": self.cli().last_error(key)}, FAIL_TTL)
         return data
+
+    def fetch_error(self, key: str, default: str) -> str:
+        """把发现层的失败原因翻成一句能贴到界面上的话。
+
+        远程用户只有一个笼统的「抓取失败」时没法自救：这里把 javdb 子进程真正吐出来的
+        那句话（二进制缺失 / 超时 / 退出码与 stderr 摘要）原样带出去，并补上冷却剩余时间
+        —— 否则「改完代理点重试仍然失败」会被误判成没修好。
+        """
+        reason = self.cli().last_error(key)
+        if not reason:
+            marker = self._cache_read(f"fail:{key}", FAIL_TTL)
+            if isinstance(marker, dict):
+                reason = str(marker.get("reason") or "")
+        reason = reason or default
+        left = self.cli().cooldown_left(key)
+        if left <= 0:
+            return reason
+        return f"{reason}（冷却中，约 {max(1, left // 60)} 分钟后自动重试）"
 
     # ---------- 启动预热 ----------
 
@@ -764,27 +811,34 @@ class AVHelper(_PluginBase):
             if stop.is_set():
                 return
             self.seed_downloads()
+            failed: List[str] = []
             for period in WARM_RANK_PERIODS:
                 if stop.is_set():
                     return
-                self._warm_rank(period, stop)
+                if not self._warm_rank(period, stop):
+                    failed.append(period)
             if stop.is_set():
                 return
             # 演员榜：「我的演员」栏的候选列表，同样吃 TTL_RANK 缓存
             self._cached("actors", TTL_RANK, lambda: self.cli().actors_rank())
             self.store.kv_set(WARM_KV_KEY, int(time.time()))
-            logger.info(f"AVHelper 首屏预热完成：榜单 {'/'.join(WARM_RANK_PERIODS)}（{WARM_KIND}）与封面")
+            if failed:
+                # 预热失败必须说话：否则日志里只剩「完成」，而首屏是空的（远程用户报障时无处可查）
+                logger.warning(f"AVHelper 首屏预热部分失败：{'/'.join(failed)}（{WARM_KIND}）；"
+                               f"原因：{self.fetch_error(f'rank:{failed[0]}:{WARM_KIND}', '未知')}")
+            else:
+                logger.info(f"AVHelper 首屏预热完成：榜单 {'/'.join(WARM_RANK_PERIODS)}（{WARM_KIND}）与封面")
         except Exception as error:            # 预热失败不影响任何功能，只是首屏回到原来的开销
             logger.error(f"AVHelper 首屏预热失败：{error}")
 
-    def _warm_rank(self, period: str, stop: threading.Event) -> None:
-        """预热一档榜单：数据 + 番号封面索引 + 首屏封面图片 + Emby 索引。"""
+    def _warm_rank(self, period: str, stop: threading.Event) -> bool:
+        """预热一档榜单：数据 + 番号封面索引 + 首屏封面图片 + Emby 索引；抓到数据返回 True。"""
         data = self._cached(
             f"rank:{period}:{WARM_KIND}", TTL_RANK,
             lambda: self.cli().rankings(period=period, kind=WARM_KIND),
         )
         if not isinstance(data, dict):
-            return
+            return False
         movies = [m for m in (data.get("movies") or []) if isinstance(m, dict)]
         self.remember_thumbs(movies)
         if movies:
@@ -792,12 +846,13 @@ class AVHelper(_PluginBase):
             self._movie(movies[0])
         for raw in movies[:WARM_IMAGE_LIMIT]:
             if stop.is_set():
-                return
+                return True      # 停机不算失败，别再往下抓图
             url = str(raw.get("thumb_url") or raw.get("cover_url") or "")
             if not url or imgproxy.cached(url):
                 continue
             imgproxy.fetch(url, proxy=self._proxy)
             time.sleep(WARM_IMAGE_GAP)
+        return True
 
     def _detail_pair(self, number: str, mid: str = "") -> Tuple[Optional[Dict], Optional[Dict]]:
         """取「详情 + 磁力」，能合并就合并成一次子进程调用。
@@ -1257,13 +1312,17 @@ class AVHelper(_PluginBase):
         }
 
     def api_rankings(self, period: str = "week", kind: str = "censored") -> Dict[str, Any]:
-        """榜单：period=day/week/month，kind=censored/uncensored/fc2。"""
-        data = self._cached(
-            f"rank:{period}:{kind}", TTL_RANK,
-            lambda: self.cli().rankings(period=period, kind=kind),
-        )
+        """榜单：period=day/week/month，kind=censored/uncensored/fc2。
+
+        失败时把子进程的真原因（二进制缺失 / 超时 / 退出码与 stderr 摘要）放进 message：
+        界面 toast 会原样显示，远程用户截一张图就能定位。
+        """
+        key = f"rank:{period}:{kind}"
+        data = self._cached(key, TTL_RANK, lambda: self.cli().rankings(period=period, kind=kind))
         if data is None:
-            return {"success": False, "message": "榜单抓取失败（站点超时或代理不可达）", "movies": []}
+            message = self.fetch_error(key, "榜单抓取失败（站点超时或代理不可达）")
+            logger.warning(f"AVHelper 榜单抓取失败（{period}/{kind}）：{message}")
+            return {"success": False, "message": message, "movies": []}
         raw_movies = [m for m in (data.get("movies") or []) if isinstance(m, dict)]
         self.remember_thumbs(raw_movies)
         movies = [self._movie(m, kind) for m in raw_movies]
@@ -1273,7 +1332,9 @@ class AVHelper(_PluginBase):
         """演员榜。"""
         data = self._cached("actors", TTL_RANK, lambda: self.cli().actors_rank())
         if data is None:
-            return {"success": False, "message": "演员榜抓取失败", "actors": []}
+            message = self.fetch_error("actors", "演员榜抓取失败")
+            logger.warning(f"AVHelper 演员榜抓取失败：{message}")
+            return {"success": False, "message": message, "actors": []}
         actors = [
             {"name": a.get("name") or "", "zh": a.get("name_zht") or "",
              "avatar": self.image_url(a.get("avatar_url")), "id": a.get("id") or ""}
@@ -1297,7 +1358,9 @@ class AVHelper(_PluginBase):
             lambda: self.cli().actor(name, page=page, limit=limit),
         )
         if data is None:
-            return {"success": False, "message": "演员数据抓取失败", "movies": []}
+            message = self.fetch_error(f"actor:{name}:p{page}:l{limit}", "演员数据抓取失败")
+            logger.warning(f"AVHelper 演员数据抓取失败（{name} p{page}）：{message}")
+            return {"success": False, "message": message, "movies": []}
         raw_entity = data.get("entity") or {}
         raw_movies = [m for m in (data.get("movies") or []) if isinstance(m, dict)]
         self.remember_thumbs(raw_movies)
@@ -1327,7 +1390,9 @@ class AVHelper(_PluginBase):
             return {"success": False, "message": "搜索词为空", "movies": [], "actors": []}
         data = self.cli().search(keyword)
         if data is None:
-            return {"success": False, "message": "搜索失败", "movies": [], "actors": []}
+            message = self.fetch_error(f"search:{keyword}", "搜索失败")
+            logger.warning(f"AVHelper 搜索失败（{keyword}）：{message}")
+            return {"success": False, "message": message, "movies": [], "actors": []}
         raw_movies = [m for m in (data.get("movies") or []) if isinstance(m, dict)]
         self.remember_thumbs(raw_movies)
         movies = [self._movie(m) for m in raw_movies]
@@ -1349,7 +1414,9 @@ class AVHelper(_PluginBase):
             return {"success": False, "message": "缺少番号"}
         data, magnets_raw = self._detail_pair(number, str(id or ""))
         if data is None:
-            return {"success": False, "message": "详情抓取失败，请稍后重试"}
+            message = self.fetch_error(f"detail:{number}", "详情抓取失败，请稍后重试")
+            logger.warning(f"AVHelper 详情抓取失败（{number}）：{message}")
+            return {"success": False, "message": message}
         self.remember_thumbs(data)     # 打开过的番号都进封面索引，任务/队列补图就有源了
         actors = [
             {"name": a.get("name") or "", "zh": "", "avatar": self.image_url(a.get("avatar_url")),
