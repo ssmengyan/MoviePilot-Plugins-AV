@@ -13,6 +13,8 @@ import urllib.parse
 import urllib.request
 from typing import Dict, Optional
 
+from . import paths
+
 # 防 SSRF：只代理白名单域名（§7.1）
 ALLOWED_HOSTS = {"tp.spfcas.com", "images.projectjav.com", "cf.javfree.me"}
 # 各图床要带的 Referer：projectjav 图床带 MP 域名会被 403，带自己域名最稳；javfree 不需要
@@ -21,15 +23,18 @@ REFERERS: Dict[str, str] = {
     "images.projectjav.com": "https://projectjav.com/",
     "cf.javfree.me": "",
 }
-PROXY = "http://192.0.2.11:7890"
-# 图片缓存根：与 CACHE_ROOT 同卷（容量淘汰也在这个目录里跑）
-CACHE_ROOT = "/avhelper/cache"
-CACHE_DIR = f"{CACHE_ROOT}/images"
+# 默认不内置代理：留空即直连（内地用户在插件设置里填自己的代理）
+PROXY = ""
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
 # 已经是完整图片的魔数：WebP(RIFF) / PNG / JPEG / GIF，命中就原样返回，不做 XOR
 PLAIN_MAGIC = (b"\xff\xd8", b"RIFF", b"\x89PNG\r\n\x1a\n", b"GIF8")
+
+
+def cache_dir() -> str:
+    """图片缓存目录（与 SQLite/JSON 同根，由 `paths` 在初始化时锁定）。"""
+    return str(paths.images_dir())
 
 
 def unwrap(raw: bytes) -> bytes:
@@ -68,7 +73,7 @@ def _cache_path(url: str) -> str:
     """按 URL 的 sha1 生成缓存文件路径。"""
     digest = hashlib.sha1(url.encode("utf-8")).hexdigest()
     # 扩展名只影响磁盘文件名（内容由魔数判定），沿用 .jpg 以免丢掉已有缓存
-    return os.path.join(CACHE_DIR, digest + ".jpg")
+    return os.path.join(cache_dir(), digest + ".jpg")
 
 
 def cached(url: str) -> bool:
@@ -87,7 +92,10 @@ def _headers(url: str) -> Dict[str, str]:
 
 
 def fetch(url: str, proxy: str = PROXY) -> Optional[bytes]:
-    """取图并返回解包后的图片字节；命中缓存直接读文件。失败返回 None。"""
+    """取图并返回解包后的图片字节；命中缓存直接读文件。失败返回 None。
+
+    `proxy` 留空即直连（不再套一层空代理，否则 urllib 会拿空串当代理地址报错）。
+    """
     if not is_allowed(url):
         return None
     path = _cache_path(url)
@@ -95,8 +103,10 @@ def fetch(url: str, proxy: str = PROXY) -> Optional[bytes]:
         with open(path, "rb") as f:
             return f.read()
     try:
-        opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({"https": proxy, "http": proxy}))
+        handlers = []
+        if proxy:
+            handlers.append(urllib.request.ProxyHandler({"https": proxy, "http": proxy}))
+        opener = urllib.request.build_opener(*handlers)
         req = urllib.request.Request(url, headers=_headers(url))
         with opener.open(req, timeout=45) as resp:
             raw = resp.read()
@@ -105,7 +115,8 @@ def fetch(url: str, proxy: str = PROXY) -> Optional[bytes]:
     data = unwrap(raw)
     if len(data) < 2 or not any(data.startswith(magic) for magic in PLAIN_MAGIC):
         return None
-    os.makedirs(CACHE_DIR, exist_ok=True)
+    cache = cache_dir()
+    os.makedirs(cache, exist_ok=True)
     with open(path, "wb") as f:
         f.write(data)
     return data

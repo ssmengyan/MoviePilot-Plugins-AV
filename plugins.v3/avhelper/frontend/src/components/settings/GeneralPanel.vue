@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
- * 设置台 · 常规（新增栏目）。
+ * 设置台 · 常规。
  *
  * 切到 `vue` 渲染模式后宿主不再画 `get_form()` 那套 JSON 配置表单，
- * `enabled` / `proxy` 只能在设置台里改 —— 这一栏是它们唯一的入口。
+ * `enabled` / `proxy` / `javdb_bin` / `data_root` 只能在设置台里改 —— 这一栏是它们唯一的入口。
  * 数据归属：宿主配置，点「保存修改」时走 `emit('save', config)`。
  */
 import type { HostConfigDraft } from '../../composables/settingsModel'
@@ -30,7 +30,7 @@ function patch<K extends keyof HostConfigDraft>(key: K, value: HostConfigDraft[K
         <v-icon icon="mdi-cog-outline" color="primary" />
       </template>
       <v-card-title>常规</v-card-title>
-      <v-card-subtitle>插件开关与 javdb 代理 · 属于宿主插件配置</v-card-subtitle>
+      <v-card-subtitle>插件开关、代理与路径 · 属于宿主插件配置</v-card-subtitle>
     </v-card-item>
 
     <v-card-text>
@@ -59,7 +59,33 @@ function patch<K extends keyof HostConfigDraft>(key: K, value: HostConfigDraft[K
         variant="outlined"
         density="comfortable"
         clearable
+        class="mb-4"
         @update:model-value="(value: any) => patch('proxy', value ?? '')"
+      />
+
+      <v-text-field
+        :model-value="props.config.javdb_bin"
+        label="javdb 路径"
+        placeholder="留空 = 自动下载 / 自动查找"
+        hint="发现层依赖 javdb-cli 单文件二进制。留空时插件启动后自动下一份到数据目录；网络不通就手工放一份再填这里。"
+        persistent-hint
+        variant="outlined"
+        density="comfortable"
+        clearable
+        class="mb-4"
+        @update:model-value="(value: any) => patch('javdb_bin', value ?? '')"
+      />
+
+      <v-text-field
+        :model-value="props.config.data_root"
+        label="数据目录"
+        placeholder="留空 = 插件数据目录下的 cache"
+        hint="SQLite 台账、JSON 缓存与图片缓存同根。改这里等于换一套数据，旧数据不会自动搬过去。"
+        persistent-hint
+        variant="outlined"
+        density="comfortable"
+        clearable
+        @update:model-value="(value: any) => patch('data_root', value ?? '')"
       />
     </v-card-text>
   </v-card>

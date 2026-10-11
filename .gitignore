@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 前端：node_modules 不入库，**frontend/dist 必须入库**（宿主要靠它加载联邦组件）
+node_modules/
+.vite/
+*.tsbuildinfo
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 运行时产物
+*.log
+*.tmp
+*.bak
+data/

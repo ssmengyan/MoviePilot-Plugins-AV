@@ -51,6 +51,10 @@ export interface NoticeItem {
 export interface HostConfigDraft {
   enabled: boolean
   proxy: string
+  /** javdb 二进制路径；留空 = 自动下载 / 自动查找（见插件 `paths.py`）。 */
+  javdb_bin: string
+  /** 数据根（SQLite / JSON 缓存 / 图片缓存同根）；留空 = 插件数据目录下的 `cache`。 */
+  data_root: string
   emby_host: string
   emby_apikey: string
 }
@@ -99,9 +103,9 @@ export const RULE_FALLBACK: RuleState = {
   trigger: 'notify',
   maxPerDay: 6,
   minIntervalMin: POLICY_MIN_INTERVAL_MIN,
-  savePath: '/media/9kg/avi',
+  savePath: '',
   category: 'avi',
-  downloader: 'qb',
+  downloader: '',
 }
 
 export function str(value: unknown, fallback = ''): string {
@@ -259,6 +263,8 @@ export function sameHost(a: HostConfigDraft | null, b: HostConfigDraft | null): 
   return (
     a.enabled === b.enabled &&
     a.proxy === b.proxy &&
+    a.javdb_bin === b.javdb_bin &&
+    a.data_root === b.data_root &&
     a.emby_host === b.emby_host &&
     a.emby_apikey === b.emby_apikey
   )

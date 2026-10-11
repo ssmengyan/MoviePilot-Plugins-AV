@@ -5,7 +5,7 @@
 /* ============ 状态 ============ */
 export const DEFAULT_RULE = {
   res:'1080p', mustCnsub:false, preferUncensored:true, allow4k:true, minSeeders:3,
-  sites:[], prefSites:['馒头','Rousi'], btFallback:true, savePath:'/media/9kg/avi',
+  sites:[], prefSites:['馒头','Rousi'], btFallback:true, savePath:'',
   category:'avi', downloader:'qb', trigger:'notify', maxPerDay:6, minIntervalMin:240
 };
 export const S = {

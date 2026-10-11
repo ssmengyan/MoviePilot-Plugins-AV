@@ -90,11 +90,12 @@ class Notifier:
         return self._emit(KIND_INFO, "正在刮削",
                           f"{number} 下载已完成，MediaInfo 抓取中", push=push)
 
-    def stored(self, number: str, save_path: str = "/media/9kg/avi",
+    def stored(self, number: str, save_path: str = "",
                push: bool = True) -> Dict[str, Any]:
         """已入库。"""
+        where = f" {save_path}" if save_path else ""
         return self._emit(KIND_OK, "已入库",
-                          f"{number} 已入库 {save_path}，Emby 已扫描，MetaTube 已刮削",
+                          f"{number} 已入库{where}，Emby 已扫描，MetaTube 已刮削",
                           push=push)
 
     def candidate_ready(self, number: str, count: int, push: bool = True) -> Dict[str, Any]:

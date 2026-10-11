@@ -1,11 +1,11 @@
 import { importShared } from './__federation_fn_import-JrT3xvdd.js';
-import { C as CONSOLE_EMIT_NAMES, a as Console } from './Console-BIrNNCPZ.js';
+import { C as CONSOLE_EMIT_NAMES, a as Console } from './Console-DSa0R7r0.js';
 
 const {defineComponent:_defineComponent} = await importShared('vue');
 
 const {openBlock:_openBlock,createBlock:_createBlock} = await importShared('vue');
 const _sfc_main = /* @__PURE__ */ _defineComponent({
-  __name: "Config",
+  __name: "Page",
   props: {
     initialConfig: { default: () => ({}) },
     api: { default: () => ({ get: () => Promise.reject(new Error("宿主 api 不可用")), post: () => Promise.reject(new Error("宿主 api 不可用")) }) },
@@ -19,7 +19,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
     const emit = __emit;
     return (_ctx, _cache) => {
       return _openBlock(), _createBlock(Console, {
-        mode: "settings",
+        mode: "data",
         api: _ctx.api,
         "plugin-id": _ctx.pluginId,
         "source-plugin-id": _ctx.sourcePluginId,

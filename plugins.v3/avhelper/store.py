@@ -1,8 +1,8 @@
 """插件自管 SQLite 存储：收藏演员 / 订阅 / 已知番号 / 搜索任务 / 通知 / 缓存索引 / 下载台账。
 
-数据库落在缓存盘 `/avhelper/cache/meta/avhelper.db`（对应 NAS 的 /vol3，容器内同路径）。
-全部方法同步实现，由 FastAPI 的线程池或插件定时任务调用；连接按调用短生命周期创建，
-避免跨线程复用。
+数据库落在数据根的 `meta/avhelper.db`（数据根由 `paths` 解析：老部署仍是 `/avhelper/cache`，
+新部署落到 MoviePilot 的插件数据目录）。全部方法同步实现，由 FastAPI 的线程池或插件定时任务
+调用；连接按调用短生命周期创建，避免跨线程复用。
 """
 
 import json
@@ -13,14 +13,19 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-# 台账的 key 与番号归一化共用 emby 的口径（`norm_key`）：同一个番号在 javdb 番号、Emby 文件名、
-# MetaTube 刮削 id 里写法不同，两边各写一份规则迟早会漂。emby.py 只依赖 app.sdk 与标准库，
-# 不反向引用本模块，所以这里不含循环依赖。
-from . import emby
+from . import paths
 
-# 数据根：SQLite、图片与 JSON 缓存同根
-DATA_ROOT = "/avhelper/cache"
-DB_PATH = Path(DATA_ROOT) / "meta" / "avhelper.db"
+
+def _norm_key(text: Any) -> str:
+    """番号归一化：借用 `emby.norm_key()`，延迟导入以便本模块在无宿主环境下被单测直接加载。
+
+    台账的 key 与番号归一化必须共用同一份规则（`emby.norm_key`）：同一个番号在 javdb 番号、
+    Emby 文件名、MetaTube 刮削 id 里写法不同，两边各写一份迟早会漂。`emby.py` 依赖 `app.sdk`，
+    模块级导入会让 `store` 无法脱离宿主被单测加载，所以放到调用点再导。
+    """
+    from . import emby
+
+    return emby.norm_key(text)
 
 # 建表语句：与执行方案 §6.3 的表结构一致，另加 notice/kv 两张辅助表
 _SCHEMA = """
@@ -173,8 +178,10 @@ def _to_int(value: Any) -> int:
 class Store:
     """插件自有数据的唯一入口（线程安全，短连接）。"""
 
-    def __init__(self, db_path: Path = DB_PATH):
-        self.db_path = Path(db_path)
+    def __init__(self, db_path: Optional[Path] = None):
+        # 默认路径在调用时向 `paths` 取：`paths.configure()` 之后数据根才定型，
+        # 写成默认参数会在模块导入那一刻被固化成老路径。
+        self.db_path = Path(db_path) if db_path else paths.db_path()
         self._lock = threading.Lock()
 
     # ---------- 基础 ----------
@@ -509,7 +516,7 @@ class Store:
         台账里没有这个键时也占一行墓碑：否则下次补种照样会把它建出来。
         返回 True 表示「这条现在不会再出现在列表里」（幂等，重复移除同一个键仍返回 True）。
         """
-        key = emby.norm_key(key_or_number)
+        key = _norm_key(key_or_number)
         if not key:
             return False        # 归一不出 key 就无从打墓碑
         now = _now()
@@ -534,7 +541,7 @@ class Store:
         读与写放在同一次持锁里（照 `kv_update` 的写法）：Emby 补种、老队列迁移、提交下载
         三个写入方可能同时在跑，「是不是新插入」要数得准，否则 `download_seed` 的条数会飘。
         """
-        key = emby.norm_key(key_from)
+        key = _norm_key(key_from)
         if not key:
             return False        # 归一不出 key 就登记不了，也不能拿空 key 占掉主键那一行
         now = _now()

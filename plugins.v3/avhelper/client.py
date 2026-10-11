@@ -1,6 +1,9 @@
 """javdb-cli 子进程封装：发现层（榜单/演员/详情/磁力）。
 
 所有调用走子进程，输出按 utf-8 解码；失败返回 None 由上层降级，不抛异常到 UI。
+
+二进制路径与代理都不写死：路径由 `paths.javdb_bin()` 按配置/历史路径/PATH 依次解析，
+代理留空时**不传 `--proxy`**，让 javdb-cli 自己回落 `HTTPS_PROXY`/`ALL_PROXY` 或它的本地配置。
 """
 
 import json
@@ -8,9 +11,10 @@ import subprocess
 import time
 from typing import Any, Dict, List, Optional
 
-# javdb-cli 只读二进制：插件只读它，不复制、不修改
-JAVDB_BIN = "/avhelper/bin/javdb"
-DEFAULT_PROXY = "http://192.0.2.11:7890"
+from . import paths
+
+# 默认不内置任何代理：内地以外直连即可，内地用户在插件设置里填自己的代理
+DEFAULT_PROXY = ""
 TIMEOUT = 60
 # 连续失败冷却：同一命令连续 2 次失败 → 冷却 1 小时（§8.2）
 _FAIL_COUNT: Dict[str, int] = {}
@@ -20,8 +24,8 @@ _COOLDOWN_UNTIL: Dict[str, float] = {}
 class JavdbClient:
     """javdb-cli 调用门面。"""
 
-    def __init__(self, bin_path: str = JAVDB_BIN, proxy: str = DEFAULT_PROXY):
-        self.bin_path = bin_path
+    def __init__(self, bin_path: Optional[str] = None, proxy: str = DEFAULT_PROXY):
+        self.bin_path = bin_path or paths.javdb_bin()
         self.proxy = proxy
 
     def _run(self, key: str, args: List[str]) -> Optional[Any]:
@@ -29,7 +33,8 @@ class JavdbClient:
         now = time.time()
         if _COOLDOWN_UNTIL.get(key, 0) > now:
             return None
-        cmd = [self.bin_path, "--proxy", self.proxy] + args + ["--json"]
+        # 代理留空就不传 --proxy：显式传空串会把 javdb-cli 自己的环境变量/配置一并压掉
+        cmd = [self.bin_path] + (["--proxy", self.proxy] if self.proxy else []) + args + ["--json"]
         try:
             # stdin 必须显式置为 DEVNULL：javdb 在继承到打开的管道时会阻塞等待 EOF，
             # 导致 uvicorn 进程内每次调用都被 60s 超时（命令行 docker exec 不复现）。

@@ -10,8 +10,8 @@
 顺序仍是“优先站点 → 其余站点”，命中即停，站点之间串行并随机间隔（§8.2）。
 
 下载（§6.6）：候选的 enclosure 若为 `[base64]{url}` 两段式，先由 `SiteSearcher.resolve`
-换票取回种子字节，再交给下载链；下载器默认 qb，分类默认 avi（qB 分类目录已指向
-/media/9kg/avi，因此不需要手工维护目录）。
+换票取回种子字节，再交给下载链；保存路径与下载器默认留空（用 MoviePilot 的下载器默认值），
+分类默认 `avi` —— 配合 qBittorrent 的 auto_tmm（分类即目录）就不必手工维护目录。
 """
 
 import re
@@ -45,13 +45,15 @@ DEFAULT_RULE: Dict[str, Any] = {
     "trigger": "notify",
     "maxPerDay": 6,
     "minIntervalMin": 240,
-    "savePath": "/media/9kg/avi",
+    "savePath": "",
     "category": "avi",
-    "downloader": "qb",
+    "downloader": "",
 }
 
 QUEUE_KEY = "queue"
-DEFAULT_SAVE_PATH = "/media/9kg/avi"
+# 保存路径与下载器留空 = 交给 MoviePilot 用「设置 → 下载器」里的默认值；
+# 分类 `avi` 是给 qB 的一个标签，配合 qB 的 auto_tmm 就能自己落到分类目录。
+DEFAULT_SAVE_PATH = ""
 DEFAULT_CATEGORY = "avi"
 # 进度快照的年龄上限（秒）。为什么分两档（2026-10-11 实测）：
 # 队列里只要还有**带 hash 的历史条目**，原实现每次 `/bootstrap` 都要问一遍下载器

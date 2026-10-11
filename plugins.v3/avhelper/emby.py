@@ -26,7 +26,8 @@ TIMEOUT = 6           # 单次请求超时，媒体库不通时不能拖住界�
 PAGE = 500            # 分页大小
 MAX_ITEMS = 20000     # 单库索引上限，防异常大库吃内存
 
-# 认库依据：库名或路径里出现 jav / 9kg / avi（本环境 JAV 库路径是 /Media/9kg/avi）
+# 认库依据：库名或库路径里出现 jav / 9kg / avi（常见命名习惯）。
+# 一个都命中不了时 `pick_libraries()` 会退回全部「电影」类型库，所以自定义库名也能用。
 _JAV_HINT = re.compile(r"(?:^|[^a-z0-9])(?:jav|9kg|avi)(?:[^a-z0-9]|$)", re.I)
 _FC2 = re.compile(r"FC2[-_ ]*PPV[-_ ]*(\d{3,8})", re.I)
 _LEAD = re.compile(r"^([A-Za-z]{2,6}\d?[-_ ]?\d{2,7})")

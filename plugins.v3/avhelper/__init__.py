@@ -1,7 +1,8 @@
 """AV 资源助手：JAV 榜单/演员/详情浏览 + 番号订阅、PT 选种下载、通知与缓存治理。
 
-后端为 2026-10 的前端重写版（Vue 联邦界面 + `/ui` 静态应用），数据根 `/avhelper/cache`
-（SQLite、图片与 JSON 缓存同根），只读共用 javdb 二进制 `/avhelper/bin/javdb`。
+后端为 2026-10 的前端重写版（Vue 联邦界面 + `/ui` 静态应用）。数据根、javdb 二进制路径
+都不写死，由 `paths.py` 按「插件配置 → 历史固定路径 → MoviePilot 插件数据目录」解析，
+别人装到自己机器上也能直接跑（详见仓库 README 的「安装」一节）。
 
 界面说明：宿主 Vuetify JSON 页面无法承载搜索框、灯箱等交互（当前宿主前端在事件调用后不会
 重新拉取页面），因此完整界面由本插件自带的静态目录 `ui/`（拆分前是单文件 `webui.html`）经
@@ -33,7 +34,7 @@ from app.sdk.network import RequestUtils
 from app.sdk.plugin import _PluginBase
 from app.sdk.scheduler import add_plugin_once_job, remove_plugin_once_job
 
-from . import emby, imgproxy, longshot, scoring
+from . import emby, imgproxy, longshot, paths, scoring
 from .client import JavdbClient
 from .notify import Notifier
 from .ratelimit import RateLimiter
@@ -41,9 +42,6 @@ from .store import Store
 from .tasks import DEFAULT_RULE, TaskEngine, merge_rule
 
 PLUGIN_ID = "AVHelper"
-# 数据根：与原版 `/avhelper/cache` 完全隔离（同一个挂载卷下的子目录，容器重建不丢数据）
-CACHE_ROOT = Path("/avhelper/cache")
-META_DIR = CACHE_ROOT / "meta"
 # 前端静态目录与 MIME 表：多文件前端由 `/ui/` 下发，ES module 的相对导入依赖目录语义
 UI_DIR = Path(__file__).with_name("ui")
 UI_EXT_MIME: Dict[str, str] = {
@@ -63,7 +61,8 @@ UI_EXT_MIME: Dict[str, str] = {
     ".woff": "font/woff",
     ".woff2": "font/woff2",
 }
-DEFAULT_PROXY = "http://192.0.2.11:7890"
+# 默认不内置代理：内地以外直连即可，内地用户在插件设置里填自己的代理
+DEFAULT_PROXY = ""
 GLOBAL_RULE_KEY = "global_rule"
 THUMB_KEY = "num2thumb"      # 番号 → 封面原图的本地索引（任务/下载队列补图用）
 # 缓存 TTL（执行方案 §8.1，不得放宽）
@@ -203,7 +202,7 @@ def size_text(size: Any) -> str:
 def is_keep_file(path: Path) -> bool:
     """缓存清理必须保留的文件：插件自管的 SQLite 库与它的事务副产物。
 
-    数据库就落在 `META_DIR`（`/avhelper/cache/meta/avhelper.db`），与 JSON 缓存同目录；
+    数据库就落在元数据目录（`<数据根>/meta/avhelper.db`），与 JSON 缓存同目录；
     而孤儿扫描按「不在 cache_idx 里就删」判定，不排除它会把订阅/收藏/任务一起删掉。
     """
     return path.name.startswith("avhelper.db")
@@ -214,16 +213,19 @@ class AVHelper(_PluginBase):
 
     plugin_name = "AV 资源助手"
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
-    plugin_icon = "Moviepilot_A.png"
-    plugin_version = "0.3.4"
+    plugin_icon = ("https://raw.githubusercontent.com/ssmengyan/"
+                   "MoviePilot-Plugins-AV/main/icons/avhelper.png")
+    plugin_version = "0.4.0"
     plugin_label = "发现"
-    plugin_author = "local"
+    plugin_author = "ssmengyan"
     plugin_config_prefix = "avhelper_"
     plugin_order = 100
     auth_level = 1
 
     _enabled = False
     _proxy = DEFAULT_PROXY
+    _javdb_bin = ""          # 手动指定的 javdb 二进制路径；留空按 paths 的默认顺序解析
+    _data_root = ""          # 手动指定的数据根；留空按 paths 的默认顺序解析
     _client: Optional[JavdbClient] = None
     _store: Optional[Store] = None
     _limiter: Optional[RateLimiter] = None
@@ -245,23 +247,31 @@ class AVHelper(_PluginBase):
     def init_plugin(self, config: Optional[Dict[str, Any]] = None) -> None:
         """读取配置并装配存储、限流、通知与任务引擎；允许重复调用。"""
         self.stop_service()
+        self._enabled = False
+        self._emby_host = ""
+        self._emby_apikey = ""
+        self._data_root = ""
+        if config:
+            self._enabled = bool(config.get("enabled"))
+            self._proxy = str(config.get("proxy") or "")
+            self._javdb_bin = str(config.get("javdb_bin") or "").strip()
+            self._data_root = str(config.get("data_root") or "").strip()
+            self._emby_host = str(config.get("emby_host") or "").strip()
+            self._emby_apikey = str(config.get("emby_apikey") or "").strip()
+        # 路径必须在建 Store 之前定型：SQLite 文件、JSON 缓存、图片缓存都按数据根落盘
+        paths.configure(data_root=self._data_root, javdb_bin=self._javdb_bin,
+                        fallback_root=self.get_data_path())
+
         self._store = Store()
         self._store.init()
         self._limiter = RateLimiter(self._store)
         self._notifier = Notifier(self, self._store)
         self._engine = TaskEngine(self, self._store, self._limiter, self._notifier)
 
-        self._enabled = False
-        self._emby_host = ""
-        self._emby_apikey = ""
-        if config:
-            self._enabled = bool(config.get("enabled"))
-            self._proxy = str(config.get("proxy") or self._proxy)
-            self._emby_host = str(config.get("emby_host") or "").strip()
-            self._emby_apikey = str(config.get("emby_apikey") or "").strip()
         self._emby_lib = None
         self._emby_sig = None
-        self._client = JavdbClient(proxy=self._proxy)
+        self._client = JavdbClient(bin_path=self._javdb_bin or None, proxy=self._proxy)
+        self.start_javdb_bootstrap()
         self.start_warm_up()
 
     def get_state(self) -> bool:
@@ -358,7 +368,7 @@ class AVHelper(_PluginBase):
     # ---------- 配置与页面 ----------
 
     def get_form(self) -> Tuple[Optional[List[dict]], Dict[str, Any]]:
-        """配置页：启用开关与 javdb 用的代理地址。"""
+        """配置页：启用开关、javdb 代理、javdb 二进制路径、数据根与 Emby 覆盖项。"""
         form = [
             {
                 "component": "VForm",
@@ -371,8 +381,21 @@ class AVHelper(_PluginBase):
                                           "props": {"model": "enabled", "label": "启用插件"}}]},
                             {"component": "VCol", "props": {"cols": 12, "md": 6},
                              "content": [{"component": "VTextField",
-                                          "props": {"model": "proxy", "label": "代理地址",
-                                                    "placeholder": "http://host:port"}}]},
+                                          "props": {"model": "proxy", "label": "代理地址（可留空）",
+                                                    "placeholder": "http://host:port，留空 = 直连"}}]},
+                        ],
+                    },
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {"component": "VCol", "props": {"cols": 12, "md": 6},
+                             "content": [{"component": "VTextField",
+                                          "props": {"model": "javdb_bin", "label": "javdb 路径（可留空）",
+                                                    "placeholder": "留空 = 自动下载 / 自动查找"}}]},
+                            {"component": "VCol", "props": {"cols": 12, "md": 6},
+                             "content": [{"component": "VTextField",
+                                          "props": {"model": "data_root", "label": "数据目录（可留空）",
+                                                    "placeholder": "留空 = 插件数据目录下的 cache"}}]},
                         ],
                     },
                     {
@@ -393,12 +416,17 @@ class AVHelper(_PluginBase):
                      "text": "完整界面在插件详情页内（内嵌应用）：榜单、演员、订阅、任务、通知与站点检索都在里面。"},
                     {"component": "VAlert",
                      "props": {"type": "info", "variant": "tonal", "class": "mt-2"},
+                     "text": "javdb 是发现层依赖（javdb-cli 单文件二进制）。留空时插件会在后台自动下载一份"
+                             "到数据目录；网络不通就手工放一份并在上面填路径。"},
+                    {"component": "VAlert",
+                     "props": {"type": "info", "variant": "tonal", "class": "mt-2"},
                      "text": "Emby 用于给界面里的番号打「已入库」标记（没有的片不显示标记）。"
                              "两栏都留空时自动复用 MoviePilot「设置 → 媒体服务器」里的 Emby。"},
                 ],
             }
         ]
         return form, {"enabled": self._enabled, "proxy": self._proxy,
+                      "javdb_bin": self._javdb_bin, "data_root": self._data_root,
                       "emby_host": self._emby_host, "emby_apikey": self._emby_apikey}
 
     def get_page(self) -> Optional[List[dict]]:
@@ -524,10 +552,17 @@ class AVHelper(_PluginBase):
         return self._engine
 
     def cli(self) -> JavdbClient:
-        """取 javdb 客户端，未初始化时按当前代理兜底。"""
+        """取 javdb 客户端，未初始化时按当前代理与二进制路径兜底。"""
         if self._client is None:
-            self._client = JavdbClient(proxy=self._proxy)
+            self._client = JavdbClient(bin_path=self._javdb_bin or None, proxy=self._proxy)
         return self._client
+
+    @property
+    def proxy_kwargs(self) -> Dict[str, str]:
+        """`RequestUtils` 要的代理参数；留空代理时返回空字典（不能传空串，等于给个坏代理）。"""
+        if not self._proxy:
+            return {}
+        return {"http": self._proxy, "https": self._proxy}
 
     def emby(self) -> emby.EmbyLibrary:
         """Emby 库查询入口（连接信息变了就换实例，索引随之重建）。"""
@@ -674,7 +709,7 @@ class AVHelper(_PluginBase):
 
     def _cache_file(self, key: str) -> Path:
         """缓存文件路径（按 key 哈希命名）。"""
-        return META_DIR / (hashlib.sha1(key.encode("utf-8")).hexdigest() + ".json")
+        return paths.meta_dir() / (hashlib.sha1(key.encode("utf-8")).hexdigest() + ".json")
 
     def _cache_read(self, key: str, ttl: int) -> Any:
         """读 JSON 缓存；不存在或超过 TTL 返回 None。"""
@@ -721,6 +756,28 @@ class AVHelper(_PluginBase):
         return data
 
     # ---------- 启动预热 ----------
+
+    def start_javdb_bootstrap(self) -> bool:
+        """后台确保 javdb 二进制就位：缺文件就从官方 Release 下载一份，不阻塞宿主启动。
+
+        别人新装这个插件时容器里没有 javdb，这一步让他们不必手工放二进制；已经有
+        （配置指定 / 历史路径 / PATH）时只是校验一下，不发任何请求。
+        """
+        if paths.javdb_ready():
+            logger.info(f"AVHelper javdb 就绪：{paths.javdb_bin()}")
+            return False
+        thread = threading.Thread(target=self._javdb_bootstrap, name="avhelper-javdb",
+                                  daemon=True)
+        thread.start()
+        return True
+
+    def _javdb_bootstrap(self) -> None:
+        """下载 javdb 二进制（守护线程里跑，失败只记日志，不影响插件其它功能）。"""
+        ok, detail = paths.ensure_javdb(proxy=self._proxy)
+        if ok:
+            logger.info(f"AVHelper javdb 已就位：{detail}")
+        else:
+            logger.warning(f"AVHelper javdb 未就绪：{detail}")
 
     def start_warm_up(self) -> bool:
         """启动后台首屏预热；宿主启动不被拖住。
@@ -1139,7 +1196,8 @@ class AVHelper(_PluginBase):
 
         平时只服务 javdb 封面/预览图；长缩略图在浏览器直连失败时才退回这里（WebP 原样透传）。
         """
-        blob = imgproxy.fetch(url or "")
+        # 走插件配置里那份代理：这条路是「浏览器直连失败」的兜底，服务端同样可能需要代理
+        blob = imgproxy.fetch(url or "", proxy=self._proxy)
         if blob is None:
             return Response(status_code=404)
         return Response(content=blob, media_type=imgproxy.media_type(blob),
@@ -1162,7 +1220,7 @@ class AVHelper(_PluginBase):
             return int(cached)
         total = 0
         try:
-            for path in CACHE_ROOT.rglob("*"):
+            for path in paths.data_root().rglob("*"):
                 if not path.is_file():
                     continue
                 try:
@@ -1387,7 +1445,7 @@ class AVHelper(_PluginBase):
         def fetcher(url: str, referer: str) -> Optional[str]:
             """带代理抓取 projectjav / javfree 页面。"""
             return RequestUtils().get(url, headers={"User-Agent": longshot.UA, "Referer": referer},
-                                      proxies={"http": self._proxy, "https": self._proxy})
+                                      proxies=self.proxy_kwargs)
 
         url = longshot.resolve_long(number, fetcher) or ""
         # 找到了压 7 天；没找到只压 2 分钟负缓存——否则新片/改版会被判「没有」整整一周，重试也没用
@@ -1629,12 +1687,12 @@ class AVHelper(_PluginBase):
 
         # 2. 孤儿文件（在缓存目录里但不在索引里；数据库文件除外）
         #
-        # **只扫 META_DIR，不扫 images**：图片缓存从不登记索引（`imgproxy.fetch()` 与 `/img`
+        # **只扫元数据目录，不扫 images**：图片缓存从不登记索引（`imgproxy.fetch()` 与 `/img`
         # 路由都不调 `cache_put`），所以"不在索引里"对图片而言恒真 —— 把 images 一起扫等于
         # 每晚把整个图片缓存删光（2026-10-10 实测：847 个文件被判孤儿）。图片本该由下面第 3 步
         # 的「容量上限 + 按 mtime 淘汰」来兜底。原实现两处并存，属既有缺陷，本次修正。
         indexed = {item["path"] for item in self.store.cache_all()}
-        for folder in (META_DIR,):
+        for folder in (paths.meta_dir(),):
             if not folder.exists():
                 continue
             for path in folder.glob("*"):
@@ -1647,7 +1705,7 @@ class AVHelper(_PluginBase):
 
         # 3. 容量上限：按 mtime 由旧到新淘汰（同样不碰数据库文件）
         limit = CACHE_MAX_GB * 1024 ** 3
-        files = [p for p in CACHE_ROOT.rglob("*") if p.is_file() and not is_keep_file(p)]
+        files = [p for p in paths.data_root().rglob("*") if p.is_file() and not is_keep_file(p)]
         total = sum(p.stat().st_size for p in files)
         if total > limit:
             for path in sorted(files, key=lambda p: p.stat().st_mtime):

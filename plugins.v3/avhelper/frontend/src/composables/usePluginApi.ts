@@ -24,6 +24,8 @@ export interface PluginApi {
 export interface PluginConfig {
   enabled?: boolean
   proxy?: string
+  javdb_bin?: string
+  data_root?: string
   emby_host?: string
   emby_apikey?: string
   [key: string]: unknown

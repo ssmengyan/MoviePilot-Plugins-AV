@@ -1,0 +1,164 @@
+AVHelper 非商业学习许可协议
+AVHelper Non-Commercial Learning License
+Version 1.0  ·  生效日期：2026-10-11
+
+版权所有 (c) 2026 ssmengyan
+Copyright (c) 2026 ssmengyan
+
+────────────────────────────────────────────────────────────────────────
+【中文正文】
+────────────────────────────────────────────────────────────────────────
+
+本项目（下称「本软件」，含本仓库内的全部源代码、前端工程、构建产物、图标、
+文档与其他随附材料）免费公开，供大家学习、研究与个人使用。凡复制、使用、
+修改、合并、发布、分发本软件或其任何副本、衍生作品的个人或组织，即视为
+已阅读、理解并同意遵守本协议的全部条款。
+
+第 1 条  授予的权利（你可以做的事）
+  1.1 你可以自由地阅读、学习、研究本软件的源代码与实现思路。
+  1.2 你可以在**非商业目的**下自由使用、复制、修改本软件，并将其部署在
+      你自己的设备或自用环境中。
+  1.3 你可以自由地二次开发：修改源码、增删功能、制作衍生作品。
+  1.4 你可以在**非商业目的**下自由地分发本软件的原版或你的衍生版本，
+      包括以开源或公开仓库的形式发布。
+
+第 2 条  使用条件（你必须遵守的事）
+  2.1 **署名**：分发本软件或其衍生作品时，必须保留本协议全文、原始版权声明
+      与本仓库地址（https://github.com/ssmengyan/MoviePilot-Plugins-AV），
+      不得删除或篡改作者信息。
+  2.2 **相同方式共享**：你发布的衍生作品必须继续采用与本协议实质相同的许可
+      （即同样允许学习与非商业使用、同样禁止商业使用），不得改为限制更严或
+      允许商用的许可，也不得对本软件的后续使用者追加额外限制。
+  2.3 **标明改动**：修改后的版本必须以显著方式说明你做过修改，且不得暗示
+      你的衍生版本由原作者背书或认可。
+  2.4 **非商业性质**：不得利用本软件直接或间接获取商业利益（详见第 3 条）。
+
+第 3 条  禁止商业使用（核心限制）
+  3.1 未经版权人事先书面授权，**严禁将本软件（含其任何部分、衍生版本或
+      修改版本）用于任何商业用途**。
+  3.2 第 3.1 条所称「商业用途」包括但不限于：
+      (a) 出售、出租、许可、订阅或以其他方式对本软件收费；
+      (b) 将本软件作为付费产品或付费服务的组成部分（含会员制、代部署、
+          代配置、技术支持包、教程付费社群等）向他人提供；
+      (c) 将本软件预装、捆绑或集成到任何硬件、软件、镜像、固件、系统
+          集成方案或云服务中销售或随之收费；
+      (d) 在网站、应用、NAS 系统集成或任何渠道中，以本软件为卖点投放
+          广告、引流、拉新或以之获取广告、赞助、佣金等收入；
+      (e) 在商业实体内部作为生产工具使用而向其客户交付成果并收费。
+  3.3 个人出于学习、研究、技术交流目的的免费分享、免费转载、免费镜像
+      不属于商业用途，但须完整遵守第 2 条。
+
+第 4 条  合法合规与免责（请务必阅读）
+  4.1 本软件只是一个**技术演示与学习项目**，实现的是「从公开元数据站点读取
+      影片资料 → 在你自己已配置的 PT/BT 站点上搜索 → 调用你自己已部署的
+      MoviePilot 下载与媒体库功能」这一类通用自动化流程。
+  4.2 **本软件不包含、不提供、不分发、不托管、不索引任何影音内容**，也不
+      内置任何资源站的账号、密钥或订阅源。所有数据均来自使用者自行配置的
+      第三方服务。
+  4.3 使用者应自行确认其所在国家或地区的法律法规，并**自行承担**因安装、
+      配置、使用本软件（含抓取、搜索、下载、刮削等行为）而产生的一切后果
+      与法律责任。请勿将本软件用于任何违法用途，请勿下载或传播任何违法
+      内容。
+  4.4 本软件与任何元数据站点、PT/BT 站点、媒体服务器软件、MoviePilot 及其
+      相关组织均**无任何隶属、合作、赞助或背书关系**；相关名称与商标归其
+      各自权利人所有。
+  4.5 本项目仅面向达到其所在司法辖区法定成年年龄的使用者。
+  4.6 请遵守你所使用的每一个第三方服务的服务条款与使用限制。
+
+第 5 条  无担保
+  本软件按「现状」提供，不附带任何明示或默示的担保，包括但不限于对适销性、
+  特定用途适用性及不侵权的担保。在任何情况下，作者或版权持有人均不对因
+  本软件或本软件的使用或其他交易而产生、引起或与之相关的任何索赔、损害
+  或其他责任负责，无论是合同诉讼、侵权行为还是其他方式。
+
+第 6 条  协议终止
+  你一旦违反本协议任何条款，本协议授予你的全部权利即自动终止。终止后你
+  必须立即停止使用并销毁本软件的所有副本。第 2、3、4、5 条在终止后继续
+  有效。
+
+第 7 条  其他
+  7.1 本协议以中文版本为准；英文译文仅供参考。
+  7.2 若本协议任何条款被认定为无效或不可执行，其余条款仍然完全有效。
+  7.3 作者保留随时更新本协议的权利；更新后的协议适用于其发布之后的新版本。
+
+────────────────────────────────────────────────────────────────────────
+【English Translation (for reference only — the Chinese text prevails)】
+────────────────────────────────────────────────────────────────────────
+
+Copyright (c) 2026 ssmengyan. All rights reserved.
+
+This project (the "Software") is released free of charge for learning, research
+and personal use. By copying, using, modifying, merging, publishing or
+distributing the Software or any copy or derivative thereof, you accept all
+terms of this License.
+
+1. GRANTED RIGHTS
+   You may read, study and research the source code; use, copy and modify the
+   Software for NON-COMMERCIAL purposes; create derivative works; and
+   redistribute the Software or your derivative works for NON-COMMERCIAL
+   purposes, including via public repositories.
+
+2. CONDITIONS
+   (a) Attribution: keep this License, the original copyright notice and the
+       repository URL in all copies and derivative works.
+   (b) ShareAlike: derivative works must be distributed under a license with
+       terms substantially equivalent to this one (non-commercial, learning
+       oriented), with no additional restrictions.
+   (c) State changes: modified versions must be clearly marked as modified and
+       must not imply endorsement by the original author.
+   (d) Non-commercial only, as defined in Section 3.
+
+3. NON-COMMERCIAL RESTRICTION
+   Any commercial use of the Software, in whole or in part, or of any derivative
+   work, is strictly prohibited without prior written permission. "Commercial
+   use" includes, without limitation: selling, renting, licensing or
+   subscription-based distribution of the Software; including it in a paid
+   product or service (including paid deployment, configuration, support or
+   paid community access); bundling it with hardware, software, firmware,
+   system images or cloud services for a fee; monetising it through
+   advertising, sponsorship, referral or lead generation; and using it
+   internally to deliver paid services to customers. Free, non-commercial
+   sharing, reposting and mirroring for learning purposes is permitted subject
+   to Section 2.
+
+4. LAWFUL USE AND DISCLAIMER
+   The Software is a technical demonstration and learning project only. It
+   contains, hosts, indexes and distributes NO media content whatsoever and
+   bundles no credentials or subscription feeds. All data comes from
+   third-party services configured by the user. You are solely responsible for
+   complying with the laws of your jurisdiction and for any consequence of
+   installing, configuring or using the Software. The Software is not
+   affiliated with, endorsed by or sponsored by any metadata site, PT/BT site,
+   media server software, MoviePilot or their related organisations. It is
+   intended only for users who have reached the age of majority in their
+   jurisdiction. Respect the terms of service of every third-party service
+   you use.
+
+5. NO WARRANTY
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+   FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+   IN THE SOFTWARE.
+
+6. TERMINATION
+   Rights granted under this License terminate automatically upon any breach.
+   You must then stop using and destroy all copies. Sections 2, 3, 4 and 5
+   survive termination.
+
+7. MISCELLANEOUS
+   The Chinese text prevails. If any provision is held invalid, the remaining
+   provisions stay in full force.
+
+────────────────────────────────────────────────────────────────────────
+关于本许可的说明 / Note on this license
+────────────────────────────────────────────────────────────────────────
+本许可属于「源码公开（source-available）」性质的许可：它欢迎任何人学习、
+使用、修改与二次开发，但明确禁止商业使用。因此按开放源代码促进会（OSI）
+的定义，它**不是**严格意义上的「开源许可（Open Source License）」。如果你
+希望把本项目用于商业场景，请先联系作者取得书面授权。
+This is a source-available license, not an OSI-approved open source license,
+because commercial use is prohibited. For commercial licensing, contact the
+author first.

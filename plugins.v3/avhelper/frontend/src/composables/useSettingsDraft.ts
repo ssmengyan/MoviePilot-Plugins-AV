@@ -132,6 +132,8 @@ export function useSettingsDraft(options: UseSettingsDraftOptions): UseSettingsD
   const hostConfig = reactive<HostConfigDraft>({
     enabled: options.initialConfig?.enabled === true,
     proxy: str(options.initialConfig?.proxy),
+    javdb_bin: str(options.initialConfig?.javdb_bin),
+    data_root: str(options.initialConfig?.data_root),
     emby_host: str(options.initialConfig?.emby_host),
     emby_apikey: str(options.initialConfig?.emby_apikey),
   })
@@ -179,6 +181,8 @@ export function useSettingsDraft(options: UseSettingsDraftOptions): UseSettingsD
     return {
       enabled: options.initialConfig?.enabled === true,
       proxy: str(options.initialConfig?.proxy),
+      javdb_bin: str(options.initialConfig?.javdb_bin),
+      data_root: str(options.initialConfig?.data_root),
       emby_host: str(options.initialConfig?.emby_host),
       emby_apikey: str(options.initialConfig?.emby_apikey),
     }
@@ -207,6 +211,8 @@ export function useSettingsDraft(options: UseSettingsDraftOptions): UseSettingsD
     const next: HostConfigDraft = {
       enabled: conf.enabled === true,
       proxy: str(conf.proxy),
+      javdb_bin: str(conf.javdb_bin),
+      data_root: str(conf.data_root),
       emby_host: str(conf.emby_host),
       emby_apikey: str(conf.emby_apikey),
     }
@@ -353,6 +359,8 @@ export function useSettingsDraft(options: UseSettingsDraftOptions): UseSettingsD
       const host: HostConfigDraft = {
         enabled: hostConfig.enabled,
         proxy: str(hostConfig.proxy).trim(),
+        javdb_bin: str(hostConfig.javdb_bin).trim(),
+        data_root: str(hostConfig.data_root).trim(),
         emby_host: str(hostConfig.emby_host).trim(),
         emby_apikey: str(hostConfig.emby_apikey).trim(),
       }

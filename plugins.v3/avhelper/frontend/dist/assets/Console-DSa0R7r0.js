@@ -126,9 +126,9 @@ const RULE_FALLBACK$1 = {
   trigger: "notify",
   maxPerDay: 6,
   minIntervalMin: POLICY_MIN_INTERVAL_MIN,
-  savePath: "/media/9kg/avi",
+  savePath: "",
   category: "avi",
-  downloader: "qb"
+  downloader: ""
 };
 function str(value, fallback = "") {
   return typeof value === "string" ? value : value === null || value === void 0 ? fallback : String(value);
@@ -234,7 +234,7 @@ function sameRule(a, b) {
 }
 function sameHost(a, b) {
   if (!a || !b) return a === b;
-  return a.enabled === b.enabled && a.proxy === b.proxy && a.emby_host === b.emby_host && a.emby_apikey === b.emby_apikey;
+  return a.enabled === b.enabled && a.proxy === b.proxy && a.javdb_bin === b.javdb_bin && a.data_root === b.data_root && a.emby_host === b.emby_host && a.emby_apikey === b.emby_apikey;
 }
 function embyHalfFilled(config) {
   const host = str(config?.emby_host).trim();
@@ -349,6 +349,8 @@ function useSettingsDraft(options) {
   const hostConfig = reactive$3({
     enabled: options.initialConfig?.enabled === true,
     proxy: str(options.initialConfig?.proxy),
+    javdb_bin: str(options.initialConfig?.javdb_bin),
+    data_root: str(options.initialConfig?.data_root),
     emby_host: str(options.initialConfig?.emby_host),
     emby_apikey: str(options.initialConfig?.emby_apikey)
   });
@@ -375,6 +377,8 @@ function useSettingsDraft(options) {
     return {
       enabled: options.initialConfig?.enabled === true,
       proxy: str(options.initialConfig?.proxy),
+      javdb_bin: str(options.initialConfig?.javdb_bin),
+      data_root: str(options.initialConfig?.data_root),
       emby_host: str(options.initialConfig?.emby_host),
       emby_apikey: str(options.initialConfig?.emby_apikey)
     };
@@ -392,6 +396,8 @@ function useSettingsDraft(options) {
     const next = {
       enabled: conf.enabled === true,
       proxy: str(conf.proxy),
+      javdb_bin: str(conf.javdb_bin),
+      data_root: str(conf.data_root),
       emby_host: str(conf.emby_host),
       emby_apikey: str(conf.emby_apikey)
     };
@@ -499,6 +505,8 @@ function useSettingsDraft(options) {
       const host = {
         enabled: hostConfig.enabled,
         proxy: str(hostConfig.proxy).trim(),
+        javdb_bin: str(hostConfig.javdb_bin).trim(),
+        data_root: str(hostConfig.data_root).trim(),
         emby_host: str(hostConfig.emby_host).trim(),
         emby_apikey: str(hostConfig.emby_apikey).trim()
       };
@@ -650,14 +658,14 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
             ]),
             default: _withCtx$k(() => [
               _createVNode$k(_component_v_card_title, null, {
-                default: _withCtx$k(() => _cache[2] || (_cache[2] = [
+                default: _withCtx$k(() => _cache[4] || (_cache[4] = [
                   _createTextVNode$j("常规")
                 ])),
                 _: 1
               }),
               _createVNode$k(_component_v_card_subtitle, null, {
-                default: _withCtx$k(() => _cache[3] || (_cache[3] = [
-                  _createTextVNode$j("插件开关与 javdb 代理 · 属于宿主插件配置")
+                default: _withCtx$k(() => _cache[5] || (_cache[5] = [
+                  _createTextVNode$j("插件开关、代理与路径 · 属于宿主插件配置")
                 ])),
                 _: 1
               })
@@ -675,14 +683,14 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
                 class: "mb-2",
                 "onUpdate:modelValue": _cache[0] || (_cache[0] = (value) => patch("enabled", value === true))
               }, null, 8, ["model-value"]),
-              !props.enabledKnown ? (_openBlock$o(), _createElementBlock$n("p", _hoisted_1$n, _cache[4] || (_cache[4] = [
+              !props.enabledKnown ? (_openBlock$o(), _createElementBlock$n("p", _hoisted_1$n, _cache[6] || (_cache[6] = [
                 _createTextVNode$j(" 拿不到当前开关状态（"),
                 _createElementVNode$m("code", null, "/bootstrap", -1),
                 _createTextVNode$j(" 未返回 "),
                 _createElementVNode$m("code", null, "enabled", -1),
                 _createTextVNode$j("），保存前请确认。 ")
               ]))) : _createCommentVNode$i("", true),
-              _cache[5] || (_cache[5] = _createElementVNode$m("p", { class: "text-caption text-medium-emphasis mb-4" }, " 关闭后定时订阅检查与「运行一次」都不执行，界面仍可浏览。 ", -1)),
+              _cache[7] || (_cache[7] = _createElementVNode$m("p", { class: "text-caption text-medium-emphasis mb-4" }, " 关闭后定时订阅检查与「运行一次」都不执行，界面仍可浏览。 ", -1)),
               _createVNode$k(_component_v_text_field, {
                 "model-value": props.config.proxy,
                 label: "javdb 代理地址",
@@ -692,7 +700,31 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
                 variant: "outlined",
                 density: "comfortable",
                 clearable: "",
+                class: "mb-4",
                 "onUpdate:modelValue": _cache[1] || (_cache[1] = (value) => patch("proxy", value ?? ""))
+              }, null, 8, ["model-value"]),
+              _createVNode$k(_component_v_text_field, {
+                "model-value": props.config.javdb_bin,
+                label: "javdb 路径",
+                placeholder: "留空 = 自动下载 / 自动查找",
+                hint: "发现层依赖 javdb-cli 单文件二进制。留空时插件启动后自动下一份到数据目录；网络不通就手工放一份再填这里。",
+                "persistent-hint": "",
+                variant: "outlined",
+                density: "comfortable",
+                clearable: "",
+                class: "mb-4",
+                "onUpdate:modelValue": _cache[2] || (_cache[2] = (value) => patch("javdb_bin", value ?? ""))
+              }, null, 8, ["model-value"]),
+              _createVNode$k(_component_v_text_field, {
+                "model-value": props.config.data_root,
+                label: "数据目录",
+                placeholder: "留空 = 插件数据目录下的 cache",
+                hint: "SQLite 台账、JSON 缓存与图片缓存同根。改这里等于换一套数据，旧数据不会自动搬过去。",
+                "persistent-hint": "",
+                variant: "outlined",
+                density: "comfortable",
+                clearable: "",
+                "onUpdate:modelValue": _cache[3] || (_cache[3] = (value) => patch("data_root", value ?? ""))
               }, null, 8, ["model-value"])
             ]),
             _: 1
@@ -704,7 +736,7 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
   }
 });
 
-const GeneralPanel = /* @__PURE__ */ _export_sfc(_sfc_main$o, [["__scopeId", "data-v-3cb0e600"]]);
+const GeneralPanel = /* @__PURE__ */ _export_sfc(_sfc_main$o, [["__scopeId", "data-v-b5a5bdb2"]]);
 
 const {defineComponent:_defineComponent$n} = await importShared('vue');
 
@@ -7849,6 +7881,6 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
   }
 });
 
-const Console = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-bc4cbfa1"]]);
+const Console = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-0d252e25"]]);
 
 export { CONSOLE_EMIT_NAMES as C, Console as a };
