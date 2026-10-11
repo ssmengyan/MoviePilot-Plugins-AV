@@ -80,13 +80,13 @@ class TestTasks:
             "id": "t1", "number": "IPZZ-961", "actor": "演员A",
             "cands": [{"site": "观众", "score": 86, "pass": True}],
             "reason": "因为所以", "state": "await", "thumb": "/img/x.jpg", "auto": False,
-            "rule": {"savePath": "/media/9kg/avi"},
+            "rule": {"savePath": "/downloads/av"},
         }
         store.task_add(task)
         got = store.task_get("t1")
         assert got is not None
         assert got["cands"][0]["score"] == 86
-        assert got["rule"]["savePath"] == "/media/9kg/avi"  # 规则必须落库，下载时才能沿用
+        assert got["rule"]["savePath"] == "/downloads/av"  # 规则必须落库，下载时才能沿用
         store.task_set_state("t1", "pushed")
         assert store.task_get("t1")["state"] == "pushed"
 

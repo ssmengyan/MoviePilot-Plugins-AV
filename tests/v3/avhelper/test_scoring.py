@@ -39,7 +39,7 @@ def rule(**overrides):
     base = {
         "res": "1080p", "mustCnsub": True, "preferUncensored": True, "allow4k": True,
         "minSeeders": 3, "sites": [], "prefSites": [], "btFallback": True,
-        "trigger": "notify", "savePath": "/media/9kg/avi", "downloader": "qb",
+        "trigger": "notify", "savePath": "/downloads/av", "downloader": "qb",
     }
     base.update(overrides)
     return base

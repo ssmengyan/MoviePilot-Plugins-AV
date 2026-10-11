@@ -2688,9 +2688,10 @@ const RULE_FALLBACK = {
   sites: [],
   prefSites: ["馒头", "Rousi"],
   btFallback: true,
-  savePath: "/media/9kg/avi",
+  // 保存路径与下载器留空 = 用 MoviePilot 的下载器默认值（后端 tasks.DEFAULT_RULE 同口径）
+  savePath: "",
   category: "avi",
-  downloader: "qb",
+  downloader: "",
   trigger: "notify",
   maxPerDay: 6,
   minIntervalMin: 240
