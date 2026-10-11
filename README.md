@@ -5,7 +5,7 @@
 **AV 资源助手** —— 番号发现、订阅、选种下载与入库标记的一体化界面
 
 [![MoviePilot](https://img.shields.io/badge/MoviePilot-v3.x-4c6ef5?style=flat-square)](https://github.com/jxxghp/MoviePilot)
-[![Plugin Version](https://img.shields.io/badge/plugin-0.4.0-7048e8?style=flat-square)](package.v3.json)
+[![Plugin Version](https://img.shields.io/badge/plugin-0.4.1-7048e8?style=flat-square)](package.v3.json)
 [![License](https://img.shields.io/badge/license-非商业学习许可-ff8a4c?style=flat-square)](LICENSE)
 
 </div>

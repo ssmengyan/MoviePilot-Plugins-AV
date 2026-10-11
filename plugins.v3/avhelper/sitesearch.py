@@ -16,6 +16,12 @@ MP 原生站点搜索为什么搜不到 AV（2026-10-11 在真机逐条实测）
 DownloadChain 的 `download_torrent()`，因此 `[base64]{url}` 两段式 enclosure
 必须由插件自己换票、取回种子字节，再交给下载链（换票协议与 MP 内部完全一致）。
 
+站点主机名统一走 `site_host()`：宿主给的 `domain` 可能是裸域名**也可能是空**，而 `url` 一定是
+完整地址（`https://rousi.pro/`）。把 `url` 当主机名拼进 enclosure 就会得到
+`https://https://rousi.pro//api/v1/torrents/2335` —— 请求直接抛 `InvalidURL`，界面只看到一句
+「站点换票失败，无法取得种子下载地址」（2026-10-11 真机故障，肉丝 IPZZ-236）。
+`normalize_url()` 负责把**已经存进任务候选**的这类坏地址就地修回来，不必重新搜种。
+
 模块顶只用标准库，宿主 HTTP 工具在使用处延迟导入——这样纯函数（参数构造、结果映射、
 enclosure 编解码）可以在无宿主环境下单测。
 """
@@ -46,6 +52,9 @@ PAGE_SIZE = 50
 TIMEOUT = 20
 # `[base64 换票参数]{换票地址}`，与 MP 的 enclosure 协议一致
 RECIPE_RE = re.compile(r"^\[(.*)\](.*)$", re.S)
+# 地址开头的一个协议头。`normalize_url` 只按「协议头写了两遍」这一种形态修坏数据，
+# 不无条件按 `://` 切分——查询串里合法带着 `://` 的直链会被切坏。
+_SCHEME_RE = re.compile(r"^[a-zA-Z][\w+.\-]*://")
 
 # M-Team 促销系数（与宿主 MTorrentSpider 保持一致）
 _MT_DOWNLOAD_FACTOR = {
@@ -119,13 +128,38 @@ def adapter_label(site: Dict[str, Any]) -> str:
     return ADAPTER_LABELS.get(detect_adapter(site), ADAPTER_LABELS[ADAPTER_MP])
 
 
+def host_of(value: Any) -> str:
+    """从站点配置字段里取纯主机名（容忍完整地址 / 协议头重复 / 带端口与路径）。
+
+    宿主两个字段的形状并不统一：`domain` 通常是裸域名（实测 `m-team.cc`、`rousi.pro`）
+    但可能为空，`url` 则一定是完整地址。这个函数也用于日志，所以绝不能把可能带 token 的
+    路径或查询串带出去。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if "://" in text:
+        text = text.split("://")[-1]        # 协议头被写了两遍时取最后一段
+    return re.split(r"[/?#]", text)[0].rsplit("@", 1)[-1].strip()
+
+
+def site_host(site: Dict[str, Any]) -> str:
+    """站点主机名：优先 `domain`，为空时退回 `url`。
+
+    搜索与下载必须用同一个口径，否则会出现「搜得到、下不了」——2026-10-11 肉丝真机故障：
+    搜索那侧自己剥了协议头，enclosure 那侧没有，`domain` 一为空就拼出坏地址。
+    """
+    site = site or {}
+    return host_of(site.get("domain")) or host_of(site.get("url"))
+
+
 def registered_domain(host: str) -> str:
     """按 MoviePilot 的站点规则取注册域名（≤3 段取末两段，>3 段原样）。
 
     宿主给插件的索引器配置里 `domain` 可能是入口子域（实测馒头是 `kp.m-team.cc`），
     直接拼 `api.` 会得到不存在的 `api.kp.m-team.cc`。
     """
-    labels = [part for part in str(host or "").split(".") if part]
+    labels = [part for part in host_of(host).split(".") if part]
     if not labels:
         return ""
     if len(labels) <= 3:
@@ -223,6 +257,25 @@ def _encode_recipe(recipe: Dict[str, Any]) -> str:
     return base64.b64encode(raw).decode("utf-8")
 
 
+def normalize_url(url: Any) -> str:
+    """修掉历史坏数据里的下载地址（协议头重复 / 主机后多余斜杠），其余原样返回。
+
+    旧版构造肉丝 enclosure 时会把站点 `url`（`https://rousi.pro/`）当主机名拼进去，存下来的
+    地址是 `https://https://rousi.pro//api/v1/torrents/2335`；这类坏地址已经躺在已有任务的
+    候选里，重新搜种才会消失，所以取地址时就地修一次（真机实测修好后能正常取回种子）。
+    """
+    text = str(url or "").strip()
+    for _ in range(3):                      # 极端情况可能叠了多层协议头
+        stripped = _SCHEME_RE.sub("", text, count=1)
+        if stripped == text or not _SCHEME_RE.match(stripped):
+            break
+        text = stripped
+    match = re.match(r"^(?P<base>[a-zA-Z][\w+.\-]*://[^/?#]+)/{2,}(?P<next>[^/])", text)
+    if match:
+        text = f"{match.group('base')}/{match.group('next')}{text[match.end():]}"
+    return text
+
+
 def parse_recipe(enclosure: str) -> Optional[Tuple[Dict[str, Any], str]]:
     """解析 `[base64]{url}`：返回（换票参数, 换票地址）；不是该格式返回 None。"""
     match = RECIPE_RE.match(str(enclosure or ""))
@@ -305,7 +358,7 @@ def rousi_rows(site: Dict[str, Any], payload: Any, apikey: str,
     rows = ((payload or {}).get("data") or {}).get("torrents") or []
     if not isinstance(rows, list):
         return []
-    host = registered_domain(str(site.get("domain") or site.get("url") or ""))
+    host = site_host(site)
     out: List[Dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, dict) or row.get("id") is None:
@@ -427,7 +480,9 @@ class SiteSearcher:
         apikey = str(site.get("apikey") or "")
         if not apikey:
             return [], f"{name} 未配置 API Key，无法搜索"
-        host = str(site.get("domain") or "").split("://")[-1].split("/")[0]
+        host = site_host(site)
+        if not host:
+            return [], f"{name} 未配置站点域名，无法搜索"
         headers = {
             "Authorization": f"Bearer {apikey}",
             "Accept": "application/json",
@@ -488,30 +543,48 @@ class SiteSearcher:
             if blob:
                 return blob, ""
             # 取不回字节就把直链交给下载器（由下载器带 Cookie 去取）
-            return content, ""
+            return normalize_url(content), ""
         recipe, request_url = parsed
-        real_url = self._redeem(recipe, request_url, site)
+        real_url, why = self._redeem(recipe, request_url, site)
         if not real_url:
-            return None, "站点换票失败，无法取得种子下载地址"
+            return None, f"站点换票失败（{why}）" if why else "站点换票失败，无法取得种子下载地址"
         blob = self._fetch_bytes(real_url, site, recipe=recipe)
         if blob:
             return blob, ""
         return None, "种子文件下载失败"
 
     def _redeem(self, recipe: Dict[str, Any], request_url: str,
-                site: Optional[Dict[str, Any]]) -> Optional[str]:
-        """执行换票请求并取出真实下载地址。"""
+                site: Optional[Dict[str, Any]]) -> Tuple[Optional[str], str]:
+        """执行换票请求并取出真实下载地址；第二个返回值是失败原因（成功时为空串）。
+
+        失败原因必须带出去：旧版只回一句「换票失败」，坏地址（`InvalidURL`）、接口 4xx、
+        响应缺字段在界面上长得一模一样，排查只能靠进容器复现。
+        """
         headers = recipe.get("header") if isinstance(recipe.get("header"), dict) else None
         params = recipe.get("params") if isinstance(recipe.get("params"), dict) else None
         cookies = (site or {}).get("cookie") if recipe.get("cookie") else None
+        request_url = normalize_url(request_url)
         client = self._http(headers=headers, site=site or {}, cookies=cookies)
         method = "get" if str(recipe.get("method") or "get").lower() == "get" else "post"
-        response, _ = self._call(client, method, request_url, params=params)
+        response, error = self._call(client, method, request_url, params=params)
+        if response is None:
+            reason = error or "无响应"
+            _warn(f"换票请求失败：{host_of(request_url) or '—'}（{reason}）")
+            return None, reason
+        status = getattr(response, "status_code", 0)
+        if status != 200:
+            _warn(f"换票请求返回 HTTP {status}：{host_of(request_url) or '—'}")
+            return None, f"站点返回 HTTP {status}"
         payload = self._json(response)
         if payload is None:
-            return None
-        value = pick_result(payload, str(recipe.get("result") or ""))
-        return str(value) if isinstance(value, str) and value else None
+            _warn(f"换票响应不是 JSON：{host_of(request_url) or '—'}")
+            return None, "换票响应不是 JSON"
+        result_path = str(recipe.get("result") or "")
+        value = pick_result(payload, result_path)
+        if not isinstance(value, str) or not value:
+            message = str(payload.get("message") or payload.get("msg") or "").strip()[:80]
+            return None, f"响应里没有 {result_path or '下载地址'}" + (f"：{message}" if message else "")
+        return normalize_url(value), ""
 
     def _fetch_bytes(self, url: str, site: Optional[Dict[str, Any]] = None,
                      recipe: Optional[Dict[str, Any]] = None) -> Optional[bytes]:
@@ -519,10 +592,15 @@ class SiteSearcher:
         headers = {"User-Agent": str((site or {}).get("ua") or UA),
                    "Accept": "application/x-bittorrent, application/octet-stream, */*"}
         cookies = None if recipe else (site or {}).get("cookie")
+        url = normalize_url(url)
         try:
             client = self._http(headers=headers, site=site or {}, cookies=cookies)
             response, _ = self._call(client, "get", url)
             if response is None or response.status_code != 200:
+                if recipe:      # 直链这条只是回落给下载器取，不算失败，别刷日志
+                    # 只记主机名：换过票的地址常带短时 token，不该进日志
+                    _warn(f"取种子字节失败（HTTP {getattr(response, 'status_code', '—')}）："
+                          f"{host_of(url) or '—'}")
                 return None
             blob = response.content or b""
             return blob if len(blob) > 100 else None

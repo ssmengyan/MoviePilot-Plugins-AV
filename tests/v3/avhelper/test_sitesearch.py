@@ -102,6 +102,46 @@ class TestAdapter:
         assert ss.mteam_api_host(dict(MTEAM_SITE, api_domain="https://api.example.cc")) == "api.example.cc"
 
 
+class TestSiteHost:
+    """站点主机名口径：`domain` 可能为空或本身写成完整地址（2026-10-11 肉丝故障根因）。"""
+
+    def test_prefers_domain(self):
+        assert ss.site_host(ROUSI_SITE) == "rousi.pro"
+        assert ss.site_host(dict(ROUSI_SITE, domain="kp.rousi.pro")) == "kp.rousi.pro"
+
+    def test_falls_back_to_url(self):
+        """宿主 `domain` 为空、`url` 是完整地址时，必须剥掉协议头与路径。"""
+        assert ss.site_host({"url": "https://rousi.pro/"}) == "rousi.pro"
+        assert ss.host_of("https://kp.m-team.cc/") == "kp.m-team.cc"
+        assert ss.host_of("https://https://rousi.pro//api/x") == "rousi.pro"
+        assert ss.host_of("api.m-team.cc:443/path?x=1") == "api.m-team.cc:443"
+        assert ss.host_of("") == "" and ss.host_of(None) == ""
+
+    def test_registered_domain_tolerates_full_url(self):
+        assert ss.registered_domain("https://rousi.pro/") == "rousi.pro"
+        assert ss.registered_domain("https://kp.m-team.cc/") == "m-team.cc"
+
+
+class TestNormalizeUrl:
+    """历史坏地址的修复：只认「协议头写了两遍」这一种形态。"""
+
+    def test_repairs_double_scheme(self):
+        bad = "https://https://rousi.pro//api/v1/torrents/2335"
+        assert ss.normalize_url(bad) == "https://rousi.pro/api/v1/torrents/2335"
+
+    def test_keeps_clean_url(self):
+        good = "https://rousi.pro/api/v1/torrents/2335"
+        assert ss.normalize_url(good) == good
+        magnet = "magnet:?xt=urn:btih:abc"
+        assert ss.normalize_url(magnet) == magnet
+        assert ss.normalize_url("") == "" and ss.normalize_url(None) == ""
+
+    def test_keeps_scheme_inside_query(self):
+        """查询串里合法带着 `://` 的直链不能被切坏（所以不能无条件按 `://` 切分）。"""
+        link = "https://jp.audiences.me/dl.php?id=1&next=https://audiences.me/x.torrent"
+        assert ss.normalize_url(link) == link
+
+
 class TestMteamParams:
     """馒头请求体：成人区必须显式带 mode=adult，且不带分类过滤。"""
 
@@ -192,6 +232,15 @@ class TestRows:
         assert row["page_url"] == "https://rousi.pro/torrents/98765"
         assert ss.parse_recipe(row["enclosure"]) is not None
 
+    def test_rousi_rows_host_from_url_when_domain_empty(self):
+        """回归：`domain` 为空会退回 `url`（完整地址），不能拼成 `https://https://…`。"""
+        site = dict(ROUSI_SITE, domain="")
+        site["url"] = "https://rousi.pro/"
+        rows = ss.rousi_rows(site, ROUSI_PAYLOAD, "pgk_test")
+        _, url = ss.parse_recipe(rows[0]["enclosure"])
+        assert url == "https://rousi.pro/api/v1/torrents/98765"
+        assert rows[0]["page_url"] == "https://rousi.pro/torrents/98765"
+
     def test_rousi_rows_empty(self):
         assert ss.rousi_rows(ROUSI_SITE, {"data": {}}, "k") == []
 
@@ -212,7 +261,7 @@ class TestResolve:
     def test_recipe_redeem_and_fetch(self, monkeypatch):
         searcher = ss.SiteSearcher()
         monkeypatch.setattr(searcher, "_redeem",
-                            lambda recipe, url, site: "https://api.m-team.cc/api/rss/dlv2?sign=x")
+                            lambda recipe, url, site: ("https://api.m-team.cc/api/rss/dlv2?sign=x", ""))
         monkeypatch.setattr(searcher, "_fetch_bytes",
                             lambda url, site=None, recipe=None: b"d8:announce" + b"x" * 200)
         enclosure = ss.mteam_recipe("api.m-team.cc", "KEY", "1")
@@ -221,10 +270,56 @@ class TestResolve:
 
     def test_recipe_redeem_failure(self, monkeypatch):
         searcher = ss.SiteSearcher()
-        monkeypatch.setattr(searcher, "_redeem", lambda recipe, url, site: None)
+        monkeypatch.setattr(searcher, "_redeem", lambda recipe, url, site: (None, ""))
         enclosure = ss.rousi_recipe("rousi.pro", "k", 1)
         content, why = searcher.resolve(enclosure, ROUSI_SITE)
         assert content is None and "换票失败" in why
+
+    def test_recipe_redeem_failure_carries_reason(self, monkeypatch):
+        """失败原因必须透出来：旧版只有一句话，坏地址与接口报错长得一模一样。"""
+        searcher = ss.SiteSearcher()
+        monkeypatch.setattr(searcher, "_redeem",
+                            lambda recipe, url, site: (None, "站点返回 HTTP 403"))
+        content, why = searcher.resolve(ss.rousi_recipe("rousi.pro", "k", 1), ROUSI_SITE)
+        assert content is None and "换票失败" in why and "403" in why
+
+    def test_redeem_normalizes_request_url(self, monkeypatch):
+        """回归：任务候选里躺着的 `https://https://host//…` 要在请求前修回来。"""
+        searcher = ss.SiteSearcher()
+        seen = {}
+
+        def fake_call(client, method, url, **kwargs):
+            seen["url"] = url
+            return None, "InvalidURL: bad url"
+
+        monkeypatch.setattr(searcher, "_http", lambda **kwargs: object())
+        monkeypatch.setattr(searcher, "_call", fake_call)
+        url, why = searcher._redeem({"method": "get", "result": "data.download_url"},
+                                   "https://https://rousi.pro//api/v1/torrents/2335", ROUSI_SITE)
+        assert seen["url"] == "https://rousi.pro/api/v1/torrents/2335"
+        assert url is None and "InvalidURL" in why
+
+    def test_redeem_reports_status_and_missing_field(self, monkeypatch):
+        searcher = ss.SiteSearcher()
+        monkeypatch.setattr(searcher, "_http", lambda **kwargs: object())
+
+        class Resp:
+            def __init__(self, status, payload=None):
+                self.status_code = status
+                self._payload = payload
+
+            def json(self):
+                return self._payload
+
+        monkeypatch.setattr(searcher, "_call", lambda *a, **k: (Resp(502), ""))
+        assert searcher._redeem({"method": "get", "result": "data.download_url"}, "https://rousi.pro/x", ROUSI_SITE) \
+            == (None, "站点返回 HTTP 502")
+
+        monkeypatch.setattr(searcher, "_call",
+                            lambda *a, **k: (Resp(200, {"message": "api key 无效", "data": {}}), ""))
+        url, why = searcher._redeem({"method": "get", "result": "data.download_url"},
+                                    "https://rousi.pro/x", ROUSI_SITE)
+        assert url is None and "data.download_url" in why and "api key 无效" in why
 
     def test_direct_url_falls_back_to_url(self, monkeypatch):
         """直链取不回字节时，把直链交给下载器（由下载器带 Cookie 去取）。"""
@@ -273,3 +368,26 @@ class TestSearchDispatch:
         searcher._search_mteam = boom
         rows, note = searcher.search(MTEAM_SITE, "X")
         assert rows == [] and "搜索异常" in note
+
+    def test_rousi_search_url_falls_back_to_site_url(self, monkeypatch):
+        """回归：搜索地址也要用 `site_host()`，否则 domain 为空会拼成 `https:///api/v1/torrents`。"""
+        searcher = ss.SiteSearcher()
+        seen = {}
+
+        def fake_call(client, method, url, **kwargs):
+            seen["url"] = url
+            return None, "stop here"
+
+        monkeypatch.setattr(searcher, "_http", lambda **kwargs: object())
+        monkeypatch.setattr(searcher, "_call", fake_call)
+        rows, note = searcher.search({"name": "Rousi", "domain": "", "url": "https://rousi.pro/",
+                                      "apikey": "pgk_test"}, "MIDV-946")
+        assert seen["url"] == "https://rousi.pro/api/v1/torrents"
+        assert rows == [] and "搜索失败" in note
+
+    def test_rousi_search_without_host_reports_reason(self):
+        """肉丝这条路径：主机名为空时给明确原因，而不是拼出 `https:///api/v1/torrents`。"""
+        searcher = ss.SiteSearcher()
+        rows, note = searcher._search_rousi({"name": "Rousi", "domain": "", "url": "",
+                                            "apikey": "k"}, "X")
+        assert rows == [] and "域名" in note

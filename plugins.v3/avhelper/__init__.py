@@ -215,7 +215,7 @@ class AVHelper(_PluginBase):
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
     plugin_icon = ("https://raw.githubusercontent.com/ssmengyan/"
                    "MoviePilot-Plugins-AV/main/icons/avhelper.png")
-    plugin_version = "0.4.0"
+    plugin_version = "0.4.1"
     plugin_label = "发现"
     plugin_author = "ssmengyan"
     plugin_config_prefix = "avhelper_"
