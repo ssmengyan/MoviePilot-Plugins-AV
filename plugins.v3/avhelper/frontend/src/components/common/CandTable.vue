@@ -11,8 +11,8 @@
  *     <div style="flex:1"></div>
  *     [订阅为自动下载，但无候选合格]
  *   </div>
- *   <table><thead><tr>
- *     站点 | 规格 | 中字 | 破解 | 大小 | 做种 | 标记 | 匹配分 | (空)
+ *   <table><colgroup>7 个 col</colgroup><thead><tr>
+ *     站点 | 标记 | 规格 | 大小 | 做种 | 匹配分 | 操作
  *   </tr></thead><tbody>
  *     PT 行…（合格行绿底、淘汰行淡化、BT 行深底）
  *     [— PT 没有合格候选，以下为 BT 磁力兜底 —]
@@ -24,7 +24,19 @@
  * 行样式语义（`app.css`）：`tr.best` = 被规则选中的最佳候选、`tr.dead` = 被淘汰、
  * `tr.bt` = BT 兜底行；每行下面还有一条 `tr.candsub` 显示种子原名（`title`）。
  *
- * 差异：老实现用 `data-dl` / `data-task` / `data-force` 属性 + `bindDownloadButtons()`
+ * 与老实现的两处**有意为之**的排版差异（老实现的 9 列在真实数据下横向过宽，
+ * 被卡片 `.avh-cand{overflow:hidden}` 裁掉右侧，「下载」按钮整个看不见）：
+ *
+ * 1. 老实现把「中字」「破解」各占一列，于是每一行都固定渲染「有/无」和「破解/—」，
+ *    既占两列宽度又几乎全是无信息量的占位符。现在合并成第 2 列「标记」，**只画存在的
+ *    标签**（顺序 `中字 → 破解 → 免费 → 优先站`，复用同一套 `.avh-tag*` 配色），
+ *    四个都没有才画一个弱化的 `—`；「标记」列吃剩余宽度（`auto`），标签少也不会撑宽表格。
+ * 2. 表格改用 `table-layout: fixed` + `<colgroup>` 显式列宽。固定布局下浏览器只按列宽
+ *    分配，不会让长内容（规格串、站点名）把表格撑过容器，因此宽度严格等于容器宽度、
+ *    最后一列「操作」永远不会被挤出卡片右侧；代价是内容不再撑列，`th`/`td` 必须自带
+ *    `overflow:hidden` + `text-overflow:ellipsis`（标题行 `.avh-cand__ttl` 同理）。
+ *
+ * 行为差异：老实现用 `data-dl` / `data-task` / `data-force` 属性 + `bindDownloadButtons()`
  * 事件委托，并在点击时把按钮 `disabled`；Vue 里改成 `download` 事件 + 组件内
  * 按站点记 in-flight（按钮转圈禁用），点击语义（含「仍要下载」的 `force`）不变。
  */
@@ -95,6 +107,22 @@ const origin = computed(() => {
 
 function isPass(cand: Candidate): boolean {
   return cand.pass !== false
+}
+
+/**
+ * 「标记」列的标签（列合并后由 `中字`/`破解`/`免费`/`优先站` 四类拼成）。
+ *
+ * 顺序固定：中字 → 破解 → 免费 → 优先站。**只返回存在的标签**：老实现「中字」列
+ * 每行都画「有/无」、「破解」列每行都画「破解/—」，两个占位符吃掉两列宽度却没有信息量。
+ * 四个都没有时返回空数组，由模板画一个弱化的 `—`（沿用 `.avh-cand__hint` 的观感）。
+ */
+function marks(cand: Candidate): Array<{ text: string; cls: string }> {
+  const out: Array<{ text: string; cls: string }> = []
+  if (cand.cnsub) out.push({ text: '中字', cls: 'avh-tag--on' })
+  if (cand.uncensored) out.push({ text: '破解', cls: 'avh-tag--uc' })
+  if (cand.free) out.push({ text: '免费', cls: 'avh-tag--free' })
+  if (cand.pref) out.push({ text: '优先站', cls: 'avh-tag--pref' })
+  return out
 }
 
 /** 行 class：`best`/`dead`/`bt` + 有原名时加 `has-sub`（老实现 `rowOf` 的同一套拼法）。 */
@@ -215,24 +243,36 @@ const poster = computed(() => {
     </div>
 
     <table class="avh-cand__table">
+      <!--
+        固定表格布局的显式列宽（`table-layout: fixed` 下只认这里的第一行/col 宽度）。
+        「标记」列留 `auto` 吸收剩余宽度；「操作」列给足 92px（下限 84px）保证
+        「仍要下载」这颗四字按钮 + 左右 8px 内边距放得下、永不被挤出卡片右边界。
+      -->
+      <colgroup>
+        <col class="avh-cand__col-site" />
+        <col class="avh-cand__col-mark" />
+        <col class="avh-cand__col-spec" />
+        <col class="avh-cand__col-size" />
+        <col class="avh-cand__col-seed" />
+        <col class="avh-cand__col-score" />
+        <col class="avh-cand__col-act" />
+      </colgroup>
       <thead>
         <tr>
           <th>站点</th>
+          <th>标记</th>
           <th>规格</th>
-          <th>中字</th>
-          <th>破解</th>
           <th>大小</th>
           <th>做种</th>
-          <th>标记</th>
           <th>匹配分</th>
-          <th />
+          <th class="avh-cand__act">操作</th>
         </tr>
       </thead>
       <tbody>
         <template v-for="row in rows" :key="row.key">
           <!-- 行内没有用元素包一层（两个分支都是 <tr>），保证 tbody 里只有表格行 -->
           <tr v-if="row.kind === 'btnote'">
-            <td colspan="9" class="avh-cand__hint avh-cand__btnote">
+            <td colspan="7" class="avh-cand__hint avh-cand__btnote">
               — PT 没有合格候选，以下为 BT 磁力兜底 —
             </td>
           </tr>
@@ -243,30 +283,29 @@ const poster = computed(() => {
                 <span v-if="row.cand.src === 'BT'" class="avh-tag">BT</span>
                 {{ row.cand.site || '' }}
               </td>
-              <td>{{ row.cand.spec || '' }}</td>
-              <td>
-                <span class="avh-tag" :class="row.cand.cnsub ? 'avh-tag--on' : ''">
-                  {{ row.cand.cnsub ? '有' : '无' }}
-                </span>
+              <!-- 「标记」：只画存在的标签，顺序 中字 → 破解 → 免费 → 优先站；全无则弱化 — -->
+              <td class="avh-cand__marks">
+                <template v-if="marks(row.cand).length">
+                  <span
+                    v-for="mark in marks(row.cand)"
+                    :key="mark.text"
+                    class="avh-tag"
+                    :class="mark.cls"
+                  >{{ mark.text }}</span>
+                </template>
+                <span v-else class="avh-cand__hint">—</span>
               </td>
-              <td>
-                <span class="avh-tag" :class="row.cand.uncensored ? 'avh-tag--uc' : ''">
-                  {{ row.cand.uncensored ? '破解' : '—' }}
-                </span>
-              </td>
+              <!-- 「规格」不再是信息大户：保留原文，`title` 兜全文，视觉弱化 + 省略号截断 -->
+              <td class="avh-cand__spec" :title="row.cand.spec || ''">{{ row.cand.spec || '' }}</td>
               <td>{{ row.cand.size || '' }}</td>
               <td>{{ seedersText(row.cand) }}</td>
-              <td>
-                <span v-if="row.cand.free" class="avh-tag avh-tag--free">免费</span>
-                <span v-if="row.cand.pref" class="avh-tag avh-tag--pref">优先站</span>
-              </td>
               <td :title="row.cand.breakdown || ''">
                 <span
                   class="avh-score"
                   :class="`avh-score--${scoreLevel(row.cand.score, isPass(row.cand))}`"
                 >{{ scoreText(row.cand) }}</span>
               </td>
-              <td>
+              <td class="avh-cand__act">
                 <v-btn
                   v-if="isPass(row.cand)"
                   class="avh-cand__dl"
@@ -287,7 +326,7 @@ const poster = computed(() => {
               </td>
             </tr>
             <tr v-if="titleOf(row.cand)" :class="['avh-cand__sub', ...rowClass(row.cand)]">
-              <td colspan="9">
+              <td colspan="7">
                 <div class="avh-cand__ttl" :title="titleOf(row.cand)">{{ titleOf(row.cand) }}</div>
               </td>
             </tr>
@@ -295,7 +334,7 @@ const poster = computed(() => {
         </template>
 
         <tr v-if="!cands.length">
-          <td colspan="9" class="avh-cand__hint avh-cand__empty">没有搜到任何候选</td>
+          <td colspan="7" class="avh-cand__hint avh-cand__empty">没有搜到任何候选</td>
         </tr>
       </tbody>
     </table>
@@ -349,25 +388,97 @@ const poster = computed(() => {
   flex: 1;
 }
 
+/*
+ * `table-layout: fixed`：列宽只认 `<colgroup>`（表格第一条 col / 首行 th），
+ * 长内容（规格串、站点名、种子原名）不再参与列宽计算，所以表格宽度**严格等于容器宽度**，
+ * 卡片 `.avh-cand{overflow:hidden}` 不会再裁掉右半张表——这是本次要修的真实缺陷。
+ * 代价：所有单元格必须自己 `overflow:hidden` + 省略号，否则内容会溢到相邻列上。
+ */
 .avh-cand__table {
+  table-layout: fixed;
   width: 100%;
   border-collapse: collapse;
   font-size: 12.5px;
 }
 
+/* 列宽：**七列全部给显式宽度**，不留"弹性列"。
+   `table-layout: fixed` 下，表格宽度（100%）大于各列宽度之和时，多出来的空间由浏览器
+   **按列宽比例摊到每一列上**（CSS 2.1 §17.5.2.1，Chrome/Firefox 实测一致）。
+   所以宽屏下七列会均衡变宽（老实现那种"铺满一整行"的观感），而列宽之比仍由下面这组
+   基准值决定；窄屏时反向等比收缩，且因为布局是 fixed，**永远不会把「操作」列挤出卡片**。
+   （曾经把「标记」列写成 `auto`：宽屏下它一个人吃掉 632px，中间空出一大片，
+   改为全列显式后同一行里最宽的一列是 287px。） */
+.avh-cand__col-site {
+  width: 96px;
+}
+
+.avh-cand__col-mark {
+  width: 180px;
+}
+
+.avh-cand__col-spec {
+  width: 120px;
+}
+
+.avh-cand__col-size {
+  width: 88px;
+}
+
+.avh-cand__col-seed {
+  width: 72px;
+}
+
+.avh-cand__col-score {
+  width: 80px;
+}
+
+.avh-cand__col-act {
+  width: 92px;
+}
+
+/* 单元格截断：fixed 布局下不给省略号就会溢到邻列 */
+.avh-cand__table th,
+.avh-cand__table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .avh-cand__table th {
-  padding: 8px 10px;
+  padding: 8px;
   text-align: left;
   font-weight: 500;
-  white-space: nowrap;
   color: rgba(var(--v-theme-on-surface), 0.5);
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.12);
 }
 
 .avh-cand__table td {
-  padding: 9px 10px;
+  /* 定高（约一行文字 + 上下 9px）配合上面的 overflow:hidden，给行高一个上限，
+     内容按单行省略号处理而不是把行撑高 */
+  height: 38px;
+  padding: 9px 8px;
   vertical-align: middle;
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+}
+
+/* 「操作」列：右对齐 + 按钮不换行，保证按钮完整贴右边界显示 */
+.avh-cand__table th.avh-cand__act,
+.avh-cand__table td.avh-cand__act {
+  text-align: right;
+}
+
+.avh-cand__table td.avh-cand__act {
+  white-space: nowrap;
+}
+
+/* 「标记」列：标签排列不换行（宽度靠 auto 列吸收，标签少也不会撑宽表格） */
+.avh-cand__marks {
+  white-space: nowrap;
+}
+
+/* 「规格」列：信息密度低，视觉弱化一档，长串走省略号（全文看 `title`） */
+.avh-cand__spec {
+  color: rgba(var(--v-theme-on-surface), 0.5);
 }
 
 /* 行语义：best 绿底、dead 淡化、bt 深一档（老 `tr.best/tr.dead/tr.bt`） */
@@ -388,7 +499,8 @@ const poster = computed(() => {
 }
 
 .avh-cand__sub td {
-  padding: 0 10px 9px;
+  /* 种子原名整行横跨 7 列：左右内边距与数据单元格统一取 8px（本次从 10px 收紧） */
+  padding: 0 8px 9px;
 }
 
 .avh-cand__ttl {
