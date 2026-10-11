@@ -26,6 +26,17 @@
  * 上面那四颗的顺序**不动**（中字 → 破解 → ⭐已收藏演员 → ✔已入库），新徽标排在最后。
  * 只在 `downloaded && !lib` 时画：已经在 Emby 库里的片子看「✔已入库」就够了，
  * 两颗都画反而是同一件事说两遍（投放条件见模板里的注释）。
+ *
+ * 差异 3（2026-10-12 加，`mode="library"`）：给「已入库的番号」栏用的库卡片。
+ * 那一栏的数据来自 Emby 库本身（`/library`），**没有** javdb 的磁力数 / 发行日 / 时长，
+ * 照榜单那两行画就会是「🧲 0 · 空日期」。所以库模式换两行：
+ * ```
+ * 第二行：{演员或 —}              {入库 2026-10-09}
+ * 第三行：{库内文件名，超长省略号}  [▶ 观看]（直达 Emby 观看地址的新标签页链接）
+ * ```
+ * 卡片本体在两种模式下**都是**"点开在线详情"，与发现榜单完全一致（用户对「已入库的番号」
+ * 的要求就是"参考发现榜单的列表形式和功能逻辑"）；「观看」是卡片上多出来的一条直达路径，
+ * 满足"点击可直接跳转到对应的 MB 观看地址"。
  */
 import Thumb from './Thumb.vue'
 
@@ -54,6 +65,11 @@ export interface CardMovie {
    * **文件可能已经被删**（台账不因文件消失而消失，这正是它存在的意义）。
    */
   downloaded?: boolean
+  /**
+   * 入库时间（Emby 的 `DateCreated`，本地时间写法；`/library` 的 `addedAt`）。
+   * 只有库模式会画它，其它来源的卡片没有这个字段。
+   */
+  addedAt?: string
 }
 
 const props = withDefaults(
@@ -63,8 +79,13 @@ const props = withDefaults(
     pluginId?: string
     /** 演员已在「我的演员」里：加一个 `⭐已收藏演员` 角标（老实现 `merged`）。 */
     actorFavorited?: boolean
+    /**
+     * 卡片形态：`rank` = 榜单/演员作品史/搜索（老实现原样），
+     * `library` = 「已入库的番号」栏（见文件头差异 3）。默认 `rank`，别的调用方一行都不用改。
+     */
+    mode?: 'rank' | 'library'
   }>(),
-  { pluginId: '', actorFavorited: false },
+  { pluginId: '', actorFavorited: false, mode: 'rank' },
 )
 
 const emit = defineEmits<{
@@ -77,11 +98,26 @@ const emit = defineEmits<{
 const number = () => String(props.movie.number || '')
 const id = () => String(props.movie.id || '')
 
+/** 是不是库模式（「已入库的番号」栏）。 */
+const library = () => props.mode === 'library'
+
 /** 时长：老实现 `mv.duration ? esc(mv.duration) + '′' : ''`（0 与空串都不显示）。 */
 const durationText = () => {
   const value = props.movie.duration
   return value ? `${value}′` : ''
 }
+
+/** 入库时间：只画到日（`2026-10-05 12:34:56` → `入库 2026-10-05`）；拿不到就不画这一段。 */
+const addedText = () => {
+  const day = String(props.movie.addedAt || '').slice(0, 10)
+  return day ? `入库 ${day}` : ''
+}
+
+/** 库内文件名：`/media/9kg/avi/IPZZ-961.mp4` → `IPZZ-961.mp4`（两种斜杠都认）。 */
+const fileName = () => String(props.movie.lib?.path || '').replace(/\\/g, '/').split('/').pop() || ''
+
+/** Emby 观看地址（`lib.url`）；没有就整颗「观看」不画。 */
+const watchUrl = () => String(props.movie.lib?.url || '')
 </script>
 
 <template>
@@ -109,11 +145,33 @@ const durationText = () => {
       <div class="avh-card__num">{{ number() }}</div>
       <div class="avh-card__sub">
         <span>{{ movie.actor || '—' }}</span>
-        <span>🧲 {{ movie.magnets || 0 }}</span>
+        <!-- 库模式第二行右侧是入库时间；榜单模式下仍是磁力条数（老实现口径，一颗都不改） -->
+        <span v-if="library()">{{ addedText() }}</span>
+        <span v-else>🧲 {{ movie.magnets || 0 }}</span>
       </div>
       <div class="avh-card__sub">
-        <span>{{ movie.date || '' }}</span>
-        <span>{{ durationText() }}</span>
+        <template v-if="library()">
+          <!-- 库内文件名：`title` 给完整路径，判断"是不是同一部片"时不用点进去 -->
+          <span :title="String(movie.lib?.path || '')">{{ fileName() }}</span>
+          <!--
+            「▶ 观看」：直达 Emby 观看地址（`lib.url`，详情页那颗「在 Emby 中打开」同一个地址）。
+            用 `<a target="_blank">` 而不是 `window.open`：中键/右键新标签页、悬停看地址、
+            弹窗拦截器都按标准链接处理；`@click.stop` 保证不会连带触发卡片的"点开详情"。
+          -->
+          <a
+            v-if="watchUrl()"
+            class="avh-card__watch"
+            :href="watchUrl()"
+            target="_blank"
+            rel="noopener"
+            title="在 Emby（MB）里观看"
+            @click.stop
+          >▶ 观看</a>
+        </template>
+        <template v-else>
+          <span>{{ movie.date || '' }}</span>
+          <span>{{ durationText() }}</span>
+        </template>
       </div>
     </div>
   </div>
@@ -228,5 +286,22 @@ const durationText = () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * 「▶ 观看」（库模式）：一颗小链接，样式走主色、不抢番号与徽标的注意力。
+ * 它**不**继承 `.avh-card__sub span` 的省略号（那条只管 `span`）：链接要整体可见、
+ * 不许被压缩，所以 `flex: none`；文件名那一格才吃剩余宽度。
+ */
+.avh-card__watch {
+  flex: none;
+  font-size: 11px;
+  color: rgb(var(--v-theme-primary));
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.avh-card__watch:hover {
+  text-decoration: underline;
 }
 </style>

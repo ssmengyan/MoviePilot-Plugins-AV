@@ -30,8 +30,18 @@
  * 并**从队列里删掉**（历史归台账，队列只留下载中）。留着这一节是为了兼容两种过渡情形 ——
  * ① 升级前留下的旧快照里那些 `done` 条目（后端删得掉队列，删不掉已经取到的快照）；
  * ② 轮询间隙：下载器刚报完成、后端这一轮还没清掉的那几秒。
- * 完成清单的权威位置是「下载历史」页，所以小节标题右侧写了那句指路。
+ * 完成清单的权威位置是同一栏的「下载历史」页签，所以小节标题右侧写了那句指路。
  * 真机 2026-10-11 探针：队列 19 条里 17 条是 `done`（旧快照），这一节眼下反而是满的。
+ *
+ * **2026-10-12 起本栏分两个页签（用户要求的"下载历史与下载界面融合"）**：
+ * 「下载中」= 上面这套（队列 + 旧快照的完成节），「下载历史」= 原第七栏 `HistoryView`
+ * （插件下载过的番号台账，见 `docs/AVHelper-下载历史设计.md`）。两件事本来就同源
+ * （历史 = 队列里完成的那些），合成一栏后左栏省下一格给新的「已入库的番号」。
+ * 两条与之配套的规矩：
+ * - **历史页签一旦打开就留在 DOM 里**（`v-show` 而不是 `v-if`）：用户可能在那里搜索/看
+ *   「只看不在库」，切回下载中再切回来不该把筛选和滚动位置清掉；
+ * - **只在「下载中」页签里轮询**：5 秒一次的进度轮询是为进度条服务的，看历史时白打
+ *   `/tasks` 没有意义（`syncPolling()`）。
  *
  * 刻意**不做**（老实现也没有，别顺手加）：
  * - 没有行内动作（取消下载 / 重试 / 打开目录）：老下载页只有 `↻ 刷新进度` 一个按钮；
@@ -40,9 +50,10 @@
  * - 不在轮询里刷右栏「运行概况」：老 `loadTasks` 只重画自己（`renderPills` 是本地计数、不发请求），
  *   右栏本来就由壳的 `/bootstrap` 15 秒轮询负责。
  */
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import EmptyState from '../common/EmptyState.vue'
 import Thumb from '../common/Thumb.vue'
+import HistoryView from './HistoryView.vue'
 import { filledThumbs, queueMissingThumbs } from '../common/common'
 import { hostToast, type PluginApi } from '../../composables/usePluginApi'
 import type { PluginStore } from '../../composables/usePluginStore'
@@ -69,6 +80,33 @@ const t = hostToast(props.toast as any)
 
 /** 轮询间隔：与老 `startTaskPolling()` 的 5000ms 一致（下载器进度本身就更新得慢）。 */
 const POLL_MS = 5000
+
+/**
+ * 页签（2026-10-12 融合）：`active` = 下载中（老下载页那套），`history` = 下载历史台账。
+ *
+ * 两个页签的**数据源完全不同**：前者是 store 里的 `/tasks` 队列（5 秒轮询），
+ * 后者自己调 `GET plugin/downloads`（`HistoryView` 内部负责，挂载时读一次）。
+ */
+type TabKey = 'active' | 'history'
+/** 页签文案（顺序固定：「下载中」在前，用户进这一栏首先是看进度）。 */
+const TABS: { key: TabKey; name: string }[] = [
+  { key: 'active', name: '下载中' },
+  { key: 'history', name: '下载历史' },
+]
+const tab = ref<TabKey>('active')
+/**
+ * 历史页签挂载过没有。
+ *
+ * 用"挂载过就一直留着（`v-show` 隐藏）"而不是每次切回去都重建：用户在历史页里可能已经
+ * 搜了番号、开了「只看不在库」，切走再切回来把筛选清掉属于无谓的打扰。代价只是历史页的
+ * DOM 留着不销毁（一张表，可忽略）。
+ */
+const historyMounted = ref(false)
+
+function pickTab(key: TabKey): void {
+  tab.value = key
+  if (key === 'history') historyMounted.value = true
+}
 
 /** 队列原样取（老实现直接 `S.queue.map(queueRow)`，不过滤、不排序）。 */
 const rows = computed<QueueItem[]>(() =>
@@ -173,10 +211,15 @@ watch(
   { immediate: true },
 )
 
-// ---------- 5 秒轮询（只在"本视图挂载 ＋ 页面可见"时跑） ----------
+// ---------- 5 秒轮询（只在"下载中页签 ＋ 本视图挂载 ＋ 页面可见"时跑） ----------
 
 /** `setInterval` 句柄；`null` = 当前没有轮询。 */
 let timer: number | null = null
+
+/** 该不该轮询：进度条只在「下载中」页签里，看历史时不必白打 `/tasks`。 */
+function shouldPoll(): boolean {
+  return tab.value === 'active' && document.visibilityState === 'visible'
+}
 
 function startPolling(): void {
   if (timer !== null) return
@@ -191,14 +234,25 @@ function stopPolling(): void {
   timer = null
 }
 
-/** 切到别的标签页/最小化：立刻停（老实现靠浏览器节流，这里显式停，回来看时 5 秒内自会刷新）。 */
-function onVisibilityChange(): void {
-  if (document.visibilityState === 'visible') startPolling()
+/** 按当前页签 + 可见性起停轮询（挂载、切页签、切前后台都走它）。 */
+function syncPolling(): void {
+  if (shouldPoll()) startPolling()
   else stopPolling()
 }
 
+/** 切到别的标签页/最小化：立刻停（老实现靠浏览器节流，这里显式停，回来看时 5 秒内自会刷新）。 */
+function onVisibilityChange(): void {
+  syncPolling()
+}
+
+/** 切页签：进「下载中」补一次最新进度（可能已经在历史页停了几分钟），再同步起停。 */
+watch(tab, (key) => {
+  if (key === 'active') void props.store.refreshTasks(true)
+  syncPolling()
+})
+
 onMounted(() => {
-  if (document.visibilityState === 'visible') startPolling()
+  syncPolling()
   document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
@@ -212,85 +266,121 @@ onBeforeUnmount(() => {
 <template>
   <div class="avh-downloads">
     <div class="avh-downloads__toolbar">
-      <span class="avh-downloads__hint">进度取自下载器，每 5 秒自动刷新</span>
+      <!--
+        两个页签（2026-10-12）：胶囊样式与发现榜单那组 tabs 同一套（`.avh-tabs`），
+        选中那颗走主色。括号里是计数：「下载中」拿队列现成数，「下载历史」不画数字
+        —— 台账由 `HistoryView` 自己读，这一层不去替它猜（猜错比不画更糟）。
+      -->
+      <div class="avh-tabs">
+        <button
+          v-for="item in TABS"
+          :key="item.key"
+          :class="{ 'avh-tabs__on': item.key === tab }"
+          @click="pickTab(item.key)"
+        >{{ item.name }}<template v-if="item.key === 'active'">（{{ activeRows.length }}）</template></button>
+      </div>
+
+      <!-- 那句"进度取自下载器"只对「下载中」成立，看历史时换成台账的口径 -->
+      <span class="avh-downloads__hint">
+        {{ tab === 'active' ? '进度取自下载器，每 5 秒自动刷新' : '本插件下载过的番号，文件删了也留着记录' }}
+      </span>
+
       <div class="avh-downloads__spacer" />
-      <v-btn variant="outlined" size="small" @click="refreshQueue">↻ 刷新进度</v-btn>
+
+      <v-btn v-if="tab === 'active'" variant="outlined" size="small" @click="refreshQueue">↻ 刷新进度</v-btn>
     </div>
 
-    <template v-if="rows.length">
-      <!-- ===== 下载中：老实现的全套（封面 / 元信息 / 路径 / 百分比 / 进度条） ===== -->
-      <div class="avh-downloads__secttl">下载中（{{ activeRows.length }}）</div>
+    <!--
+      ===== 下载中（老下载页那套） =====
+    -->
+    <template v-if="tab === 'active'">
+      <template v-if="rows.length">
+        <!-- ===== 下载中：老实现的全套（封面 / 元信息 / 路径 / 百分比 / 进度条） ===== -->
+        <div class="avh-downloads__secttl">下载中（{{ activeRows.length }}）</div>
 
-      <template v-if="activeRows.length">
-        <div v-for="(item, index) in activeRows" :key="rowKey(item, index)" class="avh-q">
-          <div class="avh-q__hd">
-            <Thumb
-              class="avh-q__poster"
-              variant="tposter"
-              :src="thumbOf(item)"
-              alt="无图"
-              :plugin-id="pluginId"
-            />
-            <div class="avh-q__main">
-              <div class="avh-q__no">{{ item.number || '' }}</div>
-              <div class="avh-q__hint avh-q__meta">{{ metaOf(item) }}</div>
-              <div class="avh-q__hint avh-q__path">{{ pathOf(item) }}</div>
+        <template v-if="activeRows.length">
+          <div v-for="(item, index) in activeRows" :key="rowKey(item, index)" class="avh-q">
+            <div class="avh-q__hd">
+              <Thumb
+                class="avh-q__poster"
+                variant="tposter"
+                :src="thumbOf(item)"
+                alt="无图"
+                :plugin-id="pluginId"
+              />
+              <div class="avh-q__main">
+                <div class="avh-q__no">{{ item.number || '' }}</div>
+                <div class="avh-q__hint avh-q__meta">{{ metaOf(item) }}</div>
+                <div class="avh-q__hint avh-q__path">{{ pathOf(item) }}</div>
+              </div>
+              <div class="avh-q__right">
+                <div class="avh-q__no">{{ progressOf(item) }}%</div>
+                <div class="avh-q__hint">下载中…</div>
+              </div>
             </div>
-            <div class="avh-q__right">
-              <div class="avh-q__no">{{ progressOf(item) }}%</div>
-              <div class="avh-q__hint">下载中…</div>
+            <div class="avh-bar">
+              <i :style="{ width: `${progressOf(item)}%` }" />
             </div>
           </div>
-          <div class="avh-bar">
-            <i :style="{ width: `${progressOf(item)}%` }" />
+        </template>
+        <!-- 一节为空只给一行小字（整体为空的 `EmptyState` 在下面），别把一个空态画两遍 -->
+        <div v-else class="avh-downloads__hint">没有下载中的任务</div>
+
+        <!--
+          ===== 已完成：静态历史行（契约 §5.3）=====
+          没有进度条、没有百分比、没有状态文案、没有任何"进行中"交互 —— 用户的诉求就是
+          「已完成下载不再显示进度，直接当历史停住」。这一节通常为空：契约 §3 起，条目一变 `done`
+          就被后端写进下载台账并从队列里删掉；留着它只为兼容旧快照与轮询间隙（见文件头注释）。
+        -->
+        <div class="avh-downloads__secttl">
+          <span>已完成（{{ doneRows.length }}）</span>
+          <span class="avh-downloads__secttl-note">完整清单见本页「下载历史」</span>
+        </div>
+
+        <template v-if="doneRows.length">
+          <div v-for="(item, index) in doneRows" :key="rowKey(item, index)" class="avh-q avh-q--done">
+            <div class="avh-q__hd">
+              <Thumb
+                class="avh-q__poster"
+                variant="tposter"
+                :src="thumbOf(item)"
+                alt="无图"
+                :plugin-id="pluginId"
+              />
+              <div class="avh-q__main">
+                <div class="avh-q__no">{{ item.number || '' }}</div>
+                <!-- 标题是台账口径的可选字段（真机队列暂不携带），有才画这一行 -->
+                <div v-if="item.title" class="avh-q__ttl">{{ item.title }}</div>
+                <div class="avh-q__hint avh-q__meta">{{ doneInfoOf(item) }}</div>
+              </div>
+            </div>
           </div>
+        </template>
+        <div v-else class="avh-downloads__hint">
+          暂无已完成条目<br>完成的下载会记入「下载历史」，这里只在旧快照与刷新间隙里短暂出现
         </div>
       </template>
-      <!-- 一节为空只给一行小字（整体为空的 `EmptyState` 在下面），别把一个空态画两遍 -->
-      <div v-else class="avh-downloads__hint">没有下载中的任务</div>
 
       <!--
-        ===== 已完成：静态历史行（契约 §5.3）=====
-        没有进度条、没有百分比、没有状态文案、没有任何"进行中"交互 —— 用户的诉求就是
-        「已完成下载不再显示进度，直接当历史停住」。这一节通常为空：契约 §3 起，条目一变 `done`
-        就被后端写进下载台账并从队列里删掉；留着它只为兼容旧快照与轮询间隙（见文件头注释）。
+        队列整体为空时的空态：老实现那两句逐字保留，**末尾补一句指路**（0.3.4 加，2026-10-12
+        改成指向本页页签）。为什么必须补：完成条目现在会被后端写进台账并**从队列摘掉**
+        （设计文档 §3），于是「没有任何下载在进行」时这一页永远是空的 —— 不告诉用户
+        「完成的在下载历史里」，那个页签就等于藏起来了。
       -->
-      <div class="avh-downloads__secttl">
-        <span>已完成（{{ doneRows.length }}）</span>
-        <span class="avh-downloads__secttl-note">完整清单见「下载历史」</span>
-      </div>
-
-      <template v-if="doneRows.length">
-        <div v-for="(item, index) in doneRows" :key="rowKey(item, index)" class="avh-q avh-q--done">
-          <div class="avh-q__hd">
-            <Thumb
-              class="avh-q__poster"
-              variant="tposter"
-              :src="thumbOf(item)"
-              alt="无图"
-              :plugin-id="pluginId"
-            />
-            <div class="avh-q__main">
-              <div class="avh-q__no">{{ item.number || '' }}</div>
-              <!-- 标题是台账口径的可选字段（真机队列暂不携带），有才画这一行 -->
-              <div v-if="item.title" class="avh-q__ttl">{{ item.title }}</div>
-              <div class="avh-q__hint avh-q__meta">{{ doneInfoOf(item) }}</div>
-            </div>
-          </div>
-        </div>
-      </template>
-      <div v-else class="avh-downloads__hint">
-        暂无已完成条目<br>完成的下载会记入「下载历史」，这里只在旧快照与刷新间隙里短暂出现
-      </div>
+      <EmptyState v-else text="下载队列为空<br>在「任务」页挑好候选点「下载」，进度在这里看<br>完成的下载在「下载历史」页签，删了文件也还在" />
     </template>
 
     <!--
-      队列整体为空时的空态：老实现那两句逐字保留，**末尾补一句指路**（0.3.4 加）。
-      为什么必须补：完成条目现在会被后端写进台账并**从队列摘掉**（设计文档 §3），
-      于是「没有任何下载在进行」时这一页永远是空的 —— 不告诉用户「完成的在下载历史里」，
-      新加的第七栏就等于藏起来了（真机验收时确认过：队列 0 条时整页只剩这三行）。
+      ===== 下载历史（原数据台第七栏，2026-10-12 并进本栏） =====
+      `historyMounted` 之后一直留着（`v-show` 隐藏），切回来筛选与滚动位置都还在。
     -->
-    <EmptyState v-else text="下载队列为空<br>在「任务」页挑好候选点「下载」，进度在这里看<br>完成的下载在「下载历史」栏，删了文件也还在" />
+    <HistoryView
+      v-if="historyMounted"
+      v-show="tab === 'history'"
+      :api="props.api"
+      :plugin-id="props.pluginId"
+      :toast="props.toast"
+    />
   </div>
 </template>
 
@@ -311,6 +401,32 @@ onBeforeUnmount(() => {
 
 .avh-downloads__spacer {
   flex: 1;
+}
+
+/* 页签：与发现榜单那组 tabs 同一套几何（胶囊容器 + 选中那颗走主色，写法照 `DiscoverView`）。
+   两份 scoped CSS 各有各的作用域，抄这一小段比抽公共件划算（本项目的既有做法）。 */
+.avh-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+  border-radius: 8px;
+  background: rgba(var(--v-theme-on-surface), 0.04);
+}
+
+.avh-tabs button {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.5);
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.avh-tabs__on {
+  color: rgb(var(--v-theme-on-primary)) !important;
+  background: rgb(var(--v-theme-primary)) !important;
 }
 
 /* 对齐 `app.css` 的 `.secttl`：12px、弱化色、字距 .4px（与 `TasksView` 的小标题同一套口径） */

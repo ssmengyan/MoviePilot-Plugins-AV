@@ -27,6 +27,14 @@ def _norm_key(text: Any) -> str:
 
     return emby.norm_key(text)
 
+
+# 台账里「**本插件下载的**」那几种来源：`plugin` = 插件提交下载 / 磁力下载，
+# `queue` = 0.3.4 之前老下载队列里已完成、迁移进来的条目（同样是插件推给下载器的）。
+# 反过来 `library` = 番号本来就在 Emby 库里、由补种登记的行 —— 用户 2026-10-12 明确
+# 「下载历史只保留在当前插件上下载过的视频记录」，所以界面侧（列表/徽标/重复提示）
+# 一律只看这几种来源，见 `AVHelper._downloads_payload()` 与 `_downloaded_keys()`。
+PLUGIN_SOURCES: List[str] = ["plugin", "queue"]
+
 # 建表语句：与执行方案 §6.3 的表结构一致，另加 notice/kv 两张辅助表
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS actor_fav(
@@ -488,24 +496,35 @@ class Store:
                 inserted += 1
         return inserted
 
-    def download_list(self) -> List[Dict[str, Any]]:
+    def download_list(self, sources: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         """全量台账（不含被移除的墓碑行），完成时间新→旧；未完成的 `completed_at` 是空串，
-        排序上自然落在最后。"""
-        rows = self._exec(
-            "SELECT key, number, title, actor, thumb, size, hash, path, downloader, "
-            "state, source, created_at, completed_at, updated_at, hidden FROM downloads "
-            "WHERE hidden = 0 ORDER BY completed_at DESC, created_at DESC",
-            fetch=True,
-        ) or []
+        排序上自然落在最后。
+
+        `sources` 给一组来源就只回那几种行（2026-10-12 加）：界面侧一律传
+        `PLUGIN_SOURCES`，见 `__init__.py` 里 `_downloads_payload()` 的说明 ——
+        `source='library'` 那批是「番号本来就在 Emby 库里」的补种行，不是这个插件下载的，
+        对用户来说它们属于「已入库的番号」那一栏，不属于「下载历史」。
+        `None`（默认）= 不过滤，给需要"全量台账"的调用方（诊断、导出）留着。
+        """
+        sql = ("SELECT key, number, title, actor, thumb, size, hash, path, downloader, "
+               "state, source, created_at, completed_at, updated_at, hidden FROM downloads "
+               "WHERE hidden = 0")
+        args: List[Any] = []
+        picked = [str(s) for s in (sources or []) if str(s)]
+        if picked:
+            sql += f" AND source IN ({','.join('?' * len(picked))})"
+            args.extend(picked)
+        sql += " ORDER BY completed_at DESC, created_at DESC"
+        rows = self._exec(sql, tuple(args), fetch=True) or []
         return [self._download_row(r) for r in rows]
 
-    def download_map(self) -> Dict[str, Dict[str, Any]]:
+    def download_map(self, sources: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
         """`归一化番号 → 行`（插件侧打「已下载」徽标用）；同样不回墓碑行。
 
         每个电影查一次库会把列表页拖慢（Emby 那套索引就是因此才做内存缓存的），
-        调用方自己带 TTL 缓存，别每个番号调一次。
+        调用方自己带 TTL 缓存，别每个番号调一次。`sources` 语义同 `download_list()`。
         """
-        return {row["key"]: row for row in self.download_list()}
+        return {row["key"]: row for row in self.download_list(sources)}
 
     def download_delete(self, key_or_number: str) -> bool:
         """「移除记录」：打墓碑（`hidden=1`），**不是**物理删除。

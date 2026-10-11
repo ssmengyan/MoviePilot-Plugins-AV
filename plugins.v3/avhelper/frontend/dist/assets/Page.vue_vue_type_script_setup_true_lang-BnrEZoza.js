@@ -1,5 +1,5 @@
 import { importShared } from './__federation_fn_import-JrT3xvdd.js';
-import { C as CONSOLE_EMIT_NAMES, a as Console } from './Console-CXmVaiTp.js';
+import { C as CONSOLE_EMIT_NAMES, a as Console } from './Console-RmsumMv0.js';
 
 const {defineComponent:_defineComponent} = await importShared('vue');
 

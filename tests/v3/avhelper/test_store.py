@@ -91,6 +91,56 @@ class TestTasks:
         assert store.task_get("t1")["state"] == "pushed"
 
 
+class TestDownloadLedger:
+    """下载台账（「下载历史」的数据源）与**来源过滤**。
+
+    2026-10-12 用户把「下载历史」重新定义成「仅保留在当前插件上下载过的视频记录」：
+    `source='library'`（番号本来就在 Emby 库里，由补种登记）不再属于这一栏，
+    界面侧一律传 `store.PLUGIN_SOURCES`，这里把那条规矩钉住。
+    """
+
+    def test_upsert_normalises_key(self, store_mod, tmp_path):
+        store = make_store(store_mod, tmp_path)
+        store.download_upsert("ipzz-00961", title="某部片", state="downloaded", source="plugin")
+        rows = store.download_list()
+        assert len(rows) == 1
+        assert rows[0]["key"] == "IPZZ961"          # 主键是归一化番号
+        assert rows[0]["number"] == "ipzz-00961"    # 展示番号原样保留
+        assert rows[0]["state"] == "downloaded"
+        assert rows[0]["completed_at"]              # 变 downloaded 时自动补完成时间
+
+    def test_plugin_sources_excludes_library_rows(self, store_mod, tmp_path):
+        store = make_store(store_mod, tmp_path)
+        store.download_upsert("IPZZ-961", source="plugin", state="downloaded")
+        store.download_upsert("MIMK-283", source="queue", state="downloaded")
+        store.download_seed([{"key": "SNOS309", "source": "library", "state": "downloaded"}])
+
+        everything = store.download_list()
+        assert {row["key"] for row in everything} == {"IPZZ961", "MIMK283", "SNOS309"}
+        assert store_mod.PLUGIN_SOURCES == ["plugin", "queue"]
+
+        picked = store.download_list(store_mod.PLUGIN_SOURCES)
+        assert {row["key"] for row in picked} == {"IPZZ961", "MIMK283"}
+        assert set(store.download_map(store_mod.PLUGIN_SOURCES)) == {"IPZZ961", "MIMK283"}
+
+    def test_hidden_rows_never_come_back(self, store_mod, tmp_path):
+        """「移除记录」= 打墓碑：列表与 map 都不再回它，连来源过滤也救不回来。"""
+        store = make_store(store_mod, tmp_path)
+        store.download_upsert("IPZZ-961", source="plugin", state="downloaded")
+        assert store.download_delete("IPZZ-961") is True
+        assert store.download_list(store_mod.PLUGIN_SOURCES) == []
+        assert store.download_map(store_mod.PLUGIN_SOURCES) == {}
+
+    def test_reseed_does_not_change_source(self, store_mod, tmp_path):
+        """`download_seed` 只补空、不覆盖已有来源：插件下载过的行不会被 library 补种改写。"""
+        store = make_store(store_mod, tmp_path)
+        store.download_upsert("IPZZ-961", source="plugin", state="downloading")
+        store.download_seed([{"key": "IPZZ961", "source": "library", "state": "downloaded"}])
+        row = store.download_map()[ "IPZZ961"]
+        assert row["source"] == "plugin"
+        assert row["state"] == "downloaded"
+
+
 class TestNotices:
     """通知记录。"""
 

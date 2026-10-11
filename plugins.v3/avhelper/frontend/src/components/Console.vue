@@ -22,7 +22,7 @@ import RuntimePanel from './settings/RuntimePanel.vue'
 import AboutPanel from './settings/AboutPanel.vue'
 import SiteSearchView from './views/SiteSearchView.vue'
 import DownloadsView from './views/DownloadsView.vue'
-import HistoryView from './views/HistoryView.vue'
+import LibraryView from './views/LibraryView.vue'
 import TasksView from './views/TasksView.vue'
 import SubsView from './views/SubsView.vue'
 import ActorsView from './views/ActorsView.vue'
@@ -72,9 +72,12 @@ const DATA_SECTIONS: SectionItem[] = [
   { key: 'actors', title: '我的演员', icon: 'mdi-account-star' },
   { key: 'subs', title: '订阅', icon: 'mdi-rss' },
   { key: 'tasks', title: '任务', icon: 'mdi-clipboard-list' },
+  // 「下载」内部有两个页签（下载中 / 下载历史，2026-10-12 融合）：完成的番号落到台账后
+  // 由同栏的「下载历史」页签兜底（删了文件也还在），所以左栏不再单列「下载历史」。
   { key: 'downloads', title: '下载', icon: 'mdi-download' },
-  // 「下载历史」紧挨「下载」：前者只留下载中，完成的番号落到台账后由这一栏兜底（删了文件也还在）
-  { key: 'history', title: '下载历史', icon: 'mdi-history' },
+  // 「已入库的番号」（2026-10-12 加）：Emby 库里**此刻**的片子，实时口径，删了就不在其中。
+  // 与「下载历史」分工明确：这一栏答"库里有什么"，那一栏答"插件下过什么"。
+  { key: 'library', title: '已入库的番号', icon: 'mdi-library-shelves' },
   { key: 'sitesearch', title: '站点搜索', icon: 'mdi-magnify' },
 ]
 
@@ -84,7 +87,9 @@ const pluginId = computed(() => props.pluginId || props.sourcePluginId || '')
  * 数据台**已原生化**的栏目 → 视图组件（S6 增量替换，设计文档 §6.1）。
  *
  * **六栏到这里全部原生化**（2026-10-10，`discover` 是最后一栏）；0.3.4 起多出第七栏
- * `history`（下载历史，见 `docs/AVHelper-下载历史设计.md`）。这张表里没有的栏目
+ * `history`（下载历史，见 `docs/AVHelper-下载历史设计.md`），2026-10-12 那一栏**并进「下载」栏
+ * 的两个页签**（左栏省下一格），同一天新增第七栏 `library`（已入库的番号，
+ * 见 `docs/AVHelper-已入库列表设计.md`）。这张表里没有的栏目
  * 仍由 `AppFrame` 承载被嵌应用（`ui/`），`AppFrame` 从此只作为"设置台之外的回退"保留
  * ——真机上它只在两种情况下出现：这张表被回退式删掉一行，或宿主不认识 `vue` 渲染模式
  * （那时整个联邦组件根本不会加载，`get_page()` 的 iframe 才是退路）。
@@ -97,7 +102,7 @@ const NATIVE_VIEWS: Record<string, Component> = {
   discover: DiscoverView,
   sitesearch: SiteSearchView,
   downloads: DownloadsView,
-  history: HistoryView,
+  library: LibraryView,
   tasks: TasksView,
   subs: SubsView,
   actors: ActorsView,

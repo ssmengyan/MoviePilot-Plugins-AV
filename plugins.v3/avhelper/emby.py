@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 import threading
 import time
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.sdk.logging import logger
@@ -47,6 +48,137 @@ def norm_key(text: Any) -> str:
     if not raw:
         return ""
     return re.sub(r"0*(\d+)", lambda m: str(int(m.group(1))), raw)
+
+
+# 归一化番号键 → 展示番号（`IPZZ961` → `IPZZ-961`、`FC2PPV1234567` → `FC2-PPV-1234567`）。
+# 设计稿给的是 `^([A-Z]{2,6}\d?)(\d{2,7})$`，但那个 `\d?` 贪婪，会把数字段的第一位抢进前缀：
+# `IPZZ961` 切成 `IPZZ9` + `61`（`MIDV946` → `MIDV9-46`）——只有数字段正好 2 位时才靠回溯碰对。
+# 去掉 `\d?` 后**能匹配的键集合完全不变**，只是切分点回到设计文档 §2 自己举的例子（`IPZZ-961`）。
+_DISPLAY_NUM = re.compile(r"^([A-Z]{2,6})(\d{2,7})$")
+_DISPLAY_FC2 = re.compile(r"^FC2PPV(\d+)$")
+
+
+def display_number(key: Any) -> str:
+    """归一化番号键 → 展示用番号（`IPZZ961` → `IPZZ-961`、`FC2PPV1234567` → `FC2-PPV-1234567`）。
+
+    只用于「Emby 索引里只有文件名与 MetaTube 刮削 id（归一化后是 `IPZZ961` 这种无连字符写法）」
+    的场合。拼不出来（`SSIS1` 数字段只有一位、`1PONDO123` 前置数字）就**原样返回键** ——
+    宁可显示得怪一点，也不要猜成另一个番号（猜错会让人以为这是另一部片）。
+
+    2026-10-12 从 `__init__.py` 搬到这里：与 `norm_key()` 是同一套番号口径的两半，
+    放一处才不会漂；顺带让「Emby 库 → 界面行」（`library_rows()`）能脱离宿主单测。
+    """
+    text = str(key or "").strip().upper()
+    fc2 = _DISPLAY_FC2.match(text)
+    if fc2:
+        return f"FC2-PPV-{fc2.group(1)}"
+    plain = _DISPLAY_NUM.match(text)
+    if plain:
+        return f"{plain.group(1)}-{plain.group(2)}"
+    return str(key or "")
+
+
+def key_rank(key: str) -> Tuple[int, int, str]:
+    """归一化番号键的「干净程度」排序键（小者优先），用于给一部片挑主键。
+
+    同一部片在 Emby 里会有多个键：`SNOS192`（文件名/刮削 id 的基础号）与 `SNOS192C`（中字版）、
+    `IPZZ8224K`（4K 版）。一部片只能显示一个番号，挑哪个？规则：
+
+    1. **能拼出规范番号**的优先（`IPZZ961` 能拼成 `IPZZ-961`，`SNOS192C` 拼不出）；
+    2. 其次**短**的优先（基础号比带后缀的短）；
+    3. 最后按字典序，保证同一份索引每次挑出同一个键（列表与台账才不会今天一个明天一个）。
+    """
+    text = str(key or "")
+    canonical = 0 if (_DISPLAY_NUM.match(text.upper()) or _DISPLAY_FC2.match(text.upper())) else 1
+    return (canonical, len(text), text)
+
+
+def best_keys(index: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
+    """库索引 → `条目 id → 主键`（同一部片的多个键在这里收敛成一个）。
+
+    键的顺序就是**索引的顺序**（`_build()` 按 Emby 的 `DateCreated` 倒序抓，所以是入库时间新→旧），
+    调用方据此得到"最近入库的排在前面"，不必自己排序。
+    """
+    best: Dict[str, str] = {}
+    for key, entry in (index or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        item_id = str(entry.get("id") or "") or key
+        current = best.get(item_id)
+        if current is None or key_rank(key) < key_rank(current):
+            best[item_id] = key
+    return best
+
+
+def library_rows(index: Dict[str, Dict[str, Any]],
+                 thumbs: Optional[Dict[str, str]] = None,
+                 actors: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
+    """Emby 库索引 → 界面卡片行（`/library` 的 `items[]`，契约 §4）。
+
+    纯函数（不发请求、不碰库），输入是 `EmbyLibrary.index()` 那份「归一化番号 → 条目」：
+
+    - 一部片一行：先按条目 id 归并（`best_keys()`），否则同一部片会按刮削 id / 文件名 / 标题
+      列成好几行（本机实测按键展开 148 个 vs 库里 109 条）；
+    - `number` 是 `display_number(主键)`；`title` / `path` / `url` 取 Emby 条目的 Name/Path/URL；
+    - `thumb` / `actor` 由调用方从**本地索引**查好传进来（`thumbs` / `actors` 的键允许同时给
+      「展示番号」与「归一化键」两种写法，两个都试）—— 这里不发网络请求，也不读缓存文件；
+    - `id` 故意留空：契约里 `movie.id` 是 **javdb 内部 id**（详情抽屉回传给 `/detail` 省一次解析），
+      这里手上只有 Emby 的条目 id，塞进去会让 `/detail` 去 javdb 找一个不存在的 id；
+    - `addedAt` 是入库时间（Emby 的 `DateCreated` → 本地时间写法），解析不出来是空串，
+      界面自己决定要不要画那一行。
+    """
+    thumbs = thumbs or {}
+    actors = actors or {}
+    rows: List[Dict[str, Any]] = []
+    for item_id, key in best_keys(index).items():
+        entry = index.get(key) or {}
+        shown = display_number(key)
+        rows.append({
+            "number": shown,
+            "title": str(entry.get("name") or ""),
+            # 库列表里没有 javdb 的发行日 / 时长 / 磁力（那要先抓一遍详情），一律留空，
+            # 由卡片按"库卡片"的样子渲染（`NumCard` 的 `mode="library"`）。
+            "cover": "",
+            "thumb": str(thumbs.get(shown) or thumbs.get(key) or ""),
+            "date": "",
+            "duration": 0,
+            "cnsub": False,
+            "uncensored": False,
+            "magnets": 0,
+            "maker": "",
+            "score": "",
+            "actor": str(actors.get(shown) or actors.get(key) or ""),
+            "actor_avatar": "",
+            "id": "",
+            "lib": {
+                "id": item_id,
+                "name": str(entry.get("name") or ""),
+                "path": str(entry.get("path") or ""),
+                "url": str(entry.get("url") or ""),
+            },
+            "addedAt": emby_time_text(entry.get("created")),
+        })
+    return rows
+
+
+def emby_time_text(value: Any) -> str:
+    """Emby 的 `DateCreated`（UTC ISO，如 `2026-10-05T04:34:56.0000000Z`）→ 本地 `YYYY-MM-DD HH:MM:SS`。
+
+    解析不出来返回空串：界面上空值显示「—」，总好过拿"列表生成当天"冒充入库时间。
+    Emby 的小数位是 7 位（Python 3.11 的 `fromisoformat` 只吃 1–6 位），先截到 6 位；
+    `Z` 结尾按 UTC 处理再转本地时区（插件与 Emby 同机，两个时区通常一致，但不假设）。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"(\.\d{6})\d+", r"\1", text)
+    try:
+        stamp = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if stamp.tzinfo is not None:
+        stamp = stamp.astimezone()
+    return stamp.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def mp_emby_conf() -> Tuple[str, str]:
@@ -151,6 +283,17 @@ class EmbyLibrary:
         （本环境 93 条），逐个番号调 `lookup()` 会把已经建好的索引白白查一遍。
         """
         return self._ensure_index() or {}
+
+    def invalidate(self) -> None:
+        """丢掉索引缓存，下一次 `index()` / `lookup()` 重新抓一遍（界面上的「↻ 刷新」用）。
+
+        失败负缓存也一起清：用户点刷新正是"我刚在 Emby 里改过东西"的场景，
+        这时候还拿上一次失败的结论挡着他没有任何意义。
+        """
+        with self._lock:
+            self._index = None
+            self._built_at = 0.0
+            self._failed_at = 0.0
 
     # ---------- 内部 ----------
 

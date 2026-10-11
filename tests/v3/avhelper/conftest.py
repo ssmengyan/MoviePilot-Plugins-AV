@@ -1,7 +1,7 @@
 """AVHelper 插件单测的公共夹具：按文件路径独立加载插件模块。
 
 插件包 `__init__.py` 依赖宿主 `app.sdk`，在无宿主环境下不可导入；被单测覆盖的模块
-（scoring/store/longshot/ratelimit/client）只依赖标准库，可用本夹具单独加载。
+（scoring/store/emby/longshot/ratelimit/client）只依赖标准库，可用本夹具单独加载。
 
 加载时先把插件目录注册成一个**合成包**，模块里的 `from . import paths` 这类相对导入
 才有父包可解析（否则报 `attempted relative import with no known parent package`）。
@@ -17,6 +17,46 @@ import pytest
 PLUGIN_DIR = Path(__file__).resolve().parents[3] / "plugins.v3" / "avhelper"
 # 合成包名：与真实包名 `avhelper` 区分开，避免和宿主里已安装的那份撞名
 PKG_NAME = "avhelper_under_test"
+
+
+def _install_host_stubs() -> None:
+    """把宿主 `app.sdk.*` 装成空壳（整场测试只装一次）。
+
+    `emby.py` **模块级**就 import 了 `app.sdk.logging` / `app.sdk.network`（`logger` 与
+    `RequestUtils`），无宿主环境下这两条导入会直接报 ModuleNotFoundError；而 `store.py`
+    在归一化番号时又会延迟导入 `emby`（`_norm_key()`），所以凡是碰下载台账的用例都绕不开它。
+    这里只补这两个符号：真去连 Emby 的用例不存在（`library_rows()` 是纯函数）。
+    """
+    for name in ("app", "app.sdk"):
+        sys.modules.setdefault(name, types.ModuleType(name))
+    log = types.ModuleType("app.sdk.logging")
+
+    class _Logger:
+        def info(self, *args, **kwargs):
+            pass
+
+        def error(self, *args, **kwargs):
+            pass
+
+        def warning(self, *args, **kwargs):
+            pass
+
+        def debug(self, *args, **kwargs):
+            pass
+
+    log.logger = _Logger()
+    sys.modules["app.sdk.logging"] = log
+    net = types.ModuleType("app.sdk.network")
+
+    class _RequestUtils:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    net.RequestUtils = _RequestUtils
+    sys.modules["app.sdk.network"] = net
+
+
+_install_host_stubs()
 
 
 def _ensure_package() -> str:
@@ -56,6 +96,12 @@ def store_mod():
 def scoring_mod():
     """scoring 模块。"""
     return _load("scoring")
+
+
+@pytest.fixture(scope="session")
+def emby_mod():
+    """emby 模块（番号归一化 / 展示番号 / 库索引 → 界面行）。"""
+    return _load("emby")
 
 
 @pytest.fixture(scope="session")
