@@ -54,6 +54,16 @@ def num_key(number: Any) -> str:
     return str(number or "").strip().upper()
 
 
+def is_keep_file(path: Path) -> bool:
+    """缓存清理必须保留的文件：插件自管的 SQLite 库及其事务副产物。
+
+    库就落在 `META_DIR`（与 JSON 缓存同目录），而孤儿扫描的判据是"不在 cache_idx 里就删"、
+    容量淘汰又对整个 CACHE_ROOT 递归——两处都会命中 `avhelper.db`/`-wal`/`-shm`。
+    一旦被删，`Store.init()` 只会重建空表：收藏、订阅、任务、通知会**静默全丢**。
+    """
+    return path.name.startswith("avhelper.db")
+
+
 class AVHelper(_PluginBase):
     """AV 资源助手：JAV 番号订阅、榜单浏览、PT 自动选种下载。"""
 
@@ -297,6 +307,8 @@ class AVHelper(_PluginBase):
              "summary": "手动检查订阅(受限流)"},
             {"path": "/notices", "endpoint": self.api_notices, "methods": ["GET", "DELETE"],
              "auth": "bear", "summary": "通知列表/清空"},
+            {"path": "/notices/wait", "endpoint": self.api_notices_wait, "methods": ["GET"],
+             "auth": "bear", "summary": "长轮询等新通知（角标实时到）"},
             {"path": "/sites", "endpoint": self.api_sites, "methods": ["GET"], "auth": "bear",
              "summary": "已配置站点"},
         ]
@@ -946,6 +958,32 @@ class AVHelper(_PluginBase):
             return {"success": True, "notices": [], "message": "已清空通知"}
         return {"success": True, "notices": self.store.notice_list()}
 
+    async def api_notices_wait(self, request: Request) -> Dict[str, Any]:
+        """长轮询等新通知：有新的立刻回包，没有就挂到超时（默认 25 秒）再回空。
+
+        界面靠它做「通知一到角标就变」——比定时轮询快一个数量级，也不比轮询费：一次请求
+        最多只回一次包。`after` 是客户端手里最新的通知 id；`wake=True` 表示确实有新通知。
+        超时值封顶 50 秒，给反向代理留余量（长连接挂太久会被网关掐断）。
+        """
+        try:
+            after = int(request.query_params.get("after") or 0)
+        except ValueError:
+            after = 0
+        try:
+            timeout = float(request.query_params.get("timeout") or 25)
+        except ValueError:
+            timeout = 25.0
+        timeout = max(1.0, min(timeout, 50.0))
+        deadline = time.monotonic() + timeout
+        while True:
+            newest = await asyncio.to_thread(self.store.notice_max_id)
+            if newest > after:
+                notices = await asyncio.to_thread(self.store.notice_list)
+                return {"success": True, "wake": True, "notices": notices}
+            if time.monotonic() >= deadline:
+                return {"success": True, "wake": False, "notices": []}
+            await asyncio.sleep(0.5)
+
     @staticmethod
     async def _json_body(request: Request) -> Dict[str, Any]:
         """安全读取 JSON 请求体（空体或非法 JSON 都返回空字典）。"""
@@ -990,7 +1028,7 @@ class AVHelper(_PluginBase):
             if not folder.exists():
                 continue
             for path in folder.glob("*"):
-                if path.is_file() and str(path) not in indexed:
+                if path.is_file() and not is_keep_file(path) and str(path) not in indexed:
                     try:
                         removed_bytes += path.stat().st_size
                         path.unlink()
@@ -999,7 +1037,7 @@ class AVHelper(_PluginBase):
 
         # 3. 容量上限：按 mtime 由旧到新淘汰
         limit = CACHE_MAX_GB * 1024 ** 3
-        files = [p for p in CACHE_ROOT.rglob("*") if p.is_file()]
+        files = [p for p in CACHE_ROOT.rglob("*") if p.is_file() and not is_keep_file(p)]
         total = sum(p.stat().st_size for p in files)
         if total > limit:
             for path in sorted(files, key=lambda p: p.stat().st_mtime):

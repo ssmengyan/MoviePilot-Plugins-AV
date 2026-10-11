@@ -10,7 +10,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 DB_PATH = Path("/avhelper/cache/meta/avhelper.db")
 
@@ -242,11 +242,20 @@ class Store:
     def notice_list(self) -> List[Dict[str, Any]]:
         """返回通知（新到旧）；老记录的「发布源」重复文案在这里顺手纠正。"""
         rows = self._exec(
-            "SELECT kind, title, type, body, meta, image, created_at FROM notice ORDER BY id DESC",
+            "SELECT id, kind, title, type, body, meta, image, created_at FROM notice ORDER BY id DESC",
             fetch=True,
         ) or []
-        return [{"kind": r[0], "title": r[1], "type": r[2], "body": r[3],
-                 "meta": _fix_publisher_meta(r[4]), "image": r[5], "time": r[6]} for r in rows]
+        return [{"id": r[0], "kind": r[1], "title": r[2], "type": r[3], "body": r[4],
+                 "meta": _fix_publisher_meta(r[5]), "image": r[6], "time": r[7]} for r in rows]
+
+    def notice_max_id(self) -> int:
+        """最新一条通知的 id（没有通知时为 0）。
+
+        长轮询用它判断「有没有新通知」：比时间戳可靠——同一秒里连发两条也算新，
+        而按 `created_at` 比较时第二条会被当成旧的漏掉。
+        """
+        rows = self._exec("SELECT COALESCE(MAX(id), 0) FROM notice", fetch=True)
+        return int(rows[0][0]) if rows else 0
 
     def notice_clear(self) -> None:
         """清空通知。"""
@@ -262,6 +271,35 @@ class Store:
             "ON CONFLICT(key) DO UPDATE SET val=excluded.val, expires_at=excluded.expires_at",
             (key, json.dumps(val, ensure_ascii=False), exp),
         )
+
+    def kv_update(self, key: str, fn: Callable[[Any], Any]) -> Any:
+        """原子读改写：`fn(旧值) -> 新值`，读与写在同一次持锁里完成。
+
+        下载队列这种「多处都在改的同一份数据」必须走这里：先 kv_get 拿快照、算完再 kv_set
+        整份写回，并发时后写的会把别人刚插入的条目冲掉（实测丢过一条已成功下载的记录）。
+        只给无 TTL 的键用，过期时间一律写空。
+        """
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock, sqlite3.connect(self.db_path) as conn:
+            row = conn.execute("SELECT val, expires_at FROM kv WHERE key=?", (key,)).fetchone()
+            current = None
+            if row:
+                raw, exp = row
+                if exp and exp < _now():
+                    conn.execute("DELETE FROM kv WHERE key=?", (key,))
+                else:
+                    try:
+                        current = json.loads(raw)
+                    except ValueError:
+                        current = None
+            new = fn(current)
+            conn.execute(
+                "INSERT INTO kv(key, val, expires_at) VALUES(?,?,?) "
+                "ON CONFLICT(key) DO UPDATE SET val=excluded.val, expires_at=excluded.expires_at",
+                (key, json.dumps(new, ensure_ascii=False), ""),
+            )
+            conn.commit()
+            return new
 
     def kv_get(self, key: str, default: Any = None) -> Any:
         """读键值，过期即删并返回默认值。"""

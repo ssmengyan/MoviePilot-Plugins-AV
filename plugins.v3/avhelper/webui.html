@@ -1677,14 +1677,9 @@ function candTable(t, idx, opts){
 }
 /* ---------- 5. 下载队列（从任务页拆出来的独立页） ---------- */
 function renderQueue(m){
-  m.innerHTML = '<div class="toolbar">'
-    + '<span class="hint">进度取自下载器，每 5 秒自动刷新</span>'
-    + '<div style="flex:1"></div>'
-    + '<button class="ghost" id="btnRefreshQueue">↻ 刷新进度</button></div>'
-    + (S.queue.length
-        ? S.queue.map(queueRow).join('')
-        : '<div class="empty">下载队列为空<br>在「任务」页挑好候选点「下载」，进度在这里看</div>');
-  m.querySelector('#btnRefreshQueue').onclick = () => { loadTasks(true); toast('下载队列', '正在刷新进度…'); };
+  m.innerHTML = (S.queue.length
+      ? S.queue.map(queueRow).join('')
+      : '<div class="empty">下载队列为空<br>在「任务」页挑好候选点「下载」，进度在这里看</div>');
   queueMissingThumbs(S.queue);
 }
 function queueRow(q){
@@ -1766,8 +1761,8 @@ function startDownload(taskId, site, btn, force){
       toast('下载失败', r.message || '请稍后重试', 'warn');
       return;
     }
-    const notice = r.data && r.data.notice ? r.data.notice : (r.data && r.data.id ? r.data : null);
-    if (notice && (notice.body || notice.title)){ S.notices.unshift(notice); renderPills(); }
+    // 通知以服务端记录为准：本地塞一份没有时间戳，角标会漏计，直接重拉一次
+    loadNotices(false);
     toast('已提交下载', site + ' · 进度见「下载」页', 'ok');
     loadTasks(true);
   });
@@ -1952,16 +1947,54 @@ function openNotify(){
   });
 }
 function paintNotify(){
-  if ($('#ndrawer').classList.contains('on')) $('#nBody').innerHTML = notifyBodyHtml();
+  const box = $('#nBody');
+  if (!$('#ndrawer').classList.contains('on')) return;
+  const top = box.scrollTop;
+  box.innerHTML = notifyBodyHtml();
+  box.scrollTop = top;                  // 重绘不能把用户正在看的位置顶回顶部
 }
 function loadNotices(force){
   return apiGet('/notices').then(r => {
     if (!r.ok){ if (force) toast('通知读取失败', r.message || '', 'warn'); return false; }
     const d = r.data || {};
     S.notices = Array.isArray(d.notices) ? d.notices : (Array.isArray(d) ? d : S.notices);
+    if ($('#ndrawer').classList.contains('on')) noticeMarkSeen();   // 抽屉开着 = 用户正看着，新到的不算未读
     renderPills();
     paintNotify();
     return true;
+  });
+}
+/* 通知推送：向服务端挂一条长轮询（/notices/wait）——新通知一写进库，服务端立刻回包，
+   角标当场就变；回包后马上续上，所以是「一到就变」，不是「每 N 秒看一眼」。
+   兜底：60 秒整表再拉一次（长轮询被网关掐断、或通知表被别处改动时补齐）；
+   页面切到后台就停长轮询，切回前台先整表补一次再续上。 */
+let noticeWaiting = false;              // 当前是否挂着一条长轮询
+function noticeNewestId(){
+  const first = (S.notices || [])[0] || {};
+  return Number(first.id) || 0;         // 列表按 id 倒序，第一条就是最新的
+}
+function noticeWaitOnce(){
+  if (noticeWaiting || document.hidden) return;
+  noticeWaiting = true;
+  apiGet('/notices/wait', {after: noticeNewestId(), timeout: 25}).then(r => {
+    noticeWaiting = false;
+    if (r.ok && r.data && r.data.wake && (r.data.notices || []).length){
+      S.notices = r.data.notices;
+      if ($('#ndrawer').classList.contains('on')) noticeMarkSeen();   // 抽屉开着 = 正看着，新到的不算未读
+      renderPills();
+      paintNotify();
+      noticeWaitOnce();                 // 立刻续上，等下一批
+      return;
+    }
+    // 超时（wake=false）无缝续上；接口异常退成慢轮询，凭据失效则等重新登录后再续
+    setTimeout(noticeWaitOnce, r.ok ? 0 : (r.auth ? 20000 : 8000));
+  });
+}
+function startNoticePolling(){
+  noticeWaitOnce();
+  setInterval(() => { if (!document.hidden) loadNotices(false); }, 60000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) loadNotices(false).then(noticeWaitOnce);
   });
 }
 
@@ -2189,6 +2222,7 @@ bindTokenEvents();
 bindUi();
 render();
 startTaskPolling();
+startNoticePolling();
 bootAndRender();
 })();
 </script>

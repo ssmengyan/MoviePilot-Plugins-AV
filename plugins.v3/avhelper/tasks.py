@@ -62,6 +62,35 @@ def merge_rule(rule: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return merged
 
 
+def _merge_queue(queue: List[Dict[str, Any]], by_hash: Dict[str, Any],
+                 thumbs: Dict[str, str]) -> List[Dict[str, Any]]:
+    """把补到的封面与下载器进度就地合并进队列。
+
+    `queue` 传进来的是**当前**数据（由 `Store.kv_update` 持锁取出），只按 id/hash 改命中项，
+    快照之外的条目一个都不动——被合并掉的那次丢记录就是这么来的。
+    """
+    for entry in queue:
+        tid = str(entry.get("id") or "")
+        if tid and tid in thumbs and thumbs[tid] != entry.get("thumb"):
+            entry["thumb"] = thumbs[tid]
+        torrent = by_hash.get(str(entry.get("hash") or "").lower())
+        if not torrent:
+            continue
+        try:
+            raw = float(getattr(torrent, "progress", 0) or 0)
+        except (TypeError, ValueError):
+            raw = 0.0
+        # 下载器返回的是 0-1 的小数（实测 0.4859 表示 0.49%），统一换算成百分比
+        percent = raw * 100 if raw <= 1 else raw
+        entry["progress"] = int(round(percent))
+        state = str(getattr(torrent, "state", "") or "").lower()
+        if entry["progress"] >= 100 or "upload" in state or "做种" in state:
+            entry["state"] = "done"
+        elif state:
+            entry["state"] = "down"
+    return queue[:50]
+
+
 class TaskEngine:
     """把订阅、搜索、打分、下载四处逻辑收在一处，插件类只做薄壳调用。"""
 
@@ -295,8 +324,7 @@ class TaskEngine:
         cand["picked"] = True
         self.store.task_set_state(tid, "pushed")
         self.store.known_add(task["number"], task.get("actor") or "")
-        queue = self.store.kv_get(QUEUE_KEY, []) or []
-        queue.insert(0, {
+        entry = {
             "id": "q" + uuid.uuid4().hex[:8],
             "number": task["number"],
             "thumb": task.get("thumb") or self.plugin.thumbs_of([task["number"]]).get(task["number"], ""),
@@ -310,8 +338,9 @@ class TaskEngine:
             "state": "down",
             "progress": 0,
             "added": time.strftime("%Y-%m-%d %H:%M:%S"),
-        })
-        self.store.kv_set(QUEUE_KEY, queue[:50])
+        }
+        # 队列与「进度刷新」共写：插入必须走原子读改写，别拿旧快照整份覆盖
+        self.store.kv_update(QUEUE_KEY, lambda cur: ([entry] + (cur or []))[:50])
 
         notice = self.notifier.download_start(
             task["number"], cand, image=self._absolute(task.get("thumb"), image_base)
@@ -357,8 +386,7 @@ class TaskEngine:
 
         if number:
             self.store.known_add(number, "")
-        queue = self.store.kv_get(QUEUE_KEY, []) or []
-        queue.insert(0, {
+        entry = {
             "id": "q" + uuid.uuid4().hex[:8],
             "number": number,
             "thumb": self.plugin.thumbs_of([number]).get(number, "") if number else "",
@@ -372,8 +400,9 @@ class TaskEngine:
             "state": "down",
             "progress": 0,
             "added": time.strftime("%Y-%m-%d %H:%M:%S"),
-        })
-        self.store.kv_set(QUEUE_KEY, queue[:50])
+        }
+        # 同 download()：插入走原子读改写，别拿旧快照整份覆盖
+        self.store.kv_update(QUEUE_KEY, lambda cur: ([entry] + (cur or []))[:50])
         return {"ok": True, "message": str(message or "已提交下载"), "notice": None,
                 "hash": torrent_hash, "downloader": downloader_name}
 
@@ -424,39 +453,27 @@ class TaskEngine:
     def queue(self) -> List[Dict[str, Any]]:
         """返回下载队列（顺带补番号封面），并尽力从下载器刷新真实进度。"""
         queue = self.store.kv_get(QUEUE_KEY, []) or []
+        thumbs: Dict[str, str] = {}
         if self.plugin.fill_thumbs(queue):     # 旧队列项没封面：补到就落库，省得每次重算
-            self.store.kv_set(QUEUE_KEY, queue[:50])
+            thumbs = {str(x.get("id")): str(x.get("thumb") or "") for x in queue if x.get("id")}
         hashes = [q.get("hash") for q in queue if q.get("hash")]
-        if not hashes:
-            return queue
-        try:
-            torrents = self.plugin.chain.list_torrents(hashs=hashes) or []
-        except Exception as error:
-            logger.error(f"AVHelper 刷新下载进度失败：{error}")
-            return queue
         by_hash: Dict[str, Any] = {}
-        for item in torrents:
-            h = str(getattr(item, "hash", "") or getattr(item, "hashString", "") or "").lower()
-            if h:
-                by_hash[h] = item
-        for entry in queue:
-            torrent = by_hash.get(str(entry.get("hash") or "").lower())
-            if not torrent:
-                continue
+        if hashes:
             try:
-                raw = float(getattr(torrent, "progress", 0) or 0)
-            except (TypeError, ValueError):
-                raw = 0.0
-            # 下载器返回的是 0-1 的小数（实测 0.4859 表示 0.49%），统一换算成百分比
-            percent = raw * 100 if raw <= 1 else raw
-            entry["progress"] = int(round(percent))
-            state = str(getattr(torrent, "state", "") or "").lower()
-            if entry["progress"] >= 100 or "upload" in state or "做种" in state:
-                entry["state"] = "done"
-            elif state:
-                entry["state"] = "down"
-        self.store.kv_set(QUEUE_KEY, queue[:50])
-        return queue
+                torrents = self.plugin.chain.list_torrents(hashs=hashes) or []
+            except Exception as error:
+                logger.error(f"AVHelper 刷新下载进度失败：{error}")
+                torrents = []
+            for item in torrents:
+                h = str(getattr(item, "hash", "") or getattr(item, "hashString", "") or "").lower()
+                if h:
+                    by_hash[h] = item
+        if not thumbs and not by_hash:
+            return queue
+        # 手里这份是几秒前的快照（取进度还要等下载器回包），落库时一律按 id/hash 就地合并回
+        # **当前**队列：直接整份写回会把这几秒里新提交的下载抹掉（实测丢过一条）。
+        return self.store.kv_update(
+            QUEUE_KEY, lambda cur: _merge_queue(cur or [], by_hash, thumbs))
 
     # ---------- 订阅检查 ----------
 
