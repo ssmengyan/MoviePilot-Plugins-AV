@@ -726,6 +726,17 @@ defineExpose({ syncCursor, focusFresh, reloadDetail, retryDetail })
               </template>
             </div>
 
+            <!--
+              「已下载」（下载历史契约 §5.2）：与徽标同一个投放条件 `downloaded && !lib`
+              —— 已在库的片子上面那条已经说清楚了，不必重复。
+              补一句"文件可能已不在库"是因为这颗标记天然会出现在**库里没有**的片子上，
+              不解释一句，用户会以为是「已入库」的显示 bug（台账不因文件被删而消失，这正是它的用途）。
+            -->
+            <div v-if="movie.downloaded && !movie.lib" class="avh-dlrow">
+              ✔ 已下载
+              <span class="avh-hint">下载台账里有这个番号（文件可能已不在库）</span>
+            </div>
+
             <div v-if="movie.title" class="avh-hero__ttl">{{ movie.title }}</div>
 
             <!-- 演员行：老 `.actorchips` → 点一下 closeAll + openActor(name) -->
@@ -977,6 +988,24 @@ defineExpose({ syncCursor, focusFresh, reloadDetail, retryDetail })
 
 .avh-librow a {
   color: rgb(var(--v-theme-primary));
+}
+
+/*
+ * 「已下载」行（契约 §5.2）：与 `.avh-librow` 同构（同一个位置、同一套留白与圆角），
+ * 只把语义色从 `primary` 换成 `info` —— 理由与 `NumCard` 的 `.avh-badge--dl` 一样：
+ * 「此刻在库里」与「下载台账里记过（文件可能已删）」是两件事，同色会分不清看到的是哪一条。
+ */
+.avh-dlrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+  padding: 7px 12px;
+  font-size: 13px;
+  border-radius: 8px;
+  border: 1px solid rgba(var(--v-theme-info), 0.45);
+  background: rgba(var(--v-theme-info), 0.16);
 }
 
 /* 老 `.actorchips` / `.actorchip`：胶囊演员卡 */

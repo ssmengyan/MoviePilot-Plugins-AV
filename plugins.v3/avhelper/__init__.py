@@ -17,10 +17,12 @@ import asyncio
 import hashlib
 import json
 import mimetypes
+import re
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from urllib.parse import quote, unquote
 
 from fastapi import Request, Response
@@ -83,11 +85,79 @@ WARM_IMAGE_LIMIT = 60      # 每档榜单最多预热多少张封面（榜单本
 WARM_IMAGE_GAP = 0.05      # 封面之间的间隔（秒）：串行 + 轻微间隔，别在启动瞬间打满 NAS 代理
 WARM_MIN_INTERVAL = 900    # 两次预热的最小间隔（秒）：reload/改配置会重跑 init_plugin，别重复抓
 WARM_KV_KEY = "warmup_at"  # 上次预热完成时间（防抖用）
+# 台账「已下载番号」的内存缓存时长（秒）：`_movie()` **每条电影**都要问一次（榜单一次 60 条），
+# 直查库等于把一次请求放大成几十次 SQLite 读；台账只在下载完成/补种时变，晚 30 秒打徽标没有影响
+DOWNLOAD_KEYS_TTL = 30
+# Emby 库补种的节流（秒）：`emby().index()` 自己缓存 5 分钟，同一份索引反复喂给 `download_seed`
+# 只是把近百行 UPSERT 白写一遍（历史页每次打开、每个预热都会调 `seed_downloads`）。
+# 队列迁移那半不节流 —— 它只遍历本地队列，且新完成的条目要尽快入账。
+DOWNLOAD_SEED_TTL = 300
 
 
 def num_key(number: Any) -> str:
     """番号索引键：去空白 + 统一大写（只用于本地索引，不改显示用的原值）。"""
     return str(number or "").strip().upper()
+
+
+# 展示番号：归一化键 → `IPZZ-961` / `FC2-PPV-1234567`。
+# 设计稿给的是 `^([A-Z]{2,6}\d?)(\d{2,7})$`，但那个 `\d?` 贪婪，会把数字段的第一位抢进前缀：
+# `IPZZ961` 切成 `IPZZ9` + `61`（`MIDV946` → `MIDV9-46`）——只有数字段正好 2 位时才靠回溯碰对。
+# 去掉 `\d?` 后**能匹配的键集合完全不变**，只是切分点回到设计文档 §2 自己举的例子（`IPZZ-961`）。
+_DISPLAY_NUM = re.compile(r"^([A-Z]{2,6})(\d{2,7})$")
+_DISPLAY_FC2 = re.compile(r"^FC2PPV(\d+)$")
+
+
+def display_number(key: Any) -> str:
+    """归一化番号键 → 展示用番号（`IPZZ961` → `IPZZ-961`、`FC2PPV1234567` → `FC2-PPV-1234567`）。
+
+    只有「Emby 里有、台账里没有 javdb 口径番号」时才用得到（补种时拼 `number`）：库里只有
+    文件名与 MetaTube 刮削 id，归一化后是 `IPZZ961` 这种无连字符写法。拼不出来
+    （`SSIS1` 数字段只有一位、`1PONDO123` 前置数字）就**原样返回键** —— 宁可显示得怪一点，
+    也不要猜成另一个番号（猜错会让人以为下载的是别的片）。
+    """
+    text = str(key or "").strip().upper()
+    fc2 = _DISPLAY_FC2.match(text)
+    if fc2:
+        return f"FC2-PPV-{fc2.group(1)}"
+    plain = _DISPLAY_NUM.match(text)
+    if plain:
+        return f"{plain.group(1)}-{plain.group(2)}"
+    return str(key or "")
+
+
+def _key_rank(key: str) -> Tuple[int, int, str]:
+    """归一化番号键的「干净程度」排序键（小者优先），用于给一部片挑主键。
+
+    同一部片在 Emby 里会有多个键：`SNOS192`（文件名/刮削 id 的基础号）与 `SNOS192C`（中字版）、
+    `IPZZ8224K`（4K 版）。台账一部片只登记一行，挑哪个当主键？规则：
+
+    1. **能拼出规范番号**的优先（`IPZZ961` 能拼成 `IPZZ-961`，`SNOS192C` 拼不出）；
+    2. 其次**短**的优先（基础号比带后缀的短）；
+    3. 最后按字典序，保证同一份索引每次挑出同一个键（补种是幂等的，别今天挑 A 明天挑 B）。
+    """
+    text = str(key or "")
+    canonical = 0 if (_DISPLAY_NUM.match(text.upper()) or _DISPLAY_FC2.match(text.upper())) else 1
+    return (canonical, len(text), text)
+
+
+def emby_time_text(value: Any) -> str:
+    """Emby 的 `DateCreated`（UTC ISO，如 `2026-10-05T04:34:56.0000000Z`）→ 本地 `YYYY-MM-DD HH:MM:SS`。
+
+    解析不出来返回空串：历史页那边空值显示「—」，总好过拿补种当天冒充入库时间。
+    Emby 的小数位是 7 位（Python 3.11 的 `fromisoformat` 只吃 1–6 位），先截到 6 位；
+    `Z` 结尾按 UTC 处理再转本地时区（插件与 Emby 同机，两个时区通常一致，但不假设）。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"(\.\d{6})\d+", r"\1", text)
+    try:
+        stamp = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if stamp.tzinfo is not None:
+        stamp = stamp.astimezone()
+    return stamp.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def ui_file(path: str) -> Optional[Path]:
@@ -145,7 +215,7 @@ class AVHelper(_PluginBase):
     plugin_name = "AV 资源助手"
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
     plugin_icon = "Moviepilot_A.png"
-    plugin_version = "0.3.3"
+    plugin_version = "0.3.4"
     plugin_label = "发现"
     plugin_author = "local"
     plugin_config_prefix = "avhelper_"
@@ -164,6 +234,9 @@ class AVHelper(_PluginBase):
     _emby_lib: Optional[emby.EmbyLibrary] = None
     _emby_sig: Optional[Tuple[str, str]] = None
     _cache_size_cache: Tuple[float, int] = (0.0, 0)   # (取样时间, 字节数)：缓存体积的内存缓存
+    # (取样时间, 已下载番号键)：台账「已下载」徽标的 30 秒内存缓存，见 _downloaded_keys()
+    _download_keys: Tuple[float, Set[str]] = (0.0, set())
+    _seeded_at = 0.0                                  # 上次 Emby 补种时间（节流用，见 seed_downloads）
     _warm_thread: Optional[threading.Thread] = None   # 启动预热线程（守护线程，见 warm_up）
     _warm_stop: Optional[threading.Event] = None      # 当前这次预热的停机信号（每次新建一份）
 
@@ -404,6 +477,9 @@ class AVHelper(_PluginBase):
              "auth": "bear", "summary": "提交下载"},
             {"path": "/tasks/cancel", "endpoint": self.api_task_cancel, "methods": ["POST"],
              "auth": "bear", "summary": "取消待确认任务"},
+            {"path": "/downloads", "endpoint": self.api_downloads, "methods": ["GET", "DELETE"],
+             "auth": "bear", "summary": "下载台账(下载历史)",
+             "description": "GET 列出台账并幂等补种；DELETE ?key= 移除一条记录后回最新列表"},
             {"path": "/magnet-download", "endpoint": self.api_magnet_download, "methods": ["POST"],
              "auth": "bear", "summary": "详情页磁力直接下载"},
             {"path": "/check", "endpoint": self.api_check, "methods": ["POST"], "auth": "bear",
@@ -683,6 +759,13 @@ class AVHelper(_PluginBase):
         try:
             # 缓存体积：先算一次，让首个 /bootstrap 直击 60 秒内存缓存（rglob 上万文件是它的大头）
             self.cache_size(force=True)
+            # 台账补种（设计文档 §3「启动预热」）**放在榜单之前**：补种会把「已下载」写进台账，
+            # 而下面的 `_warm_rank()` → `_movie()` 会读 `_downloaded_keys()` 的 30 秒缓存 ——
+            # 先跑榜单会把一份**空**的键集合缓存住，用户启动后头 30 秒看到的卡片全都没有「已下载」
+            # 标记（2026-10-11 真机实测到过这个空窗）。补种失败只在 seed_downloads 里记日志。
+            if stop.is_set():
+                return
+            self.seed_downloads()
             for period in WARM_RANK_PERIODS:
                 if stop.is_set():
                     return
@@ -747,8 +830,12 @@ class AVHelper(_PluginBase):
     def _movie(self, raw: Dict[str, Any], kind: str = "", actor: str = "") -> Dict[str, Any]:
         """把 javdb 记录归一化成契约里的 movie 结构（图片转代理地址）。
 
-        额外带一个 `lib` 字段：番号已在 Emby 库中时是 `{id,name,path,url}`，否则不带该字段
-        （前端只在有 `lib` 时显示「已入库」，没有就什么都不显示）。
+        额外带两个布尔线索（都不带时前端什么都不画）：
+
+        - `lib`：番号此刻在 Emby 库里，值是 `{id,name,path,url}`；
+        - `downloaded`：番号在下载台账里且 `state=='downloaded'`（契约 §5.2，只在没有 `lib`
+          时画「已下载」）。判它走 `_downloaded_keys()` 的 30 秒内存缓存 —— 本方法每条电影
+          都被调一次（榜单一次 60 条），**绝不能在这儿查库**。
         """
         number = str(raw.get("number") or "")
         who = actor or self._actor_of(number)
@@ -776,7 +863,224 @@ class AVHelper(_PluginBase):
         lib = self.emby().lookup(number)
         if lib:
             movie["lib"] = lib
+        # 「已下载」徽标：走插件内存缓存（30 秒），本方法每条电影都跑一次也不碰库
+        if emby.norm_key(number) in self._downloaded_keys():
+            movie["downloaded"] = True
         return movie
+
+    # ---------- 下载台账（下载历史）：徽标缓存 / 补种 / API ----------
+
+    def _downloaded_keys(self) -> Set[str]:
+        """台账里 `state=='downloaded'` 的番号键集合（30 秒内存缓存，契约 §4）。
+
+        `_movie()` **每条电影**都要问一次「这个番号下载过吗」（榜单一次 60 条，演员作品史还有
+        分页续拉），直接查库等于把一次请求放大成几十次 SQLite 读。台账只在下载完成/补种时变，
+        晚 30 秒打上徽标没有任何影响，所以写入侧不必主动失效。
+
+        读失败**不写缓存**：把「全都没下载过」钉住 30 秒，比慢一次更糟。
+        """
+        now = time.time()
+        stamp, keys = self._download_keys
+        if stamp and now - stamp < DOWNLOAD_KEYS_TTL:
+            return keys
+        found: Set[str] = set()
+        try:
+            for key, row in (self.store.download_map() or {}).items():
+                if isinstance(row, dict) and str(row.get("state") or "") == "downloaded":
+                    found.add(str(key))
+        except Exception as error:
+            logger.error(f"AVHelper 读取已下载台账失败：{error}")
+            return keys
+        self._download_keys = (now, found)
+        return found
+
+    def seed_downloads(self) -> None:
+        """把「已经下载过」的线索补进台账（幂等、best-effort；`/downloads` 与启动预热共用）。
+
+        两条线索（设计文档 §3「启动预热 / 打开历史页时」那一行）：
+
+        1. 老下载队列里 `done` 的条目 —— 交给引擎迁移（落 `state='downloaded'` 后把该条从队列
+           删掉，队列从此只留下载中）；引擎拿不到条目就回 0；
+        2. Emby 库里的番号 —— `emby().index()` 是「归一化番号 → {id,name,path,url}」，全量补种
+           `source='library'`。库里没有 javdb 口径的番号，展示番号用 `display_number(key)` 从键拼
+           （**拼得出才给**，见下面的行注释），标题/路径用 Emby 的 name/path；封面从本地索引
+           `num2thumb`（**只读内存，不发网络请求**）按归一化键捞一份原地址塞进 `thumb` ——
+           索引键是 `num_key()` 口径（`IPZZ-961`，带连字符），所以要先归一化再比；
+           捞不到就留空，前端画「无图」占位，不算错。
+
+        幂等：台账按归一化 key 就地合并（空值不覆盖已有值、`source` 不覆盖），重复调用条数不涨。
+        全程只记日志：台账是「锦上添花」，绝不能让 `/downloads` 或 `/bootstrap` 因补种失败而 500。
+        """
+        try:
+            moved = int(self.engine.migrate_queue_to_ledger() or 0)
+            if moved:
+                logger.info(f"AVHelper 老下载队列迁移台账：{moved} 条")
+        except Exception as error:
+            logger.error(f"AVHelper 迁移老下载队列失败：{error}")
+        # Emby 补种按 DOWNLOAD_SEED_TTL 节流（队列迁移上面那半不节流）：`emby().index()` 自己缓存
+        # 5 分钟，同一份索引反复 UPSERT 近百行纯属白写 —— 历史页每打开一次、每次预热都会调到这里。
+        now = time.time()
+        if now - self._seeded_at < DOWNLOAD_SEED_TTL:
+            return
+        self._seeded_at = now
+        try:
+            index = self.emby().index() or {}
+        except Exception as error:
+            logger.error(f"AVHelper 读取 Emby 索引失败（台账补种跳过）：{error}")
+            return
+        if not index:
+            return
+        thumbs: Dict[str, str] = {}
+        try:
+            thumbs = {emby.norm_key(k): str(v or "")
+                      for k, v in (self.store.kv_get(THUMB_KEY, {}) or {}).items() if v}
+        except Exception as error:
+            logger.error(f"AVHelper 读取封面索引失败（台账补种不带图）：{error}")
+        # 同一部片在 Emby 索引里会有**好几个键**（MetaTube 的 ProviderIds、文件名、标题各算一份），
+        # 按键补种会把同一部片列成好几行 —— 真机实测 148 行 vs 库里实际 109 个条目，
+        # 历史页上就是「SNOS-192 / SNOS192C / START-498 / START498C」这种成对的假重复。
+        # 所以先按**条目 id** 归并，每部片只留一个「最干净」的键当台账主键。
+        best: Dict[str, str] = {}
+        for key, entry in index.items():
+            if not isinstance(entry, dict):
+                continue
+            item_id = str(entry.get("id") or "") or key
+            current = best.get(item_id)
+            if current is None or _key_rank(key) < _key_rank(current):
+                best[item_id] = key
+        rows = []
+        for item_id, key in best.items():
+            entry = index.get(key) or {}
+            shown = display_number(key)
+            rows.append({
+                "key": key,
+                # 只有真拼出来了（`IPZZ961` → `IPZZ-961`）才给展示番号：`download_seed` 的合并规则是
+                # 「非空就覆盖」，而拼不出的键（`SSIS1`）交上去等于把台账里 `SSIS-001` 这种权威写法
+                # 降级成归一化结果（store.py 的注释专门警告过）。留空则老行保留原值、新行交给前端
+                # `number || key` 兜底 —— 显示出来是同一个字符串，但库里不会攒下一份错的。
+                "number": shown if shown != key else "",
+                "thumb": thumbs.get(key, ""),
+                "title": str(entry.get("name") or ""),
+                "path": str(entry.get("path") or ""),
+                "state": "downloaded",
+                "source": "library",
+                # 入库时间（Emby 的 DateCreated）当完成时间：比「插件第一次看到它」真实得多。
+                # 解析不出来就留空 —— 宁可在页面上显示「—」，也不拿补种当天冒充下载日期。
+                "completed_at": emby_time_text(entry.get("created")),
+                "created_at": "",
+            })
+        try:
+            added = int(self.store.download_seed(rows) or 0)
+            # 补种改变了台账 → 让「已下载番号」那份 30 秒缓存立刻失效：否则补种后打开榜单，
+            # 卡片上的「已下载」标记要等最长 30 秒才出现（缓存是给 `_movie()` 的每片一查做的，
+            # 不是给这种一次性写入留的）。
+            self._download_keys = (0.0, set())
+            if added:
+                logger.info(f"AVHelper 从 Emby 库补种台账：新增 {added} 条"
+                            f"（库里 {len(rows)} 个番号，带图 {sum(1 for r in rows if r['thumb'])} 条）")
+        except Exception as error:
+            logger.error(f"AVHelper 从 Emby 库补种台账失败：{error}")
+
+    def _duplicate_note(self, number: Any) -> str:
+        """番号在台账里已下载过 → 拼一句附在返回的 `message` 末尾（**只提示不拦**，契约 §3）。
+
+        这里直查 `download_map()` 而不复用 `_downloaded_keys()`：用户点一次下载才走一趟，代价
+        可以忽略；而且要拿 `completed_at` 拼日期，那份 30 秒缓存里只有 key 集合、没有时间。
+        """
+        key = emby.norm_key(number)
+        if not key:
+            return ""
+        try:
+            row = (self.store.download_map() or {}).get(key) or {}
+        except Exception as error:
+            logger.error(f"AVHelper 查询已下载台账失败：{error}")
+            return ""
+        if str(row.get("state") or "") != "downloaded":
+            return ""
+        done = str(row.get("completed_at") or row.get("created_at") or "")[:10]
+        return (f"（该番号 {done} 已下载过，本次为重复下载）" if done
+                else "（该番号已下载过，本次为重复下载）")
+
+    def _downloads_payload(self) -> Dict[str, Any]:
+        """组装 `/downloads` 的 `{success, items, counts}`（GET 与 DELETE 共用，删完立刻回一份）。
+
+        逐条按契约 §4 的字段名给，`thumb`/`sizeText` 都在这儿算好（`image_url()` / `size_text()`）：
+        同一个字节数在前端两处显示成不同写法，比缺省更糟。`lib` 是**此刻**的 Emby 命中
+        （没配置 Emby、或片子不在库都是 `null` ——「从没入库」与「已被删」契约里统一成一句话）。
+
+        台账读失败回 `success:false` + 空列表而不是抛出去：历史页有自己的错误态，
+        但一个 500 会把宿主那次请求打成异常（前端只能靠 catch 猜原因）。
+        """
+        try:
+            rows = self.store.download_list() or []
+        except Exception as error:
+            logger.error(f"AVHelper 读取下载台账失败：{error}")
+            return {"success": False, "message": "下载台账读取失败",
+                    "items": [], "counts": {"total": 0, "inLibrary": 0, "missing": 0}}
+        try:
+            library = self.emby().index() or {}
+        except Exception as error:
+            logger.error(f"AVHelper 读取 Emby 索引失败（台账库状态一律算不在库）：{error}")
+            library = {}
+        items: List[Dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            key = str(row.get("key") or "")
+            try:
+                items.append({
+                    "key": key,
+                    # 台账里是什么就是什么：Emby 补种拼不出展示番号的键留着空串，
+                    # 前端 `displayNumber()` 自会退回 `key`（契约允许空），别在这一层二次发明
+                    "number": str(row.get("number") or ""),
+                    "title": str(row.get("title") or ""),
+                    "actor": str(row.get("actor") or ""),
+                    "thumb": self.image_url(row.get("thumb")),
+                    "size": int(row.get("size") or 0),
+                    "sizeText": size_text(row.get("size")),
+                    "hash": str(row.get("hash") or ""),
+                    "state": str(row.get("state") or "downloading"),
+                    "source": str(row.get("source") or "plugin"),
+                    "createdAt": str(row.get("created_at") or ""),
+                    "completedAt": str(row.get("completed_at") or ""),
+                    "path": str(row.get("path") or ""),
+                    "lib": library.get(key),
+                })
+            except Exception as error:      # 一条烂数据不该把整页打挂（items 是列表，不是全有才给）
+                logger.error(f"AVHelper 组装台账条目失败 {key}：{error}")
+        in_library = sum(1 for item in items if item.get("lib"))
+        return {
+            "success": True,
+            "items": items,
+            "counts": {"total": len(items), "inLibrary": in_library,
+                       "missing": len(items) - in_library},
+        }
+
+    def api_downloads(self, request: Request) -> Dict[str, Any]:
+        """下载台账：GET 列表（顺带幂等补种）/ DELETE 移除一条记录（`?key=<归一化键或番号>`）。
+
+        写成同步函数：宿主会丢线程池跑，补种要读 Emby 索引与写库，不能占住事件循环。
+        GET 每次都补种（契约 §4 末尾）—— 用户打开历史页的那一刻才可能发现「这片早就入库了」
+        或「老队列里其实下完过」；DELETE 按契约只删记录并回一份**最新**列表（复用同一个组装
+        函数），不补种：刚删掉的东西立刻被自己补回来，比不补更让人困惑。
+        """
+        if request.method == "DELETE":
+            key = str(request.query_params.get("key") or "").strip()
+            if not key:
+                payload = self._downloads_payload()
+                payload["success"] = False
+                payload["message"] = "缺少 key"
+                return payload
+            try:
+                removed = bool(self.store.download_delete(key))
+            except Exception as error:
+                logger.error(f"AVHelper 移除台账记录失败 {key}：{error}")
+                removed = False
+            payload = self._downloads_payload()
+            payload["message"] = "已移除记录" if removed else f"台账里没有 {key} 这条记录"
+            return payload
+        self.seed_downloads()
+        return self._downloads_payload()
 
     # ---------- API：界面与图片 ----------
 
@@ -1195,7 +1499,13 @@ class AVHelper(_PluginBase):
             self.engine.download, tid, str(payload.get("site") or ""),
             str(request.base_url).rstrip("/"), bool(payload.get("force")),
         )
-        return {"success": bool(result.get("ok")), "message": result.get("message") or "",
+        # 重复下载提示（契约 §3）：番号只能从引擎返回值里找 —— 请求体里只有任务 id，而
+        # `TaskEngine.download()` 目前只回 ok/message/notice/hash/downloader（没有番号），
+        # 所以这条路径**现在不会出提示**；tasks.py 的返回值补一个 "number" 即自动生效。
+        message = str(result.get("message") or "")
+        if result.get("ok"):
+            message += self._duplicate_note(result.get("number"))
+        return {"success": bool(result.get("ok")), "message": message,
                 "notice": result.get("notice"), "hash": result.get("hash"),
                 "downloader": result.get("downloader"), "queue": self.engine.queue(fresh=True)}
 
@@ -1227,7 +1537,12 @@ class AVHelper(_PluginBase):
             self.engine.download_magnet, str(payload.get("number") or ""), info_hash,
             str(payload.get("name") or ""),
         )
-        return {"success": bool(result.get("ok")), "message": result.get("message") or "",
+        # 重复下载提示（契约 §3）：番号就在请求体里（详情页的「下载」一定带），
+        # 已下载过就追加一句，**不拦** —— 用户可能就是想再下一遍。
+        message = str(result.get("message") or "")
+        if result.get("ok"):
+            message += self._duplicate_note(payload.get("number"))
+        return {"success": bool(result.get("ok")), "message": message,
                 "hash": result.get("hash"), "downloader": result.get("downloader"),
                 "queue": self.engine.queue(fresh=True)}
 

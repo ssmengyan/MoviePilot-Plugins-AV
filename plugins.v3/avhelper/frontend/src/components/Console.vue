@@ -22,6 +22,7 @@ import RuntimePanel from './settings/RuntimePanel.vue'
 import AboutPanel from './settings/AboutPanel.vue'
 import SiteSearchView from './views/SiteSearchView.vue'
 import DownloadsView from './views/DownloadsView.vue'
+import HistoryView from './views/HistoryView.vue'
 import TasksView from './views/TasksView.vue'
 import SubsView from './views/SubsView.vue'
 import ActorsView from './views/ActorsView.vue'
@@ -72,6 +73,8 @@ const DATA_SECTIONS: SectionItem[] = [
   { key: 'subs', title: '订阅', icon: 'mdi-rss' },
   { key: 'tasks', title: '任务', icon: 'mdi-clipboard-list' },
   { key: 'downloads', title: '下载', icon: 'mdi-download' },
+  // 「下载历史」紧挨「下载」：前者只留下载中，完成的番号落到台账后由这一栏兜底（删了文件也还在）
+  { key: 'history', title: '下载历史', icon: 'mdi-history' },
   { key: 'sitesearch', title: '站点搜索', icon: 'mdi-magnify' },
 ]
 
@@ -80,7 +83,8 @@ const pluginId = computed(() => props.pluginId || props.sourcePluginId || '')
 /**
  * 数据台**已原生化**的栏目 → 视图组件（S6 增量替换，设计文档 §6.1）。
  *
- * **六栏到这里全部原生化**（2026-10-10，`discover` 是最后一栏）：这张表里没有的栏目
+ * **六栏到这里全部原生化**（2026-10-10，`discover` 是最后一栏）；0.3.4 起多出第七栏
+ * `history`（下载历史，见 `docs/AVHelper-下载历史设计.md`）。这张表里没有的栏目
  * 仍由 `AppFrame` 承载被嵌应用（`ui/`），`AppFrame` 从此只作为"设置台之外的回退"保留
  * ——真机上它只在两种情况下出现：这张表被回退式删掉一行，或宿主不认识 `vue` 渲染模式
  * （那时整个联邦组件根本不会加载，`get_page()` 的 iframe 才是退路）。
@@ -93,6 +97,7 @@ const NATIVE_VIEWS: Record<string, Component> = {
   discover: DiscoverView,
   sitesearch: SiteSearchView,
   downloads: DownloadsView,
+  history: HistoryView,
   tasks: TasksView,
   subs: SubsView,
   actors: ActorsView,

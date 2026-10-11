@@ -43,6 +43,11 @@ export interface RankMovie {
   id?: string
   /** 已入库（Emby 命中）时是对象。 */
   lib?: { id?: string; name?: string; path?: string; url?: string } | null
+  /**
+   * 该番号在下载台账里已完成下载（后端 `_movie()` 的 `downloaded`，契约 §5.2）。
+   * 与 `lib` 区分：台账记录不因文件被删而消失，所以会出现"下载过、库里却没有"的片子。
+   */
+  downloaded?: boolean
 }
 
 /**

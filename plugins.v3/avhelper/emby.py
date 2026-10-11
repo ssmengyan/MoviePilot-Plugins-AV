@@ -35,8 +35,12 @@ _LEAD = re.compile(r"^([A-Za-z]{2,6}\d?[-_ ]?\d{2,7})")
 def norm_key(text: Any) -> str:
     """番号归一化：去掉非字母数字、统一大写，并抹掉数字段的前导零。
 
-    `MIDV-946` / `midv00946` / `MIDV-946-UC` → `MIDV946`；`FC2-PPV-1234567` → `FC2PPV1234567`。
+    `MIDV-946` / `midv00946` / `MIDV-946-UC` → `MIDV946UC`；`FC2-PPV-1234567` → `FC2PPV1234567`。
     javdb 的番号与 Emby 里的文件名、MetaTube 刮削 id 写法各不相同，必须先归一化再比。
+
+    ⚠️ 后**缀**（`-UC` 这种）不会被丢掉 —— 只抹数字段的前导零（原 docstring 写成 `MIDV946` 是错的，
+    2026-10-11 由前端那条线实测指出；台账主键、`_download_keys()` 与前端 `downloadHistory.normKey()`
+    都按这个"保留后缀"的口径对齐）。
     """
     raw = re.sub(r"[^0-9A-Za-z]", "", str(text or "")).upper()
     if not raw:
@@ -138,6 +142,15 @@ class EmbyLibrary:
             return None
         return (self._ensure_index() or {}).get(key)
 
+    def index(self) -> Dict[str, Dict[str, Any]]:
+        """整个库的 `归一化番号 → {id, name, path, url}`；未配置或查询失败返回空字典。
+
+        与 `lookup()` 是同一份内存索引（同样的 5 分钟缓存与失败负缓存），只是不做单点查询：
+        「从库里补种台账」「历史页显示在库状态」要的是一次拿到全部命中，一次 HTTP 抓完就够
+        （本环境 93 条），逐个番号调 `lookup()` 会把已经建好的索引白白查一遍。
+        """
+        return self._ensure_index() or {}
+
     # ---------- 内部 ----------
 
     def _ensure_index(self) -> Dict[str, Dict[str, Any]]:
@@ -189,6 +202,9 @@ class EmbyLibrary:
                     "name": str(item.get("Name") or ""),
                     "path": str(item.get("Path") or ""),
                     "url": self._web_url(str(item.get("Id") or "")),
+                    # 入库时间（Emby 的 UTC ISO）：下载台账拿它当「完成时间」——
+                    # 片子是被整理入库那一刻进的库，比「插件第一次看到它」真实得多。
+                    "created": str(item.get("DateCreated") or ""),
                 }
                 for key in _item_keys(item):
                     index.setdefault(key, entry)
@@ -204,14 +220,14 @@ class EmbyLibrary:
         start = 0
         while len(out) < MAX_ITEMS:
             data = self._api(self._items_base or "/emby/Items", ParentId=parent, Recursive="true",
-                             IncludeItemTypes="Movie", Fields="Path,ProviderIds,Name",
+                             IncludeItemTypes="Movie", Fields="Path,ProviderIds,Name,DateCreated",
                              StartIndex=start, Limit=PAGE, EnableTotalRecordCount="false",
                              SortBy="DateCreated", SortOrder="Descending")
             if not isinstance(data, dict) and not self._items_base:
                 # 管理员直查不被接受时退回用户维度（Emby 各版本行为不一）
                 self._items_base = self._user_items_base()
                 data = self._api(self._items_base, ParentId=parent, Recursive="true",
-                                 IncludeItemTypes="Movie", Fields="Path,ProviderIds,Name",
+                                 IncludeItemTypes="Movie", Fields="Path,ProviderIds,Name,DateCreated",
                                  StartIndex=start, Limit=PAGE, EnableTotalRecordCount="false")
             if not isinstance(data, dict):
                 break

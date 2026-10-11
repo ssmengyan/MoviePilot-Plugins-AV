@@ -98,6 +98,33 @@ def _merge_queue(queue: List[Dict[str, Any]], by_hash: Dict[str, Any],
     return queue[:50]
 
 
+# 台账的 size 列是字节，而队列/候选里的 size 是 `scoring.human_size()` 的展示文本（"1.2 GB"）
+_SIZE_RE = re.compile(r"([\d.]+)\s*(B|KB|MB|GB|TB)", re.I)
+
+
+def _size_bytes(text: Any) -> int:
+    """把「1.2 GB」这种展示文本还原成字节；认不出来返回 0（台账里 0 就是未知）。"""
+    hit = _SIZE_RE.search(str(text or ""))
+    if not hit:
+        return 0
+    try:
+        value = float(hit.group(1))
+    except ValueError:
+        return 0
+    scale = {"B": 1, "KB": 1024, "MB": 1024 ** 2, "GB": 1024 ** 3, "TB": 1024 ** 4}
+    return int(value * scale[hit.group(2).upper()])
+
+
+def _queue_fingerprint(entry: Dict[str, Any]) -> Tuple[str, str, str, str]:
+    """队列条目的身份指纹：登记进台账后，据此把它从队列里摘掉。
+
+    不能按整条 dict 相等去比——取快照与摘除之间进度/封面会被别的线程改掉，比不出来。
+    只取不会变的四个字段；四个都空是坏数据（指纹全空），依旧不会误摘别人（见 `_flush_done`）。
+    """
+    return (str(entry.get("id") or ""), str(entry.get("number") or ""),
+            str(entry.get("hash") or "").lower(), str(entry.get("added") or ""))
+
+
 class TaskEngine:
     """把订阅、搜索、打分、下载四处逻辑收在一处，插件类只做薄壳调用。"""
 
@@ -352,12 +379,27 @@ class TaskEngine:
         }
         # 队列与「进度刷新」共写：插入必须走原子读改写，别拿旧快照整份覆盖
         self.store.kv_update(QUEUE_KEY, lambda cur: ([entry] + (cur or []))[:50])
+        # 台账登记（设计文档 §3）：提交成功先记「下载中」，完成时间等队列那一路补。
+        # 写台账只是旁路记录，失败绝不影响这次提交的结果（`_ledger_upsert` 自己兜异常）。
+        self._ledger_upsert(
+            str(task["number"] or ""),
+            title=str(cand.get("title") or ""),
+            actor=str(task.get("actor") or ""),
+            thumb=self._ledger_thumb(entry["thumb"]),
+            size=_size_bytes(cand.get("size")),
+            hash=str(torrent_hash or ""),
+            path=save_path,
+            downloader=str(downloader_name or ""),
+            state="downloading",
+            source="plugin",
+        )
 
         notice = self.notifier.download_start(
             task["number"], cand, image=self._absolute(task.get("thumb"), image_base)
         )
+        # 带上 number：接口层要靠它给「该番号已下载过」的提示（任务页那条路以前拿不到番号）
         return {"ok": True, "message": str(message or "已提交下载"), "notice": notice,
-                "hash": torrent_hash, "downloader": downloader_name}
+                "hash": torrent_hash, "downloader": downloader_name, "number": task["number"]}
 
     def download_magnet(self, number: str, info_hash: str, name: str = "") -> Dict[str, Any]:
         """详情页磁力直接推给下载器（界面上的「下载」，省掉复制再粘贴）。
@@ -414,6 +456,17 @@ class TaskEngine:
         }
         # 同 download()：插入走原子读改写，别拿旧快照整份覆盖
         self.store.kv_update(QUEUE_KEY, lambda cur: ([entry] + (cur or []))[:50])
+        # 同 download()：磁力这条路径也没有演员/大小，能拿到的先记进台账（设计文档 §3）
+        self._ledger_upsert(
+            str(number or ""),
+            title=str(name or ""),
+            thumb=self._ledger_thumb(entry["thumb"]),
+            hash=str(torrent_hash or ""),
+            path=save_path,
+            downloader=str(downloader_name or ""),
+            state="downloading",
+            source="plugin",
+        )
         return {"ok": True, "message": str(message or "已提交下载"), "notice": None,
                 "hash": torrent_hash, "downloader": downloader_name}
 
@@ -475,6 +528,10 @@ class TaskEngine:
 
         落库一律走 `Store.kv_update` 的就地合并：取快照之后还要等下载器回包（可能几秒），
         期间「提交下载」插入的新条目不能因为整份覆盖而丢（实测丢过一条已下载完成的记录）。
+
+        返回前会把已完成的条目登记进台账并从队列里摘掉（见 `_flush_done`，设计文档 §3）：
+        历史归台账、队列只留下载中，下载页不再为完成项画进度条，也免得每轮都拿一堆
+        已完成的 hash 去问下载器。
         """
         queue = self.store.kv_get(QUEUE_KEY, []) or []
         thumbs: Dict[str, str] = {}
@@ -495,10 +552,128 @@ class TaskEngine:
         else:
             self._kick_refresh(active, done)
 
-        if not thumbs and not by_hash:
+        if thumbs or by_hash:
+            queue = self.store.kv_update(
+                QUEUE_KEY, lambda cur: _merge_queue(cur or [], by_hash, thumbs))
+        return self._flush_done(queue)
+
+    def _flush_done(self, queue: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """把已完成的条目登记进台账并从队列摘掉，返回摘完的队列（设计文档 §3）。
+
+        `queue` 传进来的是刚合并完的快照，**摘除要在 `kv_update` 里按指纹就地做**：
+        快照与摘除之间「提交下载」还会插入新条目，整份写回会把那条冲掉（老毛病）。
+        只摘「登记成功」的那几条——台账写失败就留在队列里下轮重试，宁可在下载页多显示
+        一行「已完成」，也不能让这条下载从两处记录里同时消失。
+        """
+        done = [e for e in (queue or [])
+                if isinstance(e, dict) and str(e.get("state") or "") == "done"]
+        if not done:
             return queue
-        return self.store.kv_update(
-            QUEUE_KEY, lambda cur: _merge_queue(cur or [], by_hash, thumbs))
+        moved = set()
+        for entry in done:
+            number = str(entry.get("number") or "")
+            if not number:
+                continue            # 没番号归一不出 key：留在队列里当「已完成」显示，别悄悄丢掉
+            if self._ledger_upsert(
+                number,
+                title=str(entry.get("title") or ""),
+                thumb=self._ledger_thumb(entry.get("thumb")),
+                size=_size_bytes(entry.get("size")),
+                hash=str(entry.get("hash") or ""),
+                path=str(entry.get("savePath") or ""),
+                downloader=str(entry.get("downloader") or ""),
+                state="downloaded",
+                created_at=str(entry.get("added") or ""),   # 只在首次写入时生效
+            ):
+                moved.add(_queue_fingerprint(entry))
+        if not moved:
+            return queue
+
+        def keep(cur: Any) -> List[Dict[str, Any]]:
+            """就地摘掉已登记的条目；其余条目与顺序原样保留（期间新插入的不能丢）。"""
+            return [item for item in (cur or [])
+                    if not (isinstance(item, dict) and _queue_fingerprint(item) in moved)]
+
+        try:
+            return self.store.kv_update(QUEUE_KEY, keep)
+        except Exception as error:
+            logger.error(f"AVHelper 从队列移除已完成条目失败：{error}")
+            return queue
+
+    # ---------- 下载台账 ----------
+
+    def migrate_queue_to_ledger(self) -> int:
+        """把队列里还留着的、已完成的老条目补登记进台账（`source='queue'`），返回登记条数。
+
+        给启动预热与打开历史页用：只登记、**不删队列条目**（摘除由 `queue()` 的常规路径做），
+        所以反复调用是安全的——台账按归一化番号合并，重复登记只是刷新 `updated_at`。
+        返回的是「这次交去登记的条数」（不是新增行数，新增多少看 `Store.download_seed`）；
+        写库失败返回 0，调用方据此知道这一轮没补上。
+        """
+        rows: List[Dict[str, Any]] = []
+        for entry in (self.store.kv_get(QUEUE_KEY, []) or []):
+            if not isinstance(entry, dict) or str(entry.get("state") or "") != "done":
+                continue
+            number = str(entry.get("number") or "")
+            if not number:          # 归一不出 key 的登记不了，跳过
+                continue
+            stamp = str(entry.get("added") or "")
+            rows.append({
+                "number": number,
+                "title": str(entry.get("title") or ""),
+                "thumb": self._ledger_thumb(entry.get("thumb")),
+                "size": _size_bytes(entry.get("size")),
+                "hash": str(entry.get("hash") or ""),
+                "path": str(entry.get("savePath") or ""),
+                "downloader": str(entry.get("downloader") or ""),
+                "state": "downloaded",
+                "source": "queue",
+                # 老条目里 `added` 是它真正的提交时间，也是这批数据里唯一的时间戳；
+                # 拿「迁移当天」当完成时间会把几天前的下载记录全拉到现在，所以两个时间都用它。
+                "created_at": stamp,
+                "completed_at": stamp,
+            })
+        if not rows:
+            return 0
+        try:
+            self.store.download_seed(rows)
+        except Exception as error:
+            logger.error(f"AVHelper 迁移老队列到下载台账失败：{error}")
+            return 0
+        logger.info(f"AVHelper 老队列迁移：登记 {len(rows)} 条已完成下载")
+        return len(rows)
+
+    def _ledger_thumb(self, thumb: Any) -> str:
+        """封面转台账口径：台账存图床**原地址**，读的时候才转 /img 代理。
+
+        队列与任务里的 thumb 已经是插件代理地址（`thumbs_of`/`fill_thumbs` 的产物），
+        原样写进台账会被读的那一侧再包一层代理——`__init__._raw_image()` 的注释里
+        把「代理套代理」单独标出来过，所以这里先还原成原地址。
+        """
+        raw = str(thumb or "")
+        unwrap = getattr(self.plugin, "_raw_image", None)
+        if not raw or not callable(unwrap):
+            return raw
+        try:
+            return str(unwrap(raw) or raw)
+        except Exception:
+            return raw
+
+    def _ledger_upsert(self, number: str, **fields: Any) -> bool:
+        """写一条台账，返回是否写入成功；失败只记日志。
+
+        台账是「下载过什么」的旁路记录：写失败绝不能让提交下载或队列渲染跟着失败，
+        但调用方要据此决定队列条目摘不摘——没登记成功的留在队列里下轮重试。
+        番号为空同样返回 False（归一不出 key，登记不了），别让调用方以为记上了。
+        """
+        if not str(number or "").strip():
+            return False
+        try:
+            self.store.download_upsert(number, **fields)
+            return True
+        except Exception as error:
+            logger.error(f"AVHelper 写下载台账失败（{number}）：{error}")
+            return False
 
     def _query_torrents(self, hashes: List[str]) -> Dict[str, Any]:
         """问一次下载器，返回 `hash → 种子对象`；失败只记日志（不抛、不影响队列渲染）。"""

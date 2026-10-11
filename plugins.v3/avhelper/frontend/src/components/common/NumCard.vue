@@ -21,6 +21,11 @@
  * ```
  * 差异：老实现用 `data-num`/`data-id` + `bindCards()` 绑点击与悬停预热详情，
  * Vue 里改成 `select` / `hover` 事件（`hover` 供详情预热用），字段与文案不变。
+ *
+ * 差异 2（下载历史契约 §5.2，老实现没有）：徽标末尾多一颗 `[✔已下载]`。
+ * 上面那四颗的顺序**不动**（中字 → 破解 → ⭐已收藏演员 → ✔已入库），新徽标排在最后。
+ * 只在 `downloaded && !lib` 时画：已经在 Emby 库里的片子看「✔已入库」就够了，
+ * 两颗都画反而是同一件事说两遍（投放条件见模板里的注释）。
  */
 import Thumb from './Thumb.vue'
 
@@ -42,6 +47,13 @@ export interface CardMovie {
   id?: string
   /** 已在 Emby 库中时是对象 `{id,name,path,url}`，否则没有该字段。 */
   lib?: { id?: string; name?: string; path?: string; url?: string } | null
+  /**
+   * 番号在下载台账里且已完成下载（后端 `_movie()` 的 `downloaded`，契约 §5.2）。
+   *
+   * 与 `lib` 的区别：`lib` = 此刻 Emby 库里真有这部片；`downloaded` = 下载台账里记过这个番号，
+   * **文件可能已经被删**（台账不因文件消失而消失，这正是它存在的意义）。
+   */
+  downloaded?: boolean
 }
 
 const props = withDefaults(
@@ -86,6 +98,11 @@ const durationText = () => {
         <span v-if="movie.uncensored" class="avh-badge avh-badge--uc">破解</span>
         <span v-if="actorFavorited" class="avh-badge avh-badge--new">⭐已收藏演员</span>
         <span v-if="movie.lib" class="avh-badge avh-badge--lib">✔已入库</span>
+        <!--
+          「已下载」（契约 §5.2）：`downloaded && !lib` 才画 —— 在库的片子上面那颗已经说明白了，
+          重复标记只会让用户以为自己漏看了什么。徽标顺序：前四颗保持老实现原样，这颗排最末。
+        -->
+        <span v-if="movie.downloaded && !movie.lib" class="avh-badge avh-badge--dl">✔已下载</span>
       </div>
     </div>
     <div class="avh-card__meta">
@@ -175,6 +192,18 @@ const durationText = () => {
 
 .avh-badge--lib {
   background: rgba(var(--v-theme-primary), 0.85);
+}
+
+/*
+ * 「已下载」为什么**不复用** `--lib` 的 `primary`：
+ * 两颗徽标虽然互斥（`downloaded && !lib`），但说的是两件事 —— `primary` 那颗＝此刻真的在 Emby 库里，
+ * 这颗＝下载台账里记过（文件可能已删）。同色会让人扫一眼分不清看到的是哪一颗，
+ * 而"库里没有、但下载过"恰恰是最需要一眼认出来的情形（防重复下载）。
+ * 取 `info`：与 `primary` 同属冷色、明度接近，落在同一批卡片上既不抢眼又能区分；
+ * 其余四颗已占用 success / secondary / warning / primary，`info` 是唯一没被用掉的语义色。
+ */
+.avh-badge--dl {
+  background: rgba(var(--v-theme-info), 0.85);
 }
 
 .avh-card__meta {
