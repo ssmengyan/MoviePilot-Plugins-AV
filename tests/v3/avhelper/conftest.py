@@ -53,7 +53,26 @@ def _install_host_stubs() -> None:
             pass
 
     net.RequestUtils = _RequestUtils
+
+    class _SitesHelper:
+        """站点目录门面：`tasks.sites()` 才用它，队列单测走不到。"""
+
+        def get_indexers(self):
+            return []
+
+    net.SitesHelper = _SitesHelper
     sys.modules["app.sdk.network"] = net
+    cfg = types.ModuleType("app.sdk.config")
+
+    class _Settings:
+        """宿主 `settings` 的空壳：`tasks.py` 只在拼通知图址时用到 `MP_DOMAIN`。"""
+
+        @staticmethod
+        def MP_DOMAIN(url=""):
+            return ""
+
+    cfg.settings = _Settings()
+    sys.modules["app.sdk.config"] = cfg
 
 
 _install_host_stubs()
@@ -126,3 +145,9 @@ def client_mod():
 def paths_mod():
     """paths 模块（数据根 / javdb 二进制解析）。"""
     return _load("paths")
+
+
+@pytest.fixture(scope="session")
+def tasks_mod():
+    """tasks 模块（下载队列的进度合并与台账收尾）。"""
+    return _load("tasks")

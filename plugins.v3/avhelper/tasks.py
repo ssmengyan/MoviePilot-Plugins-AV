@@ -19,12 +19,13 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.sdk.config import settings
 from app.sdk.logging import logger
 from app.sdk.network import SitesHelper
 
+from . import emby
 from . import scoring
 from .ratelimit import is_antibot_error
 from .sitesearch import SiteSearcher
@@ -61,6 +62,15 @@ DEFAULT_CATEGORY = "avi"
 # 已完成的种子进度不会再变，没必要按秒核对；真正在下载的才需要勤刷。
 QUEUE_REFRESH_ACTIVE = 12      # 有未完成条目时：进度快照最多这么旧
 QUEUE_REFRESH_DONE = 300       # 只有已完成条目时：多久回下载器核对一次（防被删/重新校验）
+# 「这个 hash 在下载器里查不到了」要连续这么多轮才认账（2026-10-12 加，见 `_flush_gone`）。
+# 为什么要容忍：查询偶尔会抽风（下载器重启、模块把错误吞成空列表），凭一次失败就删掉一条
+# 正在下载的记录，比多留十几秒的假记录更糟。中途又查到就立刻清零，所以只有真没了才会累计。
+QUEUE_MISS_LIMIT = 2
+# 「下完了」的判据用宿主归一后的状态（`DownloadTaskState`：downloading / paused / completed），
+# **不是**进度数字 —— 同一个字段各家下载器给的口径不一样，见 `_percent()` 的说明。
+QUEUE_DONE_STATE = "completed"
+# 进度数字只作兜底：原生读数就是百分比口径时 ≥ 99.5 也算下完（状态万一没归一到 completed）。
+QUEUE_DONE_RAW = 99.5
 
 
 def merge_rule(rule: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -69,35 +79,6 @@ def merge_rule(rule: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if isinstance(rule, dict):
         merged.update({k: v for k, v in rule.items() if v is not None})
     return merged
-
-
-def _merge_queue(queue: List[Dict[str, Any]], by_hash: Dict[str, Any],
-                 thumbs: Dict[str, str]) -> List[Dict[str, Any]]:
-    """把补到的封面与下载器进度就地合并进队列。
-
-    `queue` 传进来的是**当前**数据（由 `Store.kv_update` 持锁取出），只按 id/hash 改命中项，
-    快照之外的条目一个都不动——被合并掉的那次丢记录就是这么来的。
-    """
-    for entry in queue:
-        tid = str(entry.get("id") or "")
-        if tid and tid in thumbs and thumbs[tid] != entry.get("thumb"):
-            entry["thumb"] = thumbs[tid]
-        torrent = by_hash.get(str(entry.get("hash") or "").lower())
-        if not torrent:
-            continue
-        try:
-            raw = float(getattr(torrent, "progress", 0) or 0)
-        except (TypeError, ValueError):
-            raw = 0.0
-        # 下载器返回的是 0-1 的小数（实测 0.4859 表示 0.49%），统一换算成百分比
-        percent = raw * 100 if raw <= 1 else raw
-        entry["progress"] = int(round(percent))
-        state = str(getattr(torrent, "state", "") or "").lower()
-        if entry["progress"] >= 100 or "upload" in state or "做种" in state:
-            entry["state"] = "done"
-        elif state:
-            entry["state"] = "down"
-    return queue[:50]
 
 
 # 台账的 size 列是字节，而队列/候选里的 size 是 `scoring.human_size()` 的展示文本（"1.2 GB"）
@@ -139,6 +120,8 @@ class TaskEngine:
                                      proxy=str(getattr(plugin, "_proxy", "") or ""))
         # 下载进度快照：两档时间戳（未完成 / 已完成）+ 单飞标记，见 `queue()`
         self._queue_at: Dict[str, float] = {"active": 0.0, "done": 0.0}
+        # 「这台下载器给的进度已经是百分比了」：按下载器名记住，见 `_percent()`
+        self._scales: Dict[str, bool] = {}
         self._queue_lock = threading.Lock()
         self._queue_busy = False
 
@@ -514,6 +497,69 @@ class TaskEngine:
         logger.info(f"AVHelper 取消待确认任务：{task.get('number')}（{tid}）")
         return {"ok": True, "message": f"已取消 {task.get('number') or ''} 的待确认任务"}
 
+    def _percent(self, raw: float, downloader: str) -> float:
+        """把下载器给的 `progress` 换算成百分比（0-100）。
+
+        **同一个字段，宿主各下载器模块给的口径不一样**（2026-10-12 读宿主源码核对）：
+
+        - qbittorrent：`progress=(torrent_data.get('progress') or 0) * 100` —— 已经是百分比；
+        - transmission：直接透传 `percent_done` —— 还是 0-1 的小数。
+
+        判据只能用读数本身：`> 1` 必然已是百分比，顺便把「这台下载器是百分比口径」记进
+        `self._scales`；`<= 1` 时按记下的口径走，没见过的下载器沿用旧行为（当小数 ×100）。
+        不这么认的话，qB 上真实的 0.5% 会被画成 50%，进度条一开始就乱跳。
+        插件重启后这份记忆会丢，但任何一条超过 1% 的读数都会立刻把它补回来。
+        """
+        name = str(downloader or "")
+        if raw > 1:
+            self._scales[name] = True
+            return min(100.0, max(0.0, raw))
+        if self._scales.get(name):
+            return min(100.0, max(0.0, raw))
+        return min(100.0, max(0.0, raw * 100))
+
+    def _merge_queue(self, queue: List[Dict[str, Any]], by_hash: Dict[str, Any],
+                     thumbs: Dict[str, str],
+                     missing: Optional[Set[str]] = None) -> List[Dict[str, Any]]:
+        """把补到的封面与下载器进度就地合并进队列。
+
+        `queue` 传进来的是**当前**数据（由 `Store.kv_update` 持锁取出），只按 id/hash 改命中项，
+        快照之外的条目一个都不动——被合并掉的那次丢记录就是这么来的。
+
+        :param missing: 本轮**确认**下载器里已经没有的 hash 集合（小写）。`None` = 本轮没问、
+            或者没问成，一个都不算缺失 —— 下载器连不上时绝不能把队列当成「全被删了」清空。
+            命中缺失的条目累加 `miss` 轮数（查到就清零），够 `QUEUE_MISS_LIMIT` 由
+            `_flush_gone` 收尾；用户手动在下载器里取消下载就是这么被发现的。
+        """
+        for entry in queue:
+            tid = str(entry.get("id") or "")
+            if tid and tid in thumbs and thumbs[tid] != entry.get("thumb"):
+                entry["thumb"] = thumbs[tid]
+            digest = str(entry.get("hash") or "").lower()
+            torrent = by_hash.get(digest) if digest else None
+            if not torrent:
+                # 已经 `done` 的条目不算缺失：下完的种子被清理掉是正常的，它们由 `_flush_done`
+                # 登记进台账后摘走，别在这里再记一笔「不见了」。
+                if (digest and missing and digest in missing
+                        and str(entry.get("state") or "") != "done"):
+                    entry["miss"] = int(entry.get("miss") or 0) + 1
+                continue
+            entry["miss"] = 0
+            name = str(getattr(torrent, "downloader", "") or entry.get("downloader") or "")
+            try:
+                raw = float(getattr(torrent, "progress", 0) or 0)
+            except (TypeError, ValueError):
+                raw = 0.0
+            entry["progress"] = int(round(self._percent(raw, name)))
+            state = str(getattr(torrent, "state", "") or "").lower()
+            # 状态是主判据；`upload`/`做种` 与进度数字都是给「宿主没把状态归一好」留的兜底
+            if (state == QUEUE_DONE_STATE or "upload" in state or "做种" in state
+                    or raw >= QUEUE_DONE_RAW):
+                entry["state"] = "done"
+            elif state:
+                entry["state"] = "down"
+        return queue[:50]
+
     def queue(self, fresh: bool = False) -> List[Dict[str, Any]]:
         """返回下载队列（顺带补番号封面），并**按需**从下载器刷新真实进度。
 
@@ -534,6 +580,11 @@ class TaskEngine:
         返回前会把已完成的条目登记进台账并从队列里摘掉（见 `_flush_done`，设计文档 §3）：
         历史归台账、队列只留下载中，下载页不再为完成项画进度条，也免得每轮都拿一堆
         已完成的 hash 去问下载器。
+
+        还有一类条目同样不该留在队列里：**下载器里已经没有它了**（用户手动取消了下载、
+        或在下载器里删了任务）。合并只认「查到的 hash」，查不到就什么都不改，于是那条会
+        永远停在最后一次读到的进度上，界面上挂着一条假的「下载中 0%」，刷新多少次都一样。
+        `_merge_queue` 累计「连续查不到」的轮数，够 `QUEUE_MISS_LIMIT` 就交给 `_flush_gone`。
         """
         queue = self.store.kv_get(QUEUE_KEY, []) or []
         thumbs: Dict[str, str] = {}
@@ -545,8 +596,12 @@ class TaskEngine:
         done = [str(q.get("hash")) for q in queue
                 if q.get("hash") and str(q.get("state") or "") == "done"]
         by_hash: Dict[str, Any] = {}
+        missing: Optional[Set[str]] = None
         if fresh:
-            by_hash = self._query_torrents(active + done)
+            by_hash, ok = self._query_torrents(active + done)
+            if ok:
+                # 问到的那些是「还在」，其余的才算「没了」——问失败时 `missing` 保持 None
+                missing = {h.lower() for h in (active + done)} - set(by_hash)
             if active:
                 self._queue_at["active"] = time.time()
             if done:
@@ -554,10 +609,11 @@ class TaskEngine:
         else:
             self._kick_refresh(active, done)
 
-        if thumbs or by_hash:
+        if by_hash or thumbs or missing:
             queue = self.store.kv_update(
-                QUEUE_KEY, lambda cur: _merge_queue(cur or [], by_hash, thumbs))
-        return self._flush_done(queue)
+                QUEUE_KEY,
+                lambda cur: self._merge_queue(cur or [], by_hash, thumbs, missing))
+        return self._flush_gone(self._flush_done(queue))
 
     def _flush_done(self, queue: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """把已完成的条目登记进台账并从队列摘掉，返回摘完的队列（设计文档 §3）。
@@ -600,6 +656,77 @@ class TaskEngine:
             return self.store.kv_update(QUEUE_KEY, keep)
         except Exception as error:
             logger.error(f"AVHelper 从队列移除已完成条目失败：{error}")
+            return queue
+
+    def _flush_gone(self, queue: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """把「下载器里已经没有」的条目从队列摘掉，返回摘完的队列。
+
+        谁会走到这里见 `_merge_queue`：连续 `QUEUE_MISS_LIMIT` 轮问下载器都查不到这个 hash
+        （用户手动在下载器里取消下载、或在下载器里删了任务）。摘除沿用 `_flush_done` 那套
+        指纹口径，期间新插入的条目不受影响。
+
+        台账那一侧**只做加法，绝不抹记录**：
+
+        - Emby 库里已经有这个番号 → 那是「下完了才把种子清理掉」，按已完成补记
+          （`_flush_done` 的口径），「已下载」徽标与该有的提示照旧；
+        - 不在库里 → 这次没下成，台账里那条（提交下载时写的 `state='downloading'`）
+          **原样留着**：它不算「已下载」、也不触发重复下载提示，只是历史页里多一行
+          「不在库（可能已删除）」的记录。反过来把记录撤掉（墓碑）看着更干净，但 Emby
+          索引在媒体库不通时只会回空字典 —— 那时「不在库」并不等于「没下成」，撤掉一条
+          真下好的记录比留一行噪音糟得多。
+
+        一句话：**队列按事实说话（没了就摘），台账只往上补、不往下删。**
+        """
+        gone = [e for e in (queue or []) if isinstance(e, dict)
+                and str(e.get("state") or "") != "done"
+                and int(e.get("miss") or 0) >= QUEUE_MISS_LIMIT]
+        if not gone:
+            return queue
+
+        try:
+            library = self.plugin.emby().index() or {}
+        except Exception as error:      # `index()` 自己不会抛，这里兜住配置异常之类
+            logger.error(f"AVHelper 核对 Emby 索引失败（这次只摘队列）：{error}")
+            library = {}
+
+        for entry in gone:
+            number = str(entry.get("number") or "")
+            digest = str(entry.get("hash") or "")
+            key = emby.norm_key(number) if number else ""
+            if not key or key not in library:
+                logger.info(f"AVHelper 下载已不在下载器，从队列摘掉：{number or digest}")
+                self.notifier.info(
+                    "下载已从下载器移除",
+                    f"{number or digest} 在下载器里已经找不到了，已从「下载中」移除",
+                )
+                continue
+            if self._ledger_upsert(
+                number,
+                title=str(entry.get("title") or ""),
+                thumb=self._ledger_thumb(entry.get("thumb")),
+                size=_size_bytes(entry.get("size")),
+                hash=digest,
+                path=str(entry.get("savePath") or ""),
+                downloader=str(entry.get("downloader") or ""),
+                state="downloaded",
+                created_at=str(entry.get("added") or ""),   # 只在首次写入时生效
+            ):
+                logger.info(f"AVHelper 种子已不在下载器但 Emby 已有：{number} 按已完成登记")
+                self.notifier.info("下载已完成",
+                                   f"{number} 的种子已不在下载器里，Emby 库里已有，"
+                                   "按已完成记入「下载历史」")
+
+        removed = {_queue_fingerprint(entry) for entry in gone}
+
+        def keep(cur: Any) -> List[Dict[str, Any]]:
+            """就地摘掉这些条目；其余条目与顺序原样保留（期间新插入的不能丢）。"""
+            return [item for item in (cur or [])
+                    if not (isinstance(item, dict) and _queue_fingerprint(item) in removed)]
+
+        try:
+            return self.store.kv_update(QUEUE_KEY, keep)
+        except Exception as error:
+            logger.error(f"AVHelper 从队列移除已在下载器消失的条目失败：{error}")
             return queue
 
     # ---------- 下载台账 ----------
@@ -677,21 +804,40 @@ class TaskEngine:
             logger.error(f"AVHelper 写下载台账失败（{number}）：{error}")
             return False
 
-    def _query_torrents(self, hashes: List[str]) -> Dict[str, Any]:
-        """问一次下载器，返回 `hash → 种子对象`；失败只记日志（不抛、不影响队列渲染）。"""
-        if not hashes:
-            return {}
+    def _list_torrents(self, hashes: List[str]) -> List[Any]:
+        """按 hash 点名问宿主下载器（`include_all_tags=True`，老宿主不认这个参数就退回）。
+
+        为什么要那个参数：默认只查带宿主内置标签（`TORRENT_TAG`，默认 `MoviePilot`）的任务，
+        种子一旦被别的工具摘掉标签，这里就「查不到」—— 而查不到会被当成「已从下载器移除」
+        （见 `_merge_queue` / `_flush_gone`）。按 hash 点名本来就不需要标签过滤。
+        """
+        chain = self.plugin.chain
         try:
-            torrents = self.plugin.chain.list_torrents(hashs=hashes) or []
+            return chain.list_torrents(hashs=hashes, include_all_tags=True)
+        except TypeError:                   # 宿主版本没有这个形参
+            return chain.list_torrents(hashs=hashes)
+
+    def _query_torrents(self, hashes: List[str]) -> Tuple[Dict[str, Any], bool]:
+        """问一次下载器，返回 `(hash → 种子对象, 这一轮问成了没有)`。
+
+        第二个返回值就是「本轮结果可不可信」：只有可信时，调用方才会把「查不到的 hash」
+        当成「下载器里真的没有」（`missing`）。异常、没有下载器可问、宿主不认参数等等一律
+        按不可信处理 —— 宁可这一轮什么都不判，也不能凭一次失败把下载中的记录全摘掉。
+        失败只记日志（不抛、不影响队列渲染）。
+        """
+        if not hashes:
+            return {}, False
+        try:
+            torrents = self._list_torrents(list(hashes)) or []
         except Exception as error:
             logger.error(f"AVHelper 刷新下载进度失败：{error}")
-            return {}
+            return {}, False
         by_hash: Dict[str, Any] = {}
         for item in torrents:
             h = str(getattr(item, "hash", "") or getattr(item, "hashString", "") or "").lower()
             if h:
                 by_hash[h] = item
-        return by_hash
+        return by_hash, True
 
     def _kick_refresh(self, active: List[str], done: List[str]) -> None:
         """到点了就在后台补一次进度（守护线程 + 单飞），请求本身不等它。"""
@@ -708,14 +854,18 @@ class TaskEngine:
 
         def worker() -> None:
             try:
-                by_hash = self._query_torrents(hashes)
+                by_hash, ok = self._query_torrents(hashes)
                 if need_active:
                     self._queue_at["active"] = time.time()
                 if need_done:
                     self._queue_at["done"] = time.time()
-                if by_hash:
+                # 同步那条路（`queue(fresh=True)`）也是同样的算法，两边不能各算一套
+                missing = ({h.lower() for h in hashes} - set(by_hash)) if ok else None
+                if by_hash or missing:
                     # 只并进度，不动封面：封面那条线上一次请求已经写过了
-                    self.store.kv_update(QUEUE_KEY, lambda cur: _merge_queue(cur or [], by_hash, {}))
+                    self.store.kv_update(
+                        QUEUE_KEY,
+                        lambda cur: self._merge_queue(cur or [], by_hash, {}, missing))
             except Exception as error:         # 后台线程里的异常绝不能漏出去
                 logger.error(f"AVHelper 后台刷新下载进度失败：{error}")
             finally:

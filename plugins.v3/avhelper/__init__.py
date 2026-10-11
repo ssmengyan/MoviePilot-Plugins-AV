@@ -154,9 +154,8 @@ class AVHelper(_PluginBase):
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
     plugin_icon = ("https://raw.githubusercontent.com/ssmengyan/"
                    "MoviePilot-Plugins-AV/main/icons/avhelper.png")
-    # 版本：本分支的 0.5.0 覆盖 main 的 0.4.1（0.4.1 的站点换票修复已随本轮合并进来，
-    # 两条 changelog 都留在 package.v3.json 的 history 里）
-    plugin_version = "0.5.0"
+    # 版本：0.5.1 是 0.5.0 的补丁（在下载器里取消下载后队列那条假记录不消失）
+    plugin_version = "0.5.1"
     plugin_label = "发现"
     plugin_author = "ssmengyan"
     plugin_config_prefix = "avhelper_"
