@@ -26,6 +26,25 @@ class TestDisplayNumber:
         assert emby_mod.display_number("") == ""
 
 
+class TestShownNumber:
+    """展示番号：优先用 Name 里的原始写法（保住前导零），对不上才退回从键反推。"""
+
+    def test_keeps_leading_zero_from_name(self, emby_mod):
+        """`norm_key` 抹了前导零（CAWB040 → CAWB40），从键反推会显示成 CAWB-40（真机 31/109 条）。"""
+        assert emby_mod.display_number("CAWB40") == "CAWB-40"       # 老规则的样子
+        assert emby_mod.shown_number("CAWB40", "CAWB-040") == "CAWB-040"
+        assert emby_mod.shown_number("MNGS70", "MNGS-070 在男士美容院…") == "MNGS-070"
+
+    def test_falls_back_when_name_disagrees(self, emby_mod):
+        """Name 开头的番号与键归一化后**不相等**就不采信（宁可显示得怪，也不猜成另一部片）。"""
+        assert emby_mod.shown_number("MIRD277C", "MIRD-277 MOODYZ 粉丝感恩节") == "MIRD277C"
+        assert emby_mod.shown_number("IPZZ961", "完全不是番号的一段中文标题") == "IPZZ-961"
+
+    def test_plain_name_is_harmless(self, emby_mod):
+        assert emby_mod.shown_number("IPZZ961", "") == "IPZZ-961"
+        assert emby_mod.shown_number("IPZZ961", "IPZZ-961 某部片") == "IPZZ-961"
+
+
 class TestKeyRank:
     """同一部片多个键时挑哪个（小者优先）。"""
 
@@ -119,8 +138,24 @@ class TestLibraryRows:
         assert row["cover"] == "" and row["cnsub"] is False and row["uncensored"] is False
 
     def test_thumb_lookup_falls_back_to_normalised_key(self, emby_mod):
-        """封面索引两种写法都要认：javdb 口径 `IPZZ-961` 与 Emby 归一化键 `IPZZ961`。"""
+        """封面索引三种写法都认：Name 原始番号 / 从键反推的展示番号 / 归一化键本身。"""
         assert emby_mod.library_rows(self.INDEX, {"IPZZ961": "/img?url=y"})[0]["thumb"] == "/img?url=y"
+        assert emby_mod.library_rows(self.INDEX, {"IPZZ-961": "/img?url=z"})[0]["thumb"] == "/img?url=z"
+
+    def test_thumb_lookup_prefers_name_spelling(self, emby_mod):
+        """Name 写法（`CAWB-040`，与本地 javdb 索引同口径）优先，命中率最高。"""
+        index = {"CAWB40": {"id": "9", "name": "CAWB-040 某部片", "path": "/x.mp4", "url": "u"}}
+        row = emby_mod.library_rows(index, {"CAWB-040": "/img?a", "CAWB40": "/img?b"})[0]
+        assert row["thumb"] == "/img?a"
+
+    def test_actor_lookup_same_three_forms(self, emby_mod):
+        index = {"CAWB40": {"id": "9", "name": "CAWB-040 某部片", "path": "/x.mp4", "url": "u"}}
+        assert emby_mod.library_rows(index, None, {"CAWB-040": "演员甲"})[0]["actor"] == "演员甲"
+
+    def test_number_uses_name_spelling(self, emby_mod):
+        """展示番号走 `shown_number()`：Name 里写 `CAWB-040` 时就显示 `CAWB-040`（不是 `CAWB-40`）。"""
+        index = {"CAWB40": {"id": "9", "name": "CAWB-040 某部片", "path": "/x.mp4", "url": "u"}}
+        assert emby_mod.library_rows(index)[0]["number"] == "CAWB-040"
 
     def test_empty_index(self, emby_mod):
         assert emby_mod.library_rows({}) == []

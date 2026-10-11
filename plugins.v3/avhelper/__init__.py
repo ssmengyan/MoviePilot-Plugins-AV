@@ -1107,13 +1107,14 @@ class AVHelper(_PluginBase):
             logger.error(f"AVHelper 读取 Emby 索引失败（已入库列表）：{error}")
             return []
         # 封面：本地「番号 → 封面原图」索引 + 7 天详情缓存，**不发网络请求**（`thumbs_of` 的纪律）。
-        # javdb 口径的键是 `IPZZ-961`，而 Emby 索引给的是归一化键 `IPZZ961`，两种都试一遍。
+        # 三种写法都试：Name 里的原始番号（`CAWB-040`，最可能与本地索引的 javdb 口径一致）、
+        # 从键反推的展示番号、以及归一化键本身（`IPZZ961` 这种无连字符写法）。
         wanted: List[str] = []
         for key in emby.best_keys(index).values():
-            shown = emby.display_number(key)
-            wanted.append(shown)
-            if key != shown:
-                wanted.append(key)
+            entry = index.get(key) or {}
+            wanted.append(emby.shown_number(key, entry.get("name")))
+            wanted.append(emby.display_number(key))
+            wanted.append(key)
         try:
             thumbs = self.thumbs_of(wanted)
         except Exception as error:

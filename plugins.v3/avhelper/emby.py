@@ -78,6 +78,24 @@ def display_number(key: Any) -> str:
     return str(key or "")
 
 
+def shown_number(key: Any, name: Any = "") -> str:
+    """展示番号：**优先用库条目 Name 开头那一段原始写法**，退回 `display_number(key)`。
+
+    为什么需要它：`norm_key()` 会抹掉数字段的前导零（`CAWB-040` → `CAWB40`），从键反推展示番号
+    就成了 `CAWB-40` —— 与用户在 Emby / javdb 上看到的写法对不上（真机 109 条里 31 条如此）。
+    Emby 条目的 `Name` 是 MetaTube 刮削写进去的原始番号写法，最权威。
+
+    但只用它与键**归一化后相等**的那一种（`norm_key(lead) == key`）：对不上宁可按老规则显示，
+    也不猜 —— 猜错会让人以为这是另一部片（`display_number()` 的注释里说过同一条纪律）。
+    """
+    lead = _LEAD.match(str(name or ""))
+    if lead:
+        candidate = lead.group(1).strip()
+        if candidate and norm_key(candidate) == str(key or ""):
+            return candidate
+    return display_number(key)
+
+
 def key_rank(key: str) -> Tuple[int, int, str]:
     """归一化番号键的「干净程度」排序键（小者优先），用于给一部片挑主键。
 
@@ -119,9 +137,10 @@ def library_rows(index: Dict[str, Dict[str, Any]],
 
     - 一部片一行：先按条目 id 归并（`best_keys()`），否则同一部片会按刮削 id / 文件名 / 标题
       列成好几行（本机实测按键展开 148 个 vs 库里 109 条）；
-    - `number` 是 `display_number(主键)`；`title` / `path` / `url` 取 Emby 条目的 Name/Path/URL；
+    - `number` 是 `shown_number(主键, Name)`（优先用 Name 里的原始番号写法，见它的说明）；
+      `title` / `path` / `url` 取 Emby 条目的 Name/Path/URL；
     - `thumb` / `actor` 由调用方从**本地索引**查好传进来（`thumbs` / `actors` 的键允许同时给
-      「展示番号」与「归一化键」两种写法，两个都试）—— 这里不发网络请求，也不读缓存文件；
+      「展示番号」「Name 里的原始番号」「归一化键」几种写法，几个都试）—— 这里不发网络请求，也不读缓存文件；
     - `id` 故意留空：契约里 `movie.id` 是 **javdb 内部 id**（详情抽屉回传给 `/detail` 省一次解析），
       这里手上只有 Emby 的条目 id，塞进去会让 `/detail` 去 javdb 找一个不存在的 id；
     - `addedAt` 是入库时间（Emby 的 `DateCreated` → 本地时间写法），解析不出来是空串，
@@ -132,14 +151,24 @@ def library_rows(index: Dict[str, Dict[str, Any]],
     rows: List[Dict[str, Any]] = []
     for item_id, key in best_keys(index).items():
         entry = index.get(key) or {}
-        shown = display_number(key)
+        shown = shown_number(key, entry.get("name"))
+        fallback = display_number(key)
+
+        def pick(table: Dict[str, str]) -> str:
+            """三种写法依次试：Name 原始番号 → 从键反推的展示番号 → 归一化键。"""
+            for candidate in (shown, fallback, key):
+                hit = str(table.get(candidate) or "")
+                if hit:
+                    return hit
+            return ""
+
         rows.append({
             "number": shown,
             "title": str(entry.get("name") or ""),
             # 库列表里没有 javdb 的发行日 / 时长 / 磁力（那要先抓一遍详情），一律留空，
             # 由卡片按"库卡片"的样子渲染（`NumCard` 的 `mode="library"`）。
             "cover": "",
-            "thumb": str(thumbs.get(shown) or thumbs.get(key) or ""),
+            "thumb": pick(thumbs),
             "date": "",
             "duration": 0,
             "cnsub": False,
@@ -147,7 +176,7 @@ def library_rows(index: Dict[str, Dict[str, Any]],
             "magnets": 0,
             "maker": "",
             "score": "",
-            "actor": str(actors.get(shown) or actors.get(key) or ""),
+            "actor": pick(actors),
             "actor_avatar": "",
             "id": "",
             "lib": {
