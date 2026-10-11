@@ -53,7 +53,8 @@ export interface HostConfigDraft {
   proxy: string
   /** javdb 二进制路径；留空 = 自动下载 / 自动查找（见插件 `paths.py`）。 */
   javdb_bin: string
-  /** 数据根（SQLite / JSON 缓存 / 图片缓存同根）；留空 = 插件数据目录下的 `cache`。 */
+  /** 数据根（SQLite / JSON 缓存 / 图片缓存同根）；留空 = MoviePilot 插件数据目录
+   *  `<PLUGIN_DATA_PATH>/AVHelper`（默认 `/config/plugins/AVHelper`）。 */
   data_root: string
   emby_host: string
   emby_apikey: string

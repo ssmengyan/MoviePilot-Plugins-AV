@@ -395,7 +395,7 @@ class AVHelper(_PluginBase):
                             {"component": "VCol", "props": {"cols": 12, "md": 6},
                              "content": [{"component": "VTextField",
                                           "props": {"model": "data_root", "label": "数据目录（可留空）",
-                                                    "placeholder": "留空 = 插件数据目录下的 cache"}}]},
+                                                    "placeholder": "留空 = MP 插件数据目录（/config/plugins/AVHelper）"}}]},
                         ],
                     },
                     {

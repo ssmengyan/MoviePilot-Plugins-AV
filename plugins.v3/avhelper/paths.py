@@ -5,8 +5,9 @@
 「插件配置 → 历史固定路径（老部署原地不动）→ 通用回落」：
 
 - **数据根**：配置 `data_root` → 存在 `/avhelper` 卷时用 `/avhelper/cache` →
-  MoviePilot 的插件数据目录 `<PLUGIN_DATA_PATH>/AVHelper/cache`。SQLite 台账、JSON 缓存、
-  图片缓存同根，容量淘汰也按这个根扫描。
+  MoviePilot 的插件数据目录 `<PLUGIN_DATA_PATH>/AVHelper`（默认 `/config/plugins/AVHelper`，
+  其下 `meta/` 放 SQLite 与 JSON 缓存、`images/` 放图片缓存、`bin/` 放 javdb）。
+  SQLite 台账、JSON 缓存、图片缓存同根，容量淘汰也按这个根扫描。
 - **javdb 二进制**：配置 `javdb_bin` → `/avhelper/bin/javdb` → `PATH` 上的 `javdb` →
   数据根下的 `bin/javdb`（缺文件时由 `ensure_javdb()` 自动从官方 Release 下载）。
 

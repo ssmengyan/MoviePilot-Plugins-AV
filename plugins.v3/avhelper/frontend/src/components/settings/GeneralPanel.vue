@@ -79,7 +79,7 @@ function patch<K extends keyof HostConfigDraft>(key: K, value: HostConfigDraft[K
       <v-text-field
         :model-value="props.config.data_root"
         label="数据目录"
-        placeholder="留空 = 插件数据目录下的 cache"
+        placeholder="留空 = MP 插件数据目录（/config/plugins/AVHelper）"
         hint="SQLite 台账、JSON 缓存与图片缓存同根。改这里等于换一套数据，旧数据不会自动搬过去。"
         persistent-hint
         variant="outlined"

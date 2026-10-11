@@ -123,7 +123,7 @@
 
 1. **代理地址**：内地网络填写你的 HTTP 代理（如 `http://192.0.2.2:7890`），否则留空；
 2. **javdb 路径**：留空即可（插件会自动下载）。若自动下载失败，手工放一份再填绝对路径；
-3. **数据目录**：留空即可（默认落在 MoviePilot 的插件数据目录下）；
+3. **数据目录**：留空即可（默认 `/config/plugins/AVHelper`，见下方「路径解析顺序」）；
 4. **Emby 地址 / API 密钥**：留空即可（默认复用 MoviePilot「设置 → 媒体服务器」里的 Emby）；
 5. 保存。
 
@@ -140,13 +140,17 @@
 | `enabled` | 是否启用插件。关闭后定时订阅检查不执行，界面仍可浏览 | 关 |
 | `proxy` | javdb 子进程与部分站点请求使用的 HTTP 代理；留空 = 直连 | 空 |
 | `javdb_bin` | javdb 可执行文件路径；留空 = 自动下载 / 自动查找 | 空 |
-| `data_root` | 数据根（SQLite 台账、JSON 缓存、图片缓存同根）；留空 = 插件数据目录下的 `cache` | 空 |
+| `data_root` | 数据根（SQLite 台账、JSON 缓存、图片缓存同根）；留空 = MoviePilot 插件数据目录（默认 `/config/plugins/AVHelper`） | 空 |
 | `emby_host` / `emby_apikey` | 单独指定 Emby；两项都留空 = 复用 MoviePilot 的媒体服务器配置 | 空 |
 
 **路径解析顺序**（见 `plugins.v3/avhelper/paths.py`）：
 
 - 数据根：`data_root` 配置 → 存在 `/avhelper` 挂载卷时用 `/avhelper/cache` → MoviePilot 插件数据目录；
 - javdb：`javdb_bin` 配置 → `/avhelper/bin/javdb` → `PATH` 上的 `javdb` → `<数据根>/bin/javdb`。
+
+> 两项都留空时，数据根 = MoviePilot 插件数据目录 `<PLUGIN_DATA_PATH>/AVHelper`，默认即
+> `/config/plugins/AVHelper`（`/config` 是宿主 compose 里本来就映射的卷，所以**不需要额外挂载**就能持久化）。
+> 目录里 `meta/` 放 SQLite 台账与 JSON 缓存、`images/` 放图片缓存、`bin/` 放自动下载的 javdb。
 
 ## 使用
 
@@ -220,8 +224,9 @@ A：这是刻意的限流保护（每天 ≤ 6 次、间隔 ≥ 240 分钟、站
 避免把站点打到风控。需要立刻检查时，可以在订阅栏点「检查一次」。
 
 **Q：卸载插件会删掉我的订阅和台账吗？**
-A：不会自动删。数据都在数据根目录下（默认是 MoviePilot 插件数据目录里的 `AVHelper/cache`），
-卸载插件不会清空该目录，需要你自己删。
+A：卸载本身不会删。数据都在数据根目录下（默认 MoviePilot 插件数据目录 `<PLUGIN_DATA_PATH>/AVHelper`，
+即 `/config/plugins/AVHelper`），需要你自己删。注意宿主 v3 的「彻底清理实例」是另一回事：那里勾上
+**数据目录** 会把台账连缓存一起删掉，只想清配置就别勾它。
 
 ## 二次开发
 
