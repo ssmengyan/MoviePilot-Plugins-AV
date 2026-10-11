@@ -280,10 +280,12 @@ onBeforeUnmount(() => {
         >{{ item.name }}<template v-if="item.key === 'active'">（{{ activeRows.length }}）</template></button>
       </div>
 
-      <!-- 那句"进度取自下载器"只对「下载中」成立，看历史时换成台账的口径 -->
-      <span class="avh-downloads__hint">
-        {{ tab === 'active' ? '进度取自下载器，每 5 秒自动刷新' : '本插件下载过的番号，文件删了也留着记录' }}
-      </span>
+      <!--
+        那句"进度取自下载器"只对「下载中」成立：看历史时**整句不画**。
+        历史页签自己有同一口径的说明（`HistoryView` 的工具条那句），外面再来一句一模一样的
+        就是同一句话在一屏里说两遍 —— 真机上看着就像出了 bug（0.5.0 真机验收发现）。
+      -->
+      <span v-if="tab === 'active'" class="avh-downloads__hint">进度取自下载器，每 5 秒自动刷新</span>
 
       <div class="avh-downloads__spacer" />
 

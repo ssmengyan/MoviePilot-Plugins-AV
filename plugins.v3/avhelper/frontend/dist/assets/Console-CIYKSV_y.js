@@ -3362,7 +3362,10 @@ const _hoisted_1$c = { class: "avh-downloads" };
 const _hoisted_2$c = { class: "avh-downloads__toolbar" };
 const _hoisted_3$b = { class: "avh-tabs" };
 const _hoisted_4$a = ["onClick"];
-const _hoisted_5$a = { class: "avh-downloads__hint" };
+const _hoisted_5$a = {
+  key: 0,
+  class: "avh-downloads__hint"
+};
 const _hoisted_6$9 = { class: "avh-downloads__secttl" };
 const _hoisted_7$8 = { class: "avh-q__hd" };
 const _hoisted_8$7 = { class: "avh-q__main" };
@@ -3508,10 +3511,10 @@ const _sfc_main$c = /* @__PURE__ */ _defineComponent$c({
               ], 10, _hoisted_4$a);
             }), 64))
           ]),
-          _createElementVNode$c("span", _hoisted_5$a, _toDisplayString$c(tab.value === "active" ? "进度取自下载器，每 5 秒自动刷新" : "本插件下载过的番号，文件删了也留着记录"), 1),
+          tab.value === "active" ? (_openBlock$c(), _createElementBlock$c("span", _hoisted_5$a, "进度取自下载器，每 5 秒自动刷新")) : _createCommentVNode$a("", true),
           _cache[1] || (_cache[1] = _createElementVNode$c("div", { class: "avh-downloads__spacer" }, null, -1)),
           tab.value === "active" ? (_openBlock$c(), _createBlock$a(_component_v_btn, {
-            key: 0,
+            key: 1,
             variant: "outlined",
             size: "small",
             onClick: refreshQueue
@@ -3602,7 +3605,7 @@ const _sfc_main$c = /* @__PURE__ */ _defineComponent$c({
   }
 });
 
-const DownloadsView = /* @__PURE__ */ _export_sfc(_sfc_main$c, [["__scopeId", "data-v-0813078e"]]);
+const DownloadsView = /* @__PURE__ */ _export_sfc(_sfc_main$c, [["__scopeId", "data-v-822f5d06"]]);
 
 const {defineComponent:_defineComponent$b} = await importShared('vue');
 

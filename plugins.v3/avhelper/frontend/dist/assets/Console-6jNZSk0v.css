@@ -577,24 +577,24 @@
 }
 
 /* 对齐 `app.css` 的 `.toolbar` / `.hint` / `.spacer` */
-.avh-downloads__toolbar[data-v-0813078e] {
+.avh-downloads__toolbar[data-v-822f5d06] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 14px;
 }
-.avh-downloads__hint[data-v-0813078e] {
+.avh-downloads__hint[data-v-822f5d06] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-downloads__spacer[data-v-0813078e] {
+.avh-downloads__spacer[data-v-822f5d06] {
   flex: 1;
 }
 
 /* 页签：与发现榜单那组 tabs 同一套几何（胶囊容器 + 选中那颗走主色，写法照 `DiscoverView`）。
    两份 scoped CSS 各有各的作用域，抄这一小段比抽公共件划算（本项目的既有做法）。 */
-.avh-tabs[data-v-0813078e] {
+.avh-tabs[data-v-822f5d06] {
   display: flex;
   gap: 4px;
   padding: 3px;
@@ -602,7 +602,7 @@
   border-radius: 8px;
   background: rgba(var(--v-theme-on-surface), 0.04);
 }
-.avh-tabs button[data-v-0813078e] {
+.avh-tabs button[data-v-822f5d06] {
   padding: 4px 12px;
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
@@ -611,13 +611,13 @@
   border-radius: 6px;
   cursor: pointer;
 }
-.avh-tabs__on[data-v-0813078e] {
+.avh-tabs__on[data-v-822f5d06] {
   color: rgb(var(--v-theme-on-primary)) !important;
   background: rgb(var(--v-theme-primary)) !important;
 }
 
 /* 对齐 `app.css` 的 `.secttl`：12px、弱化色、字距 .4px（与 `TasksView` 的小标题同一套口径） */
-.avh-downloads__secttl[data-v-0813078e] {
+.avh-downloads__secttl[data-v-822f5d06] {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -628,13 +628,13 @@
 }
 
 /* 小节标题右侧那句指路（契约 §5.3）：靠右、不参与标题的字距，免得挤成标题的一部分 */
-.avh-downloads__secttl-note[data-v-0813078e] {
+.avh-downloads__secttl-note[data-v-822f5d06] {
   margin-left: auto;
   letter-spacing: 0;
 }
 
 /* 对齐 `.q`：卡片底色 + 描边 + 10px 圆角 */
-.avh-q[data-v-0813078e] {
+.avh-q[data-v-822f5d06] {
   padding: 12px;
   margin-bottom: 10px;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
@@ -643,7 +643,7 @@
 }
 
 /* 对齐 `.qhd` */
-.avh-q__hd[data-v-0813078e] {
+.avh-q__hd[data-v-822f5d06] {
   display: flex;
   align-items: flex-start;
   gap: 12px;
@@ -651,7 +651,7 @@
 }
 
 /* 对齐 `.tposter`：48×64 小封面 */
-.avh-q__poster[data-v-0813078e] {
+.avh-q__poster[data-v-822f5d06] {
   width: 48px;
   height: 64px;
   flex: none;
@@ -660,29 +660,29 @@
 }
 
 /* 老实现的内联 `flex:1;min-width:0` */
-.avh-q__main[data-v-0813078e] {
+.avh-q__main[data-v-822f5d06] {
   flex: 1;
   min-width: 0;
 }
 
 /* 对齐 `.qhd .qn` */
-.avh-q__no[data-v-0813078e] {
+.avh-q__no[data-v-822f5d06] {
   font-size: 14px;
   font-weight: 600;
 }
-.avh-q__hint[data-v-0813078e] {
+.avh-q__hint[data-v-822f5d06] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-q__meta[data-v-0813078e] {
+.avh-q__meta[data-v-822f5d06] {
   margin-top: 3px;
 }
-.avh-q__path[data-v-0813078e] {
+.avh-q__path[data-v-822f5d06] {
   margin-top: 2px;
 }
 
 /* 完成行的片名（台账可选字段，见 `DoneRow` 注释）：比 `.hint` 稍亮一档，读起来像"一行记录" */
-.avh-q__ttl[data-v-0813078e] {
+.avh-q__ttl[data-v-822f5d06] {
   margin-top: 3px;
   font-size: 12.5px;
   line-height: 1.5;
@@ -692,12 +692,12 @@
 /*
  * 完成行没有进度条，`.avh-q__hd` 那 8px 的"给进度条留的"下边距就变成了行尾的空档，收掉。
  */
-.avh-q--done .avh-q__hd[data-v-0813078e] {
+.avh-q--done .avh-q__hd[data-v-822f5d06] {
   margin-bottom: 0;
 }
 
 /* 对齐 `.qhd .right` */
-.avh-q__right[data-v-0813078e] {
+.avh-q__right[data-v-822f5d06] {
   margin-left: auto;
   text-align: right;
   white-space: nowrap;
@@ -706,13 +706,13 @@
 /* 对齐 `.bar` / `.bar i`（老实现是 --acc2 → --acc 的渐变）
    只有「下载中」那一节画进度条：完成行是静态历史行，契约 §5.3 明确要去掉进度，
    所以老实现的 `.bar.done i` 换绿那条规则已随之下线（没有使用者了）。 */
-.avh-bar[data-v-0813078e] {
+.avh-bar[data-v-822f5d06] {
   height: 7px;
   border-radius: 99px;
   overflow: hidden;
   background: rgba(var(--v-theme-on-surface), 0.12);
 }
-.avh-bar i[data-v-0813078e] {
+.avh-bar i[data-v-822f5d06] {
   display: block;
   width: 0;
   height: 100%;
