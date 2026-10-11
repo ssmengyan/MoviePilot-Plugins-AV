@@ -78,11 +78,22 @@ export function useRuntimeInfo(api: PluginApi) {
     queue: Array.isArray(data.value?.queue) ? data.value?.queue ?? [] : [],
   }))
 
-  async function refresh(): Promise<void> {
+  /**
+   * 拉一次 `/bootstrap`。
+   *
+   * `fresh = true` 是**手动刷新**（右栏「刷新」、各视图的 `refresh-side`、运行与缓存栏的刷新）：
+   * 带上 `?fresh=1` 让后端同步问一次下载器，下载进度立刻是新的（代价约 0.6 秒）。
+   * 15 秒轮询与首屏**不带**它：后端回本地快照 + 后台补刷，首屏不被下载器拖慢
+   * （`TaskEngine.queue()` 里的两档年龄说明）。
+   */
+  async function refresh(fresh = false): Promise<void> {
     if (loading.value) return
     loading.value = true
     try {
-      const res: any = await api.get('plugin/bootstrap')
+      const res: any = await api.get(
+        'plugin/bootstrap',
+        fresh ? { params: { fresh: 1 } } : undefined,
+      )
       // 兼容两种返回：完整信封 / 已拆包的裸数据。
       const payload: BootstrapData =
         res && typeof res === 'object' && 'data' in res && 'success' in res

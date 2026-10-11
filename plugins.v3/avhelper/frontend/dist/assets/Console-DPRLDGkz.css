@@ -1638,7 +1638,7 @@
   color: rgb(var(--v-theme-on-surface));
 }
 
-.avh-console[data-v-a19a1698] {
+.avh-console[data-v-65dc0711] {
   display: flex;
   flex-direction: column;
   /*
@@ -1654,14 +1654,14 @@
   background: rgb(var(--v-theme-surface));
   color: rgb(var(--v-theme-on-surface));
 }
-.avh-topbar[data-v-a19a1698] {
+.avh-topbar[data-v-65dc0711] {
   flex: 0 0 auto;
   padding-inline: 0;
 }
 
 /* 三段式顶栏的左块：与右块等宽（flex-basis 0）、内容左对齐。
    `min-width: 0` + `overflow: hidden` 让它在窄弹窗里先被压缩，把宽度让给中间的搜索框。 */
-.avh-topbar__left[data-v-a19a1698] {
+.avh-topbar__left[data-v-65dc0711] {
   flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
@@ -1671,7 +1671,7 @@
 }
 
 /* 右块：与左块严格等宽 + 内容右对齐 —— 两块等宽，夹在中间的搜索框才落在工具条几何中心。 */
-.avh-topbar__right[data-v-a19a1698] {
+.avh-topbar__right[data-v-65dc0711] {
   flex: 1 1 0;
   min-width: 0;
   display: flex;
@@ -1679,7 +1679,7 @@
   justify-content: flex-end;
   gap: 4px;
 }
-.avh-title[data-v-a19a1698] {
+.avh-title[data-v-65dc0711] {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1688,7 +1688,7 @@
 /* 顶栏搜索（老 `.searchbox`：输入框 + 紧贴的「搜索」按钮，占位符同款）。
    三段式里的中段：grow 0 / basis 420px → 固定基准宽，被两侧等宽块顶到几何中心；
    窄弹窗里可一路缩到 200px（工具条本身是 nowrap 的 flex，始终单行不换行）。 */
-.avh-searchbox[data-v-a19a1698] {
+.avh-searchbox[data-v-65dc0711] {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1696,20 +1696,20 @@
   min-width: 200px;
   margin-right: 0;
 }
-.avh-searchbox__input[data-v-a19a1698] {
+.avh-searchbox__input[data-v-65dc0711] {
   flex: 1 1 auto;
   min-width: 120px;
 }
 
 /* 顶栏「🔔 通知」那颗按钮：老实现是 `.ghost`（`white-space:nowrap` + 12px 字号），
    不换行才不会在窄弹窗里折成两行。 */
-.avh-bell[data-v-a19a1698] {
+.avh-bell[data-v-65dc0711] {
   white-space: nowrap;
 }
 
 /* 未读角标：照抄老 `.bellbadge`（圆角胶囊、11px、左侧 6px 间距、最小宽 16px）。
    老实现用 `.zero{display:none}` 在 0 时隐藏，这里等价地 `v-if="notifyUnread() > 0"` 不渲染。 */
-.avh-bellbadge[data-v-a19a1698] {
+.avh-bellbadge[data-v-65dc0711] {
   display: inline-block;
   margin-left: 6px;
   padding: 0 6px;
@@ -1726,7 +1726,7 @@
    圆角 999px、字号 11px、内边距 `0 6px`、行高 16px、最小宽 16px、文字居中。
    配色不搬老界面的写死值（`--acc2:#2f6fd0` / `--warn:#d29922` / `#fff` / `#2b2100`），
    改走 Vuetify 主题变量：普通态 = 老那颗蓝（`primary`），warn 态 = 老那颗琥珀（`warning`）。 */
-.avh-pill[data-v-a19a1698] {
+.avh-pill[data-v-65dc0711] {
   display: inline-block;
   min-width: 16px;
   padding: 0 6px;
@@ -1739,16 +1739,16 @@
 }
 
 /* 老 `.pill.warn`：只有「任务」栏那一颗。 */
-.avh-pill--warn[data-v-a19a1698] {
+.avh-pill--warn[data-v-65dc0711] {
   background: rgb(var(--v-theme-warning));
   color: rgb(var(--v-theme-on-warning));
 }
 
 /* 计数为 0 也照画（老实现 `textContent = n`，不留空），只是弱化到不抢眼。 */
-.avh-pill--zero[data-v-a19a1698] {
+.avh-pill--zero[data-v-65dc0711] {
   opacity: 0.55;
 }
-.avh-body[data-v-a19a1698] {
+.avh-body[data-v-65dc0711] {
   display: flex;
   align-items: stretch;
   /* 根盒子定高后，这一层必须自己吃掉剩余高度：原来是 `flex: 0 1 auto`，
@@ -1761,7 +1761,7 @@
 
 /* 左栏：上 = 滚动区（栏目列表 + 运行概况），下 = 钉底的设置入口。
    216px = 原右栏 264px 的收窄版：概况整块搬进来后，内容区反而拿到了整宽。 */
-.avh-nav[data-v-a19a1698] {
+.avh-nav[data-v-65dc0711] {
   flex: 0 0 216px;
   max-width: 216px;
   display: flex;
@@ -1772,7 +1772,7 @@
 
 /* 左栏滚动区：`min-height: 0` 不能省 —— flex 子项默认 `min-height: auto` 会拒绝收缩，
    内容一多就把左栏顶出根盒子。滚动条只出现在这里，底部那颗按钮永远留在栏底。 */
-.avh-nav__scroll[data-v-a19a1698] {
+.avh-nav__scroll[data-v-65dc0711] {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -1781,17 +1781,17 @@
 /* 栏目行高收到 34px（Vuetify 默认 40）：左栏多装了「运行概况」整张卡片，
    6 行栏目 + 卡片 + 底部按钮要在 78vh 减去工具栏的高度里全部装下 ——
    实测 34px 正好让左栏在 1440×900 下不需要滚动（更矮的窗口仍由 `__scroll` 兜底）。 */
-.avh-nav__scroll > .v-list .v-list-item[data-v-a19a1698] {
+.avh-nav__scroll > .v-list .v-list-item[data-v-65dc0711] {
   min-height: 34px;
 }
 
 /* 「打开设置」：`margin-top: auto` 把它钉在左栏最底部，`flex: 0 0 auto` 保证它不被滚动区挤压。
    位置/样式是本轮唯一改动 —— 它的 `@click="openSettings"` 与文案一字未改。 */
-.avh-nav__switch[data-v-a19a1698] {
+.avh-nav__switch[data-v-65dc0711] {
   margin-top: auto;
   flex: 0 0 auto;
 }
-.avh-content[data-v-a19a1698] {
+.avh-content[data-v-65dc0711] {
   flex: 1 1 auto;
   min-width: 0;
   overflow: auto;
@@ -1805,36 +1805,36 @@
  * 这里**没有** `position: sticky`（右栏那版有）：卡片现在是滚动区里的最后一项，
  * sticky 只会让它在滚动时浮到顶部盖住栏目列表（outlined 卡片还是透明底，会糊在一起）。
  */
-.avh-overview[data-v-a19a1698] .v-card-item {
+.avh-overview[data-v-65dc0711] .v-card-item {
   padding: 8px 10px 4px;
 }
 
 /* 标题图标与文字之间默认 8px，窄栏里收到 6px */
-.avh-overview[data-v-a19a1698] .v-card-item__prepend {
+.avh-overview[data-v-65dc0711] .v-card-item__prepend {
   padding-inline-end: 6px;
 }
-.avh-overview[data-v-a19a1698] .v-card-text {
+.avh-overview[data-v-65dc0711] .v-card-text {
   padding: 4px 10px 8px;
 }
 
 /* 行高从 40px 收到 ~25px：7 行 + 分割线才装得进窄栏。
    只压 `padding-block` 没用（内容行高仍撑着），所以 `min-height` 也归零，
    由「标题行 21px + 上下各 2px」决定行高 —— 216px 窄栏里 7 行刚好排满。 */
-.avh-overview[data-v-a19a1698] .v-list-item {
+.avh-overview[data-v-65dc0711] .v-list-item {
   min-height: 0;
   padding-block: 2px;
 }
-.avh-overview[data-v-a19a1698] .v-list-item-title {
+.avh-overview[data-v-65dc0711] .v-list-item-title {
   line-height: 1.3;
 }
 
 /* 标题列（1fr，长标题仍是 ellipsis）与数值列之间留一点缝，别贴在一起 */
-.avh-overview[data-v-a19a1698] .v-list-item__content {
+.avh-overview[data-v-65dc0711] .v-list-item__content {
   padding-inline-end: 6px;
 }
 
 /* 数值一律不换行：「待确认任务 12」这类行一折行，7 行就把窄栏撑散了 */
-.avh-overview[data-v-a19a1698] .v-list-item__append {
+.avh-overview[data-v-65dc0711] .v-list-item__append {
   white-space: nowrap;
 }
 
@@ -1842,7 +1842,7 @@
  * 设置窗口：窗口自身占满 `v-dialog` 的 `max-width`（1120px），
  * 左栏固定 190px、右栏自适应并各自滚动 —— 与数据台同一套排布，只是换成了独立窗口。
  */
-.avh-settings[data-v-a19a1698] {
+.avh-settings[data-v-65dc0711] {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1857,23 +1857,23 @@
      `min-height` 的优先级高于 `max-height`，内容被撑到 78vh，那条 `100%` 也跟着变成 78vh。 */
   min-height: 78vh;
 }
-.avh-settings__bar[data-v-a19a1698] {
+.avh-settings__bar[data-v-65dc0711] {
   flex: 0 0 auto;
   padding-inline: 0;
 }
-.avh-settings__body[data-v-a19a1698] {
+.avh-settings__body[data-v-65dc0711] {
   display: flex;
   align-items: stretch;
   min-height: 0;
   padding: 12px;
   gap: 4px;
 }
-.avh-settings__nav[data-v-a19a1698] {
+.avh-settings__nav[data-v-65dc0711] {
   flex: 0 0 190px;
   max-width: 190px;
   overflow-y: auto;
 }
-.avh-settings__content[data-v-a19a1698] {
+.avh-settings__content[data-v-65dc0711] {
   flex: 1 1 auto;
   min-width: 0;
   overflow: auto;
@@ -1881,19 +1881,19 @@
   max-height: 68vh;
 }
 @media (max-width: 1100px) {
-.avh-body[data-v-a19a1698] {
+.avh-body[data-v-65dc0711] {
     flex-wrap: wrap;
 }
 
   /* 窄屏降级：左栏不再钉 216px，交给 flex 分配（`.avh-side` 已随右栏一起删除） */
-.avh-nav[data-v-a19a1698] {
+.avh-nav[data-v-65dc0711] {
     flex: 1 1 auto;
     max-width: none;
 }
-.avh-settings__body[data-v-a19a1698] {
+.avh-settings__body[data-v-65dc0711] {
     flex-wrap: wrap;
 }
-.avh-settings__nav[data-v-a19a1698] {
+.avh-settings__nav[data-v-65dc0711] {
     flex: 1 1 auto;
     max-width: none;
 }

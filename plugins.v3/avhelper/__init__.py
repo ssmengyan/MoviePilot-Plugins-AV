@@ -145,7 +145,7 @@ class AVHelper(_PluginBase):
     plugin_name = "AV 资源助手"
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
     plugin_icon = "Moviepilot_A.png"
-    plugin_version = "0.3.1"
+    plugin_version = "0.3.3"
     plugin_label = "发现"
     plugin_author = "local"
     plugin_config_prefix = "avhelper_"
@@ -908,9 +908,13 @@ class AVHelper(_PluginBase):
 
     # ---------- API：只读数据 ----------
 
-    def api_bootstrap(self) -> Dict[str, Any]:
-        """首屏状态聚合：收藏、订阅、任务、队列、通知、站点、默认规则与运行概况。"""
-        queue = self.engine.queue()
+    def api_bootstrap(self, fresh: int = 0) -> Dict[str, Any]:
+        """首屏状态聚合：收藏、订阅、任务、队列、通知、站点、默认规则与运行概况。
+
+        `fresh=1`（界面上**手动**点刷新时带）= 下载进度同步问一次下载器；
+        不带（15 秒轮询与首屏）走本地快照 + 后台补刷，见 `TaskEngine.queue()`。
+        """
+        queue = self.engine.queue(fresh=bool(fresh))
         rule = self.global_rule()
         size = self.cache_size()
         return {
@@ -1145,7 +1149,9 @@ class AVHelper(_PluginBase):
         界面上这是两个页面，但一次请求同时给两份数据：任务页的「待确认」角标与
         下载页的「下载中」角标用的都是同一份快照，前端一次轮询两边都刷新。
         """
-        return {"success": True, "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+        return {"success": True, "tasks": self.engine.task_list(),
+                # 用户主动打开任务页/下载页：同步问一次下载器，宁可等这 0.6 秒
+                "queue": self.engine.queue(fresh=True)}
 
     async def api_rule(self, request: Request) -> Dict[str, Any]:
         """全局默认规则：GET 读取、POST 保存（以已存规则为基准合并）。"""
@@ -1191,7 +1197,7 @@ class AVHelper(_PluginBase):
         )
         return {"success": bool(result.get("ok")), "message": result.get("message") or "",
                 "notice": result.get("notice"), "hash": result.get("hash"),
-                "downloader": result.get("downloader"), "queue": self.engine.queue()}
+                "downloader": result.get("downloader"), "queue": self.engine.queue(fresh=True)}
 
     async def api_task_cancel(self, request: Request) -> Dict[str, Any]:
         """取消待确认任务（任务卡右侧的「取消任务」）。
@@ -1223,7 +1229,7 @@ class AVHelper(_PluginBase):
         )
         return {"success": bool(result.get("ok")), "message": result.get("message") or "",
                 "hash": result.get("hash"), "downloader": result.get("downloader"),
-                "queue": self.engine.queue()}
+                "queue": self.engine.queue(fresh=True)}
 
     async def api_check(self, request: Request) -> Dict[str, Any]:
         """手动检查订阅（受限流；也可由定时任务触发）。"""
@@ -1233,7 +1239,8 @@ class AVHelper(_PluginBase):
         return {"success": True, "limited": bool(result.get("limited")),
                 "notices": result.get("notices") or [], "message": result.get("message") or "",
                 "subs": self.store.sub_list(), "tasks": self.engine.task_list(),
-                "queue": self.engine.queue()}
+                # 检查可能刚提交了下载：这一次同步问下载器（用户点完正等着看结果）
+                "queue": self.engine.queue(fresh=True)}
 
     async def api_notices(self, request: Request) -> Dict[str, Any]:
         """通知列表 / 清空。"""

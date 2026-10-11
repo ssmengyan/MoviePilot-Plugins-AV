@@ -798,7 +798,7 @@ onBeforeUnmount(() => {
                 prepend-icon="mdi-refresh"
                 :loading="runtimeLoading"
                 class="mt-2"
-                @click="refreshRuntime()"
+                @click="refreshRuntime(true)"
               >刷新</v-btn>
 
               <v-alert
@@ -840,7 +840,7 @@ onBeforeUnmount(() => {
           :toast="injectedToast"
           :focus-actor="section === 'actors' ? actorFocus : ''"
           @switch="openSettings"
-          @refresh-side="refreshRuntime()"
+          @refresh-side="refreshRuntime(true)"
           @open-movie="onOpenMovie"
           @open-actor="openActorFromOverlay"
         />
@@ -987,7 +987,7 @@ onBeforeUnmount(() => {
               :cleaning="cacheCleaning"
               :loading="runtimeLoading"
               @clean="cleanCache"
-              @refresh="refreshRuntime()"
+              @refresh="refreshRuntime(true)"
             />
 
             <AboutPanel
@@ -1020,7 +1020,7 @@ onBeforeUnmount(() => {
       :toast="injectedToast"
       @close="drawerOpen = false"
       @open-actor="openActorFromOverlay"
-      @refresh-side="refreshRuntime()"
+      @refresh-side="refreshRuntime(true)"
     />
 
     <SearchDialog

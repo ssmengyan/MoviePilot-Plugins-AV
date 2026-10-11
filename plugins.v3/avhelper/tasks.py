@@ -15,6 +15,7 @@
 """
 
 import re
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -52,6 +53,12 @@ DEFAULT_RULE: Dict[str, Any] = {
 QUEUE_KEY = "queue"
 DEFAULT_SAVE_PATH = "/media/9kg/avi"
 DEFAULT_CATEGORY = "avi"
+# 进度快照的年龄上限（秒）。为什么分两档（2026-10-11 实测）：
+# 队列里只要还有**带 hash 的历史条目**，原实现每次 `/bootstrap` 都要问一遍下载器
+# （实测 17 条已完成的种子 → 每次 0.6 秒，而 `/bootstrap` 是 15 秒一轮，首屏也被它拖慢）。
+# 已完成的种子进度不会再变，没必要按秒核对；真正在下载的才需要勤刷。
+QUEUE_REFRESH_ACTIVE = 12      # 有未完成条目时：进度快照最多这么旧
+QUEUE_REFRESH_DONE = 300       # 只有已完成条目时：多久回下载器核对一次（防被删/重新校验）
 
 
 def merge_rule(rule: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -101,6 +108,10 @@ class TaskEngine:
         self.notifier = notifier
         self.searcher = SiteSearcher(chain=getattr(plugin, "chain", None),
                                      proxy=str(getattr(plugin, "_proxy", "") or ""))
+        # 下载进度快照：两档时间戳（未完成 / 已完成）+ 单飞标记，见 `queue()`
+        self._queue_at: Dict[str, float] = {"active": 0.0, "done": 0.0}
+        self._queue_lock = threading.Lock()
+        self._queue_busy = False
 
     # ---------- 站点 ----------
 
@@ -448,8 +459,19 @@ class TaskEngine:
         logger.info(f"AVHelper 取消待确认任务：{task.get('number')}（{tid}）")
         return {"ok": True, "message": f"已取消 {task.get('number') or ''} 的待确认任务"}
 
-    def queue(self) -> List[Dict[str, Any]]:
-        """返回下载队列（顺带补番号封面），并尽力从下载器刷新真实进度。
+    def queue(self, fresh: bool = False) -> List[Dict[str, Any]]:
+        """返回下载队列（顺带补番号封面），并**按需**从下载器刷新真实进度。
+
+        两条读法（2026-10-11 改，起因是 `/bootstrap` 每次 0.6 秒）：
+
+        | 调用方 | `fresh` | 行为 |
+        | --- | --- | --- |
+        | `/bootstrap`（15 秒轮询、首屏） | `False` | **立刻**返回本地快照；该刷时丢一条守护线程去刷（单飞），下一轮就拿到新进度 |
+        | `/tasks`、提交下载/磁力下载/检查之后 | `True` | **同步**问一次下载器：用户正盯着看，宁可等这 0.6 秒 |
+
+        "该刷"分两档年龄（见 `QUEUE_REFRESH_ACTIVE` / `QUEUE_REFRESH_DONE`）：
+        未完成的条目 12 秒一轮，已完成的 5 分钟才核对一次 —— 已完成的进度不会再变，
+        按秒去问只是白等（本机队列里 17 条全是 done，改前每次请求都为此付 0.6 秒）。
 
         落库一律走 `Store.kv_update` 的就地合并：取快照之后还要等下载器回包（可能几秒），
         期间「提交下载」插入的新条目不能因为整份覆盖而丢（实测丢过一条已下载完成的记录）。
@@ -458,22 +480,72 @@ class TaskEngine:
         thumbs: Dict[str, str] = {}
         if self.plugin.fill_thumbs(queue):     # 旧队列项没封面：补到就落库，省得每次重算
             thumbs = {str(x.get("id")): str(x.get("thumb") or "") for x in queue if x.get("id")}
-        hashes = [q.get("hash") for q in queue if q.get("hash")]
+
+        active = [str(q.get("hash")) for q in queue
+                  if q.get("hash") and str(q.get("state") or "") != "done"]
+        done = [str(q.get("hash")) for q in queue
+                if q.get("hash") and str(q.get("state") or "") == "done"]
         by_hash: Dict[str, Any] = {}
-        if hashes:
-            try:
-                torrents = self.plugin.chain.list_torrents(hashs=hashes) or []
-            except Exception as error:
-                logger.error(f"AVHelper 刷新下载进度失败：{error}")
-                torrents = []
-            for item in torrents:
-                h = str(getattr(item, "hash", "") or getattr(item, "hashString", "") or "").lower()
-                if h:
-                    by_hash[h] = item
+        if fresh:
+            by_hash = self._query_torrents(active + done)
+            if active:
+                self._queue_at["active"] = time.time()
+            if done:
+                self._queue_at["done"] = time.time()
+        else:
+            self._kick_refresh(active, done)
+
         if not thumbs and not by_hash:
             return queue
         return self.store.kv_update(
             QUEUE_KEY, lambda cur: _merge_queue(cur or [], by_hash, thumbs))
+
+    def _query_torrents(self, hashes: List[str]) -> Dict[str, Any]:
+        """问一次下载器，返回 `hash → 种子对象`；失败只记日志（不抛、不影响队列渲染）。"""
+        if not hashes:
+            return {}
+        try:
+            torrents = self.plugin.chain.list_torrents(hashs=hashes) or []
+        except Exception as error:
+            logger.error(f"AVHelper 刷新下载进度失败：{error}")
+            return {}
+        by_hash: Dict[str, Any] = {}
+        for item in torrents:
+            h = str(getattr(item, "hash", "") or getattr(item, "hashString", "") or "").lower()
+            if h:
+                by_hash[h] = item
+        return by_hash
+
+    def _kick_refresh(self, active: List[str], done: List[str]) -> None:
+        """到点了就在后台补一次进度（守护线程 + 单飞），请求本身不等它。"""
+        now = time.time()
+        need_active = bool(active) and now - self._queue_at["active"] >= QUEUE_REFRESH_ACTIVE
+        need_done = bool(done) and now - self._queue_at["done"] >= QUEUE_REFRESH_DONE
+        if not need_active and not need_done:
+            return
+        hashes = (active if need_active else []) + (done if need_done else [])
+        with self._queue_lock:
+            if self._queue_busy:
+                return
+            self._queue_busy = True
+
+        def worker() -> None:
+            try:
+                by_hash = self._query_torrents(hashes)
+                if need_active:
+                    self._queue_at["active"] = time.time()
+                if need_done:
+                    self._queue_at["done"] = time.time()
+                if by_hash:
+                    # 只并进度，不动封面：封面那条线上一次请求已经写过了
+                    self.store.kv_update(QUEUE_KEY, lambda cur: _merge_queue(cur or [], by_hash, {}))
+            except Exception as error:         # 后台线程里的异常绝不能漏出去
+                logger.error(f"AVHelper 后台刷新下载进度失败：{error}")
+            finally:
+                with self._queue_lock:
+                    self._queue_busy = False
+
+        threading.Thread(target=worker, name="avhelper-queue", daemon=True).start()
 
     # ---------- 订阅检查 ----------
 

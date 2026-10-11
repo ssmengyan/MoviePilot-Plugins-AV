@@ -281,11 +281,14 @@ function useRuntimeInfo(api) {
     tasks: Array.isArray(data.value?.tasks) ? data.value?.tasks ?? [] : [],
     queue: Array.isArray(data.value?.queue) ? data.value?.queue ?? [] : []
   }));
-  async function refresh() {
+  async function refresh(fresh = false) {
     if (loading.value) return;
     loading.value = true;
     try {
-      const res = await api.get("plugin/bootstrap");
+      const res = await api.get(
+        "plugin/bootstrap",
+        fresh ? { params: { fresh: 1 } } : void 0
+      );
       const payload = res && typeof res === "object" && "data" in res && "success" in res ? res.data ?? {} : res ?? {};
       data.value = payload;
       error.value = "";
@@ -7068,7 +7071,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                         "prepend-icon": "mdi-refresh",
                         loading: _unref(runtimeLoading),
                         class: "mt-2",
-                        onClick: _cache[1] || (_cache[1] = ($event) => _unref(refreshRuntime)())
+                        onClick: _cache[1] || (_cache[1] = ($event) => _unref(refreshRuntime)(true))
                       }, {
                         default: _withCtx(() => _cache[27] || (_cache[27] = [
                           _createTextVNode("刷新")
@@ -7118,7 +7121,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
               toast: _unref(injectedToast),
               "focus-actor": section.value === "actors" ? actorFocus.value : "",
               onSwitch: openSettings,
-              onRefreshSide: _cache[2] || (_cache[2] = ($event) => _unref(refreshRuntime)()),
+              onRefreshSide: _cache[2] || (_cache[2] = ($event) => _unref(refreshRuntime)(true)),
               onOpenMovie,
               onOpenActor: openActorFromOverlay
             }, null, 40, ["store", "plugin-id", "api", "toast", "focus-actor"])) : framePluginId.value ? (_openBlock(), _createBlock(AppFrame, {
@@ -7279,7 +7282,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                       cleaning: _unref(cacheCleaning),
                       loading: _unref(runtimeLoading),
                       onClean: cleanCache,
-                      onRefresh: _cache[7] || (_cache[7] = ($event) => _unref(refreshRuntime)())
+                      onRefresh: _cache[7] || (_cache[7] = ($event) => _unref(refreshRuntime)(true))
                     }, null, 8, ["cache-text", "check", "cleaning", "loading"])) : settingsSection.value === "about" ? (_openBlock(), _createBlock(AboutPanel, {
                       key: 8,
                       version: version.value,
@@ -7314,7 +7317,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
           toast: _unref(injectedToast),
           onClose: _cache[9] || (_cache[9] = ($event) => drawerOpen.value = false),
           onOpenActor: openActorFromOverlay,
-          onRefreshSide: _cache[10] || (_cache[10] = ($event) => _unref(refreshRuntime)())
+          onRefreshSide: _cache[10] || (_cache[10] = ($event) => _unref(refreshRuntime)(true))
         }, null, 8, ["open", "number", "id", "store", "plugin-id", "api", "toast"])) : _createCommentVNode("", true),
         framePluginId.value ? (_openBlock(), _createBlock(SearchDialog, {
           key: 1,
@@ -7340,6 +7343,6 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
   }
 });
 
-const Console = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-a19a1698"]]);
+const Console = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-65dc0711"]]);
 
 export { CONSOLE_EMIT_NAMES as C, Console as a };
