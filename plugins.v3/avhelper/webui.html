@@ -319,14 +319,12 @@ html[data-mp-light]{
   --g-overlay:var(--glass-overlay-surface,rgba(11,19,34,.60));
   --plate:rgba(11,19,34,.10);
 }
-/* 嵌在 MoviePilot 里时：自己铺一层宿主主题色的底，**不透明**。
-   MP 的插件页容器在 iframe 后面垫的不是干净底色：实测中段接近纯白、右段是一张模糊海报
-   （暖色），只要留一点点透明，暗底上就会浮出斜向色块/横纹（用户实测截图确认过）。
-   铺成不透明后，界面内部的玻璃感由面板自己的 surface/描边/高光提供，不再受宿主背景干扰。
+/* 嵌在 MoviePilot 里时：自己铺一层宿主主题色的底。MP 的插件页容器常常垫一块白板
+   （或一张亮壁纸），页面若全透明，浅色文字会被冲没 —— 所以留 12% 透出，其余压成主题底色。
    独立打开（非 iframe）时自带等效底。 */
 html[data-mp-embed] body{
-  background:rgb(11,19,34);
-  background:rgb(var(--g-bg));
+  background:rgba(11,19,34,.88);
+  background:color-mix(in srgb,rgb(var(--g-bg)) 88%,transparent);
 }
 html:not([data-mp-embed]) body{
   background:
@@ -418,7 +416,7 @@ tr.bt td{background:rgba(var(--g-on),.05)}
 (function () {
   var R = document.documentElement;
   var VARS = {
-    '--v-theme-primary': 'color', '--v-theme-on-surface': 'color', '--v-theme-background': 'color',
+    '--v-theme-primary': 'color', '--v-theme-on-surface': 'color',
     '--glass-surface': 'color', '--glass-surface-soft': 'color', '--glass-surface-raised': 'color',
     '--glass-control': 'color', '--glass-border': 'color', '--glass-border-raised': 'color',
     '--glass-border-hover': 'color', '--glass-highlight': 'color', '--glass-overlay-surface': 'color',
@@ -693,7 +691,7 @@ const DEFAULT_RULE = {
 };
 const S = {
   view:'discover', period:'week', kind:'censored',
-  actor:null, actorYear:'', known:new Set(),
+  actor:null, actorYear:'', actorAll:false, known:new Set(),
   favs:[], subs:[], tasks:[], queue:[], notices:[],
   sites:[{id:'',name:'馒头'},{id:'',name:'观众'},{id:'',name:'我堡'},{id:'',name:'高清杜比'},
          {id:'',name:'GGPT'},{id:'',name:'麒麟'},{id:'',name:'象站'},{id:'',name:'织梦'},
@@ -1252,7 +1250,7 @@ function refreshFavButtons(){
 function openActor(name){
   if (!name) return;
   S.actor = name; S.view = 'actors';
-  S.actorYear = '';                         // 换演员时重置作品史的年份筛选
+  S.actorYear = ''; S.actorAll = false;     // 换演员时重置作品史的筛选/展开
   render();
   const m = $('#main'); if (m) m.scrollTop = 0;
 }
@@ -1271,19 +1269,16 @@ function filmRow(mv, i){
     + (mv.lib ? '<span class="tag lib">已入库</span>' : '')
     + '</div></div></div>';
 }
-/* 作品史按需加载：首屏只抓一页（30 部），滚到底点「加载更多」再续拉下一页。
-   站点单页上限 50；一次一页比原来 `--all` 连抓 50 页（上千部的演员要 35 秒）快得多。 */
-const FILM_PAGE = 30;                      // 每页条数（与后端 ACTOR_PAGE 一致）
-const FILM_PRELOAD = 60;                   // 预热封面的张数上限：不随已加载总数膨胀
+const FILM_FOLD = 12;                      // 作品史默认只铺 12 部，多的折起来
 function renderActorDetail(m){
   const name = S.actor;
   const key = 'page:actor:' + name;
   const entry = cached(key);
   const head = '<div class="toolbar"><button class="ghost" id="btnBack">← 返回</button></div>';
   if (!entry){
-    m.innerHTML = head + loadingHtml('正在抓取演员档案与最新作品…');
+    m.innerHTML = head + loadingHtml('正在抓取演员档案与作品史…');
     m.querySelector('#btnBack').onclick = () => { S.actor = null; render(); };
-    apiGet('/actor', {name:name, page:1, limit:FILM_PAGE}).then(r => {
+    apiGet('/actor', {name:name}).then(r => {
       if (!r.ok) put(key, {error:r.message || '抓取失败，请稍后重试'});
       else put(key, {data:r.data || {}, t:Date.now()});
       if (!r.ok) toast('演员抓取失败', r.message || '抓取失败，请稍后重试', 'warn');
@@ -1299,11 +1294,9 @@ function renderActorDetail(m){
   const d = entry.data || {};
   const e = d.entity || {};
   const movies = d.movies || [];
-  const total = Number(d.total || 0) || movies.length;   // 站点记录总数（videos_count）
-  const hasMore = !!d.hasMore;
   const faved = !!findFav(name);
   const sub = S.subs.filter(s => s.type === 'actor' && s.name === name)[0] || null;
-  /* 作品史：先按年份收敛（只对已加载的部分），列表本身按需追加下一页 */
+  /* 作品史：先按年份收敛，再对超长的折叠，避免一次把整页铺满 */
   const years = [], yearCount = {};
   movies.forEach(mv => {
     const y = String(mv.date || '').slice(0, 4);
@@ -1311,9 +1304,11 @@ function renderActorDetail(m){
   });
   const year = S.actorYear || '';
   const list = year ? movies.filter(mv => String(mv.date || '').slice(0, 4) === year) : movies;
+  const fold = !S.actorAll && list.length > FILM_FOLD;
+  const shown = fold ? list.slice(0, FILM_FOLD) : list;
   const yearBar = years.length > 1
     ? '<div class="filmyears" id="filmYears">'
-      + '<button data-y="" class="' + (year ? '' : 'on') + '">全部 ' + movies.length + (hasMore ? '+' : '') + '</button>'
+      + '<button data-y="" class="' + (year ? '' : 'on') + '">全部 ' + movies.length + '</button>'
       + years.map(y => '<button data-y="' + y + '" class="' + (year === y ? 'on' : '') + '">'
           + y + '<span style="opacity:.65"> ' + yearCount[y] + '</span></button>').join('')
       + '</div>'
@@ -1331,7 +1326,7 @@ function renderActorDetail(m){
     + (e.cup ? '<span><b>罩杯</b> ' + esc(e.cup) + '</span>' : '')
     + (e.birthplace ? '<span><b>出身</b> ' + esc(e.birthplace) + '</span>' : '')
     + (e.instagram ? '<span><b>IG</b> ' + esc(e.instagram) + '</span>' : '')
-    + '<span><b>已加载</b> ' + movies.length + ' / ' + total + ' 部</span>'
+    + '<span><b>本次返回作品</b> ' + movies.length + ' 部</span>'
     + '</div>'
     + '<div class="acts">'
     + '<button class="' + (faved ? 'ghost' : 'primary') + '" id="btnFav">' + (faved ? '★ 已收藏' : '☆ 收藏该演员') + '</button>'
@@ -1340,23 +1335,16 @@ function renderActorDetail(m){
     + '<button class="ghost" id="btnCheckActor">⚡ 检查她的新片</button>'
     + '</div>'
     + '</div></div>'
-    + '<div class="secttl">作品史（按发行时间倒序，已加载 ' + movies.length + ' 部'
-    + (total > movies.length ? ' / 站点记录 ' + total + ' 部' : '')
+    + '<div class="secttl">作品史（按发行时间倒序，共 ' + movies.length + ' 部'
     + (year ? '，' + year + ' 年 ' + list.length + ' 部' : '') + '）</div>'
     + yearBar
     + (list.length
-        ? '<div class="films">' + list.map(filmRow).join('') + '</div>'
-        : emptyHtml(year
-            ? (hasMore ? '已加载的 ' + movies.length + ' 部里没有 ' + year + ' 年的作品，继续加载试试。'
-                       : '该年份没有作品记录。')
-            : '这位演员暂无作品数据。'))
-    + (hasMore
-        ? '<div class="morebar"><button class="ghost" id="btnMoreFilms">'
-          + (year ? '继续加载 ' + FILM_PAGE + ' 部（往更早的年份找）'
-                  : '加载更多（已显示 ' + movies.length + ' / 共 ' + total + ' 部）') + '</button></div>'
-        : (movies.length > FILM_PAGE
-            ? '<div class="morebar"><span class="hint">已加载全部 ' + movies.length + ' 部</span></div>'
-            : ''));
+        ? '<div class="films">' + shown.map(filmRow).join('') + '</div>'
+          + (list.length > FILM_FOLD
+              ? '<div class="morebar"><button class="ghost" id="btnMoreFilms">'
+                + (fold ? '展开其余 ' + (list.length - FILM_FOLD) + ' 部' : '收起') + '</button></div>'
+              : '')
+        : emptyHtml(year ? '该年份没有作品记录。' : '这位演员暂无作品数据。'));
 
   m.querySelector('#btnBack').onclick = () => { S.actor = null; render(); };
   m.querySelector('#btnFav').onclick = () => toggleFav(name, e.avatar || '');
@@ -1366,53 +1354,24 @@ function renderActorDetail(m){
   const yb = m.querySelector('#filmYears');
   if (yb) yb.onclick = ev => {
     const b = ev.target.closest('button'); if (!b) return;
-    S.actorYear = b.dataset.y; render();
+    S.actorYear = b.dataset.y; S.actorAll = false; render();
   };
   const mb = m.querySelector('#btnMoreFilms');
-  if (mb) mb.onclick = () => loadMoreFilms(name, mb);
+  if (mb) mb.onclick = () => {
+    const expanding = !S.actorAll;
+    S.actorAll = expanding;
+    render();
+    if (!expanding){                       // 收起后回到「作品史」标题，避免停在半空
+      const t = $('#main').querySelector('.secttl');
+      if (t) t.scrollIntoView({block:'start'});
+    }
+  };
   m.querySelectorAll('.film').forEach(el => {
     el.onclick = ev => { ev.stopPropagation(); openMovie(el.dataset.num, el.dataset.id || ''); };
     el.onmouseenter = () => prefetchDetail(el.dataset.num, el.dataset.id || '');
   });
   prefetchCards(m, PREFETCH_N);
-  preload(movies.slice(0, FILM_PRELOAD).map(x => x.thumb));
-}
-
-/* 续拉下一页作品史：追加到已加载列表后面（按 id+番号去重，翻页期间站点新增作品会导致整体位移）。
-   整页重画，年份筛选跟着已加载的部分走；这一批里没有当前年份的作品时给个提示，免得像没反应。 */
-function loadMoreFilms(name, btn){
-  const key = 'page:actor:' + name;
-  const entry = cached(key);
-  const d = (entry && entry.data) || null;
-  if (!d){ render(); return; }
-  const page = (Number(d.page) || 1) + 1;
-  const before = S.actorYear ? yearCountOf(d.movies || [], S.actorYear) : 0;
-  const label = btn.textContent;
-  btn.disabled = true; btn.textContent = '正在加载…';
-  apiGet('/actor', {name:name, page:page, limit:FILM_PAGE}).then(r => {
-    if (!r.ok){
-      btn.disabled = false; btn.textContent = label;
-      toast('加载更多失败', r.message || '请稍后重试', 'warn');
-      return;
-    }
-    const nd = r.data || {};
-    const seen = {};
-    (d.movies || []).forEach(x => { seen[(x.id || '') + '|' + (x.number || '')] = 1; });
-    const add = (nd.movies || []).filter(x => !seen[(x.id || '') + '|' + (x.number || '')]);
-    d.movies = (d.movies || []).concat(add);
-    d.page = page;
-    d.hasMore = !!nd.hasMore;
-    d.total = nd.total || d.total;
-    d.entity = nd.entity || d.entity;
-    if (S.view !== 'actors' || S.actor !== name) return;      // 已经切走了：只更新缓存
-    render();
-    if (S.actorYear && yearCountOf(d.movies, S.actorYear) === before){
-      toast('继续加载', '这一批没有 ' + S.actorYear + ' 年的作品，已加载 ' + d.movies.length + ' 部', 'warn');
-    }
-  });
-}
-function yearCountOf(movies, year){
-  return movies.filter(mv => String(mv.date || '').slice(0, 4) === year).length;
+  preload(shown.map(x => x.thumb));
 }
 
 /* ---------- 3. 订阅 ---------- */
@@ -1612,19 +1571,19 @@ function subscribeNumber(num){
 let taskTimer = null;
 function renderTasks(m){
   const pend = S.tasks.filter(t => t.state === 'await');
+  const dling = S.queue.filter(q => q.state !== 'done').length;
   m.innerHTML = '<div class="toolbar">'
+    + (dling ? '<span class="hint">⏬ ' + dling + ' 个已提交，进度看「下载」页</span>' : '')
     + '<div style="flex:1"></div>'
     + '<button class="ghost" id="btnRefreshTasks">↻ 刷新任务</button></div>'
     + (pend.length
-        ? '<div class="secttl">待确认（' + pend.length + '）</div>'
-          + pend.map((t,i) => candTable(t, i, {cancel:true})).join('')
+        ? '<div class="secttl">待确认（' + pend.length + '）</div>' + pend.map((t,i) => candTable(t, i)).join('')
         : '<div class="empty">没有待确认的任务</div>');
   m.querySelector('#btnRefreshTasks').onclick = () => { loadTasks(true); toast('任务', '正在刷新…'); };
   bindDownloadButtons(m);
-  bindCancelButtons(m);
   queueMissingThumbs(pend);
 }
-function candTable(t, idx, opts){
+function candTable(t, idx){
   const cands = t.cands || [];
   const pt = cands.filter(c => c.src !== 'BT');
   const bt = cands.filter(c => c.src === 'BT');
@@ -1663,10 +1622,6 @@ function candTable(t, idx, opts){
     + '</div>'
     + '<div style="flex:1"></div>'
     + (t.auto && t.source === 'sub' ? '<span class="hint">订阅为自动下载，但无候选合格</span>' : '')
-    + (opts && opts.cancel
-        ? '<button class="danger" data-cancel="' + esc(t.id || '') + '"'
-          + ' title="不再等这部片：从待确认里移除（想找回就重新搜一次）">取消任务</button>'
-        : '')
     + '</div>'
     + '<table><thead><tr><th>站点</th><th>规格</th><th>中字</th><th>破解</th><th>大小</th><th>做种</th><th>标记</th><th>匹配分</th><th></th></tr></thead><tbody>'
     + pt.map(rowOf).join('')
@@ -1677,9 +1632,14 @@ function candTable(t, idx, opts){
 }
 /* ---------- 5. 下载队列（从任务页拆出来的独立页） ---------- */
 function renderQueue(m){
-  m.innerHTML = (S.queue.length
-      ? S.queue.map(queueRow).join('')
-      : '<div class="empty">下载队列为空<br>在「任务」页挑好候选点「下载」，进度在这里看</div>');
+  m.innerHTML = '<div class="toolbar">'
+    + '<span class="hint">进度取自下载器，每 5 秒自动刷新</span>'
+    + '<div style="flex:1"></div>'
+    + '<button class="ghost" id="btnRefreshQueue">↻ 刷新进度</button></div>'
+    + (S.queue.length
+        ? S.queue.map(queueRow).join('')
+        : '<div class="empty">下载队列为空<br>在「任务」页挑好候选点「下载」，进度在这里看</div>');
+  m.querySelector('#btnRefreshQueue').onclick = () => { loadTasks(true); toast('下载队列', '正在刷新进度…'); };
   queueMissingThumbs(S.queue);
 }
 function queueRow(q){
@@ -1761,8 +1721,8 @@ function startDownload(taskId, site, btn, force){
       toast('下载失败', r.message || '请稍后重试', 'warn');
       return;
     }
-    // 通知以服务端记录为准：本地塞一份没有时间戳，角标会漏计，直接重拉一次
-    loadNotices(false);
+    const notice = r.data && r.data.notice ? r.data.notice : (r.data && r.data.id ? r.data : null);
+    if (notice && (notice.body || notice.title)){ S.notices.unshift(notice); renderPills(); }
     toast('已提交下载', site + ' · 进度见「下载」页', 'ok');
     loadTasks(true);
   });
@@ -1795,25 +1755,6 @@ function bindDownloadButtons(root){
   (root || document).querySelectorAll('[data-dl]').forEach(b => b.onclick = () => {
     const t = S.tasks.filter(x => String(x.id) === String(b.dataset.task))[0] || S.siteTask;
     if (t) startDownload(t.id, b.dataset.dl, b, b.dataset.force === '1');
-  });
-}
-function bindCancelButtons(root){
-  (root || document).querySelectorAll('[data-cancel]').forEach(b => b.onclick = () => cancelTask(b.dataset.cancel, b));
-}
-/* 取消待确认任务：后端把 state 置成 canceled，任务页与角标都不再算它。
-   只有还没提交下载的能取消；已推进下载器的种子要给下载器去停，这里不假称已取消。 */
-function cancelTask(tid, btn){
-  if (!tid){ toast('取消失败', '这条任务缺少 id，无法取消', 'warn'); return; }
-  const num = ((S.tasks.filter(t => String(t.id) === String(tid))[0] || {}).number) || '';
-  btn.disabled = true;
-  apiPost('/tasks/cancel', {id:tid}).then(r => {
-    if (!r.ok){ btn.disabled = false; toast('取消任务失败', r.message || '请稍后重试', 'warn'); return; }
-    const d = r.data || {};
-    if (Array.isArray(d.tasks)) S.tasks = d.tasks;
-    if (Array.isArray(d.queue)) S.queue = d.queue;
-    renderPills();
-    toast('已取消任务', (num ? num + ' · ' : '') + '已从待确认里移除', 'warn');
-    if (S.view === 'tasks') render();
   });
 }
 function doSiteSearch(){
@@ -1947,54 +1888,16 @@ function openNotify(){
   });
 }
 function paintNotify(){
-  const box = $('#nBody');
-  if (!$('#ndrawer').classList.contains('on')) return;
-  const top = box.scrollTop;
-  box.innerHTML = notifyBodyHtml();
-  box.scrollTop = top;                  // 重绘不能把用户正在看的位置顶回顶部
+  if ($('#ndrawer').classList.contains('on')) $('#nBody').innerHTML = notifyBodyHtml();
 }
 function loadNotices(force){
   return apiGet('/notices').then(r => {
     if (!r.ok){ if (force) toast('通知读取失败', r.message || '', 'warn'); return false; }
     const d = r.data || {};
     S.notices = Array.isArray(d.notices) ? d.notices : (Array.isArray(d) ? d : S.notices);
-    if ($('#ndrawer').classList.contains('on')) noticeMarkSeen();   // 抽屉开着 = 用户正看着，新到的不算未读
     renderPills();
     paintNotify();
     return true;
-  });
-}
-/* 通知推送：向服务端挂一条长轮询（/notices/wait）——新通知一写进库，服务端立刻回包，
-   角标当场就变；回包后马上续上，所以是「一到就变」，不是「每 N 秒看一眼」。
-   兜底：60 秒整表再拉一次（长轮询被网关掐断、或通知表被别处改动时补齐）；
-   页面切到后台就停长轮询，切回前台先整表补一次再续上。 */
-let noticeWaiting = false;              // 当前是否挂着一条长轮询
-function noticeNewestId(){
-  const first = (S.notices || [])[0] || {};
-  return Number(first.id) || 0;         // 列表按 id 倒序，第一条就是最新的
-}
-function noticeWaitOnce(){
-  if (noticeWaiting || document.hidden) return;
-  noticeWaiting = true;
-  apiGet('/notices/wait', {after: noticeNewestId(), timeout: 25}).then(r => {
-    noticeWaiting = false;
-    if (r.ok && r.data && r.data.wake && (r.data.notices || []).length){
-      S.notices = r.data.notices;
-      if ($('#ndrawer').classList.contains('on')) noticeMarkSeen();   // 抽屉开着 = 正看着，新到的不算未读
-      renderPills();
-      paintNotify();
-      noticeWaitOnce();                 // 立刻续上，等下一批
-      return;
-    }
-    // 超时（wake=false）无缝续上；接口异常退成慢轮询，凭据失效则等重新登录后再续
-    setTimeout(noticeWaitOnce, r.ok ? 0 : (r.auth ? 20000 : 8000));
-  });
-}
-function startNoticePolling(){
-  noticeWaitOnce();
-  setInterval(() => { if (!document.hidden) loadNotices(false); }, 60000);
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) loadNotices(false).then(noticeWaitOnce);
   });
 }
 
@@ -2222,7 +2125,6 @@ bindTokenEvents();
 bindUi();
 render();
 startTaskPolling();
-startNoticePolling();
 bootAndRender();
 })();
 </script>

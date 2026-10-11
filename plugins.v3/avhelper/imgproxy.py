@@ -22,7 +22,9 @@ REFERERS: Dict[str, str] = {
     "cf.javfree.me": "",
 }
 PROXY = "http://192.0.2.11:7890"
-CACHE_DIR = "/avhelper/cache/images"
+# 图片缓存根：与 CACHE_ROOT 同卷（容量淘汰也在这个目录里跑）
+CACHE_ROOT = "/avhelper/cache"
+CACHE_DIR = f"{CACHE_ROOT}/images"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 

@@ -427,7 +427,11 @@ class TaskEngine:
             pass
         return ""
 
-    # ---------- 取消 ----------
+    def task_list(self) -> List[Dict[str, Any]]:
+        """任务列表：缺封面的任务用本地索引 / 详情缓存补上（不发网络请求）。"""
+        tasks = self.store.task_list()
+        self.plugin.fill_thumbs(tasks)
+        return tasks
 
     def cancel_task(self, tid: str) -> Dict[str, Any]:
         """取消一条待确认任务：状态置 canceled，任务页与角标都不再算它。
@@ -444,14 +448,12 @@ class TaskEngine:
         logger.info(f"AVHelper 取消待确认任务：{task.get('number')}（{tid}）")
         return {"ok": True, "message": f"已取消 {task.get('number') or ''} 的待确认任务"}
 
-    def task_list(self) -> List[Dict[str, Any]]:
-        """任务列表：缺封面的任务用本地索引 / 详情缓存补上（不发网络请求）。"""
-        tasks = self.store.task_list()
-        self.plugin.fill_thumbs(tasks)
-        return tasks
-
     def queue(self) -> List[Dict[str, Any]]:
-        """返回下载队列（顺带补番号封面），并尽力从下载器刷新真实进度。"""
+        """返回下载队列（顺带补番号封面），并尽力从下载器刷新真实进度。
+
+        落库一律走 `Store.kv_update` 的就地合并：取快照之后还要等下载器回包（可能几秒），
+        期间「提交下载」插入的新条目不能因为整份覆盖而丢（实测丢过一条已下载完成的记录）。
+        """
         queue = self.store.kv_get(QUEUE_KEY, []) or []
         thumbs: Dict[str, str] = {}
         if self.plugin.fill_thumbs(queue):     # 旧队列项没封面：补到就落库，省得每次重算
@@ -470,8 +472,6 @@ class TaskEngine:
                     by_hash[h] = item
         if not thumbs and not by_hash:
             return queue
-        # 手里这份是几秒前的快照（取进度还要等下载器回包），落库时一律按 id/hash 就地合并回
-        # **当前**队列：直接整份写回会把这几秒里新提交的下载抹掉（实测丢过一条）。
         return self.store.kv_update(
             QUEUE_KEY, lambda cur: _merge_queue(cur or [], by_hash, thumbs))
 
@@ -523,6 +523,7 @@ class TaskEngine:
                 break
         if not movies:
             return [self.notifier.info("检查完成", f"{name}：没有取到作品史")]
+        known = set(self.store.known_all())
         fresh = [m for m in movies if m.get("number") and m.get("number") not in known]
         if not fresh:
             return [self.notifier.info("检查完成", f"{name}：没有新片")]

@@ -8,6 +8,7 @@ import subprocess
 import time
 from typing import Any, Dict, List, Optional
 
+# javdb-cli 只读二进制：插件只读它，不复制、不修改
 JAVDB_BIN = "/avhelper/bin/javdb"
 DEFAULT_PROXY = "http://192.0.2.11:7890"
 TIMEOUT = 60

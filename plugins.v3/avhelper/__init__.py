@@ -1,23 +1,29 @@
-"""AV 资源助手（AVHelper）：JAV 榜单/演员/详情浏览 + 番号订阅、PT 选种下载、通知与缓存治理。
+"""AV 资源助手：JAV 榜单/演员/详情浏览 + 番号订阅、PT 选种下载、通知与缓存治理。
+
+后端为 2026-10 的前端重写版（Vue 联邦界面 + `/ui` 静态应用），数据根 `/avhelper/cache`
+（SQLite、图片与 JSON 缓存同根），只读共用 javdb 二进制 `/avhelper/bin/javdb`。
 
 界面说明：宿主 Vuetify JSON 页面无法承载搜索框、灯箱等交互（当前宿主前端在事件调用后不会
-重新拉取页面），因此完整界面由本插件自带的 `webui.html` 经匿名路由 `/ui` 下发，插件页用
-iframe 承载；前端自己带状态、自己调接口（契约见 docs/AVHelper-API契约.md）。
+重新拉取页面），因此完整界面由本插件自带的静态目录 `ui/`（拆分前是单文件 `webui.html`）经
+匿名路由 `/ui/` 下发，插件页用 iframe 承载；前端自己带状态、自己调接口（契约见
+docs/AVHelper-API契约.md）。
 
-安全边界：只有 `/ui` 与 `/img` 匿名；`/img` 仅反代白名单图床且无写能力，其余数据接口一律
-bear 鉴权。`API_TOKEN` 不出现在任何 URL 或页面里，前端从同源 localStorage 取会话 JWT。
+安全边界：只有 `/ui`、`/ui/`（含 `ui/` 下的静态资源）与 `/img` 匿名；`/img` 仅反代白名单图床
+且无写能力，其余数据接口一律 bear 鉴权。`API_TOKEN` 不出现在任何 URL 或页面里，前端从同源
+localStorage 取会话 JWT。
 """
 
 import asyncio
 import hashlib
 import json
+import mimetypes
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import quote, unquote
 
 from fastapi import Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.sdk.logging import logger
 from app.sdk.network import RequestUtils
@@ -32,8 +38,28 @@ from .store import Store
 from .tasks import DEFAULT_RULE, TaskEngine, merge_rule
 
 PLUGIN_ID = "AVHelper"
+# 数据根：与原版 `/avhelper/cache` 完全隔离（同一个挂载卷下的子目录，容器重建不丢数据）
 CACHE_ROOT = Path("/avhelper/cache")
 META_DIR = CACHE_ROOT / "meta"
+# 前端静态目录与 MIME 表：多文件前端由 `/ui/` 下发，ES module 的相对导入依赖目录语义
+UI_DIR = Path(__file__).with_name("ui")
+UI_EXT_MIME: Dict[str, str] = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "application/javascript",
+    ".mjs": "application/javascript",
+    ".css": "text/css",
+    ".json": "application/json",
+    ".map": "application/json",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".ico": "image/x-icon",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+}
 DEFAULT_PROXY = "http://192.0.2.11:7890"
 GLOBAL_RULE_KEY = "global_rule"
 THUMB_KEY = "num2thumb"      # 番号 → 封面原图的本地索引（任务/下载队列补图用）
@@ -41,11 +67,12 @@ THUMB_KEY = "num2thumb"      # 番号 → 封面原图的本地索引（任务/�
 TTL_RANK = 6 * 3600        # 榜单 6 小时
 TTL_DETAIL = 7 * 86400     # 番号详情 7 天
 TTL_ACTOR = 24 * 3600      # 演员作品史 24 小时
+ACTOR_PAGE = 30            # 演员作品史每页条数（界面按需续拉，§8.1）
+ACTOR_PAGE_MAX = 50        # 站点单页硬上限：请求更大也只回 50 条（实测）
 TTL_LONG = 7 * 86400       # 长图 URL 7 天
 FAIL_TTL = 120             # 抓取失败后的负缓存：这段时间内不再重试（避免每次打开都重付等待）
 CACHE_MAX_GB = 60          # 缓存总量上限（超出按最旧淘汰）
-ACTOR_PAGE = 30            # 演员作品史每页条数（界面按需续拉，§8.1）
-ACTOR_PAGE_MAX = 50        # 站点单页硬上限：请求更大也只回 50 条（实测）
+CACHE_SIZE_TTL = 60        # 缓存体积的内存缓存时长（秒）：前端 15 秒轮询一次，不能每次 rglob 整个目录
 ONCE_JOB_ID = "subcheck_now"
 
 
@@ -54,12 +81,51 @@ def num_key(number: Any) -> str:
     return str(number or "").strip().upper()
 
 
-def is_keep_file(path: Path) -> bool:
-    """缓存清理必须保留的文件：插件自管的 SQLite 库及其事务副产物。
+def ui_file(path: str) -> Optional[Path]:
+    """把 `/ui/{path}` 的子路径安全地解析成 `ui/` 目录内的文件；越界或不存在返回 None。
 
-    库就落在 `META_DIR`（与 JSON 缓存同目录），而孤儿扫描的判据是"不在 cache_idx 里就删"、
-    容量淘汰又对整个 CACHE_ROOT 递归——两处都会命中 `avhelper.db`/`-wal`/`-shm`。
-    一旦被删，`Store.init()` 只会重建空表：收藏、订阅、任务、通知会**静默全丢**。
+    含 `..` 的路径（包括被二次百分号编码、解码后才现形的）一律拒绝，解析后必须仍在 `ui/`
+    目录内；只服务文件，不列目录。
+    """
+    rel = unquote(str(path or "")).strip("/")
+    if not rel or ".." in rel:
+        return None
+    base = UI_DIR.resolve()
+    try:
+        target = (base / rel).resolve()
+    except OSError:
+        return None
+    if not target.is_relative_to(base) or not target.is_file():
+        return None
+    return target
+
+
+def ui_media_type(path: Path) -> str:
+    """静态资源的 Content-Type：先查扩展名表，再退回标准库猜测，最后 octet-stream。"""
+    guessed = mimetypes.guess_type(path.name)[0]
+    return UI_EXT_MIME.get(path.suffix.lower()) or guessed or "application/octet-stream"
+
+
+def size_text(size: Any) -> str:
+    """字节数 → 人类可读文本（B 取整，KB/MB/GB 保留 1 位小数，「4.2 GB」这种）。"""
+    try:
+        value = max(float(size or 0), 0.0)
+    except (TypeError, ValueError):
+        value = 0.0
+    if value < 1024:
+        return f"{value:.0f} B"
+    for unit in ("KB", "MB"):
+        value /= 1024
+        if value < 1024:
+            return f"{value:.1f} {unit}"
+    return f"{value / 1024:.1f} GB"
+
+
+def is_keep_file(path: Path) -> bool:
+    """缓存清理必须保留的文件：插件自管的 SQLite 库与它的事务副产物。
+
+    数据库就落在 `META_DIR`（`/avhelper/cache/meta/avhelper.db`），与 JSON 缓存同目录；
+    而孤儿扫描按「不在 cache_idx 里就删」判定，不排除它会把订阅/收藏/任务一起删掉。
     """
     return path.name.startswith("avhelper.db")
 
@@ -70,7 +136,7 @@ class AVHelper(_PluginBase):
     plugin_name = "AV 资源助手"
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
     plugin_icon = "Moviepilot_A.png"
-    plugin_version = "0.2.7"
+    plugin_version = "0.3.0"
     plugin_label = "发现"
     plugin_author = "local"
     plugin_config_prefix = "avhelper_"
@@ -88,6 +154,7 @@ class AVHelper(_PluginBase):
     _emby_apikey = ""
     _emby_lib: Optional[emby.EmbyLibrary] = None
     _emby_sig: Optional[Tuple[str, str]] = None
+    _cache_size_cache: Tuple[float, int] = (0.0, 0)   # (取样时间, 字节数)：缓存体积的内存缓存
 
     # ---------- 生命周期 ----------
 
@@ -131,7 +198,11 @@ class AVHelper(_PluginBase):
     # ---------- 宿主扩展点 ----------
 
     def get_service(self) -> List[Dict[str, Any]]:
-        """注册定时服务：订阅检查（每天 3 次）与缓存清理（每天 4 点）。"""
+        """注册定时服务：订阅检查（每天 3 次）与缓存清理（每天 4 点）。
+
+        本插件是在用插件，两个 cron 必须挂着 —— 否则订阅检查会静默停摆。
+        （若用分身/副本再装一份，务必只让一边挂 cron：会重复抓站点、重复下载。）
+        """
         return [
             {"id": "subcheck", "name": "AV 订阅检查", "trigger": "cron",
              "kwargs": {"hour": "9,14,21", "minute": "30"}, "func": self.job_subcheck},
@@ -140,7 +211,10 @@ class AVHelper(_PluginBase):
         ]
 
     def get_media_source(self) -> Optional[List[Dict[str, Any]]]:
-        """注册插件提供的 JAVDB 媒体数据源。"""
+        """注册插件提供的 JAVDB 媒体数据源。
+
+        与 `get_service` 同理：注册后宿主「媒体数据源」里才有 JAVDB。
+        """
         return [{"name": "JAVDB", "media_source": "javdb", "media_types": ["电影"]}]
 
     def get_module(self) -> Optional[Dict[str, Any]]:
@@ -180,10 +254,13 @@ class AVHelper(_PluginBase):
                 {"name": a.get("name"), "avatar": self.image_url(a.get("avatar_url"))}
                 for a in (detail.get("actors") or []) if isinstance(a, dict) and a.get("name")
             ]
-            info.directors = [detail.get("director_name")] if detail.get("director_name") else []
-            info.production_companies = (
-                [detail.get("maker_name")] if detail.get("maker_name") else []
-            )
+            # v3 的响应模型要求这两项是**对象列表**（`MediaPerson` / `MediaCompany`）。
+            # 塞纯字符串会让宿主 `GET /api/v1/media/{id}` 直接 500（ResponseValidationError：
+            # `production_companies[0]` 收到 'S1 NO.1 STYLE' 不是对象）——2026-10-10 实测复现。
+            director = str(detail.get("director_name") or "").strip()
+            maker = str(detail.get("maker_name") or "").strip()
+            info.directors = [{"name": director}] if director else []
+            info.production_companies = [{"name": maker}] if maker else []
             self.remember_actor([str(media_id)], (info.actors or [{}])[0].get("name") or "")
             return info
         except Exception as error:  # 识别失败必须让原生模块继续工作
@@ -244,7 +321,8 @@ class AVHelper(_PluginBase):
                 "props": {"type": "warning", "variant": "tonal", "class": "ma-2"},
                 "text": "插件尚未启用：请先在插件设置中开启。",
             }]
-        src = f"/api/v1/plugin/{PLUGIN_ID}/ui?v={self.plugin_version}"
+        # 尾斜杠不能省：文档 URL 带 `/ui/` 时 ES module 的 `./app.js` 才会解析到 `/ui/app.js`
+        src = f"/api/v1/plugin/{PLUGIN_ID}/ui/?v={self.plugin_version}"
         return [
             {
                 "component": "iframe",
@@ -257,8 +335,13 @@ class AVHelper(_PluginBase):
         ]
 
     def get_render_mode(self) -> Tuple[str, Optional[str]]:
-        """使用 Vuetify JSON 模式（页面里内嵌自带应用，无需联邦构建产物）。"""
-        return "vuetify", None
+        """使用 Vue 联邦模式：弹窗正文交给 `frontend/dist/assets` 里的远程组件。
+
+        切到 `vue` 之后宿主**不再画右下角那个齿轮按钮**（那是 `vuetify` 分支专有的 `VFab`），
+        设置台与数据台都由组件自己绘制。`get_form()` 仍提供宿主配置模型的默认值，
+        `get_page()` 保留 iframe 作为旧宿主/联邦加载失败时的回退。
+        """
+        return "vue", "frontend/dist/assets"
 
     def get_sidebar_nav(self) -> List[Dict[str, Any]]:
         """侧栏联邦入口需要 Vue 构建产物，本插件不提供。"""
@@ -267,10 +350,15 @@ class AVHelper(_PluginBase):
     # ---------- API 注册 ----------
 
     def get_api(self) -> List[Dict[str, Any]]:
-        """返回插件 API 列表：/ui 与 /img 匿名，其余 bear 鉴权。"""
+        """返回插件 API 列表：`/ui` 三连（含静态资源）与 `/img` 匿名，其余 bear 鉴权。"""
         return [
             {"path": "/ui", "endpoint": self.api_ui, "methods": ["GET"], "allow_anonymous": True,
+             "summary": "应用界面入口(307→/ui/)", "description": "自带界面，无密钥，补尾斜杠"},
+            {"path": "/ui/", "endpoint": self.api_ui_index, "methods": ["GET"], "allow_anonymous": True,
              "summary": "应用界面(HTML)", "description": "自带界面，无密钥"},
+            {"path": "/ui/{path:path}", "endpoint": self.api_ui_file, "methods": ["GET"],
+             "allow_anonymous": True, "summary": "界面静态资源",
+             "description": "ui/ 目录下的 js/css/图片，按扩展名给 MIME，每次从盘上读"},
             {"path": "/img", "endpoint": self.api_img, "methods": ["GET"], "allow_anonymous": True,
              "summary": "图片代理(XOR解包)", "description": "白名单图床，匿名开放"},
             {"path": "/bootstrap", "endpoint": self.api_bootstrap, "methods": ["GET"], "auth": "bear",
@@ -280,7 +368,7 @@ class AVHelper(_PluginBase):
             {"path": "/actors", "endpoint": self.api_actors, "methods": ["GET"], "auth": "bear",
              "summary": "演员榜"},
             {"path": "/actor", "endpoint": self.api_actor, "methods": ["GET"], "auth": "bear",
-             "summary": "演员档案+作品史(分页)"},
+             "summary": "演员档案+作品史"},
             {"path": "/search", "endpoint": self.api_search, "methods": ["GET"], "auth": "bear",
              "summary": "番号/演员搜索"},
             {"path": "/detail", "endpoint": self.api_detail, "methods": ["GET"], "auth": "bear",
@@ -307,10 +395,10 @@ class AVHelper(_PluginBase):
              "summary": "手动检查订阅(受限流)"},
             {"path": "/notices", "endpoint": self.api_notices, "methods": ["GET", "DELETE"],
              "auth": "bear", "summary": "通知列表/清空"},
-            {"path": "/notices/wait", "endpoint": self.api_notices_wait, "methods": ["GET"],
-             "auth": "bear", "summary": "长轮询等新通知（角标实时到）"},
             {"path": "/sites", "endpoint": self.api_sites, "methods": ["GET"], "auth": "bear",
              "summary": "已配置站点"},
+            {"path": "/cache/clean", "endpoint": self.api_cache_clean, "methods": ["POST"],
+             "auth": "bear", "summary": "清理缓存"},
         ]
 
     # ---------- 基础设施 ----------
@@ -603,19 +691,55 @@ class AVHelper(_PluginBase):
 
     # ---------- API：界面与图片 ----------
 
-    def api_ui(self) -> Response:
-        """下发自带应用界面（单文件 HTML，无密钥，可匿名访问）。"""
-        path = Path(__file__).with_name("webui.html")
-        if not path.exists():
+    def api_ui(self, request: Request) -> Response:
+        """`/ui`（缺尾斜杠）307 跳到 `/ui/`：ES module 的相对导入按文档所在目录解析。
+
+        没有尾斜杠时 `./app.js` 会解析成 `…/app.js`（少一层 `ui/`），所以这里必须补上；
+        查询串（如 `?v=`）原样保留，避免把版本参数丢掉。
+        """
+        target = f"/api/v1/plugin/{PLUGIN_ID}/ui/"
+        query = request.url.query
+        if query:
+            target = f"{target}?{query}"
+        return RedirectResponse(target, status_code=307)
+
+    def api_ui_index(self) -> Response:
+        """`/ui/` 下发界面入口页（无密钥，可匿名访问）。
+
+        每次请求都从盘上读（前端调试改完刷新即生效，见 AGENTS.md 的硬要求）。
+        `ui/index.html` 尚未拆出来时回落到老的 `webui.html`，保证多文件前端就位前也能用。
+        """
+        page = UI_DIR / "index.html"
+        if not page.is_file():
+            page = Path(__file__).with_name("webui.html")
+        if not page.is_file():
             return HTMLResponse(
-                "<meta charset='utf-8'><h2>界面文件 webui.html 缺失</h2>"
-                "<p>请重新同步插件目录。</p>", status_code=500,
+                "<meta charset='utf-8'><h2>界面文件缺失</h2>"
+                "<p>请重新同步插件目录（ui/index.html 或 webui.html）。</p>", status_code=500,
             )
         try:
-            html = path.read_text(encoding="utf-8")
+            html = page.read_text(encoding="utf-8")
         except Exception as error:
             return HTMLResponse(f"<meta charset='utf-8'>读取界面失败：{error}", status_code=500)
         return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+
+    def api_ui_file(self, path: str = "") -> Response:
+        """`/ui/{path}` 下发 `ui/` 目录内的静态文件，按扩展名给 MIME（ES module 必须是对的 JS 类型）。
+
+        每次请求都从盘上读，不做内存缓存；空路径、越界路径、不存在一律 404（不列目录）。
+        """
+        if not str(path or "").strip("/"):
+            return self.api_ui_index()
+        target = ui_file(path)
+        if target is None:
+            return Response(status_code=404)
+        try:
+            blob = target.read_bytes()
+        except Exception as error:
+            logger.error(f"AVHelper 读取界面资源失败 {target.name}：{error}")
+            return Response(status_code=500)
+        return Response(content=blob, media_type=ui_media_type(target),
+                        headers={"Cache-Control": "no-cache"})
 
     def api_img(self, url: str) -> Response:
         """图片代理：白名单内 URL → XOR 解包后的图片，否则 404。
@@ -628,11 +752,78 @@ class AVHelper(_PluginBase):
         return Response(content=blob, media_type=imgproxy.media_type(blob),
                         headers={"Cache-Control": "public, max-age=2592000"})
 
+    # ---------- 运行概况（bootstrap 用） ----------
+
+    def cache_size(self, force: bool = False) -> int:
+        """缓存目录当前占用（字节）。
+
+        结果带 `CACHE_SIZE_TTL` 秒的内存缓存：前端每 15 秒轮询一次 `/bootstrap`，
+        每次都对上万文件 rglob 会把请求拖慢。清理后要立刻拿到新值就传 `force=True`。
+
+        :param force: 忽略内存缓存，重新统计
+        :return: 缓存目录下所有文件的字节数之和（统计失败按已累计的部分返回）
+        """
+        now = time.time()
+        stamp, cached = self._cache_size_cache
+        if not force and stamp and now - stamp < CACHE_SIZE_TTL:
+            return int(cached)
+        total = 0
+        try:
+            for path in CACHE_ROOT.rglob("*"):
+                if not path.is_file():
+                    continue
+                try:
+                    total += path.stat().st_size
+                except OSError:
+                    continue
+        except OSError as error:      # 目录不存在/权限异常都不要把 /bootstrap 打挂
+            logger.error(f"AVHelper 统计缓存体积失败：{error}")
+        self._cache_size_cache = (now, total)
+        return int(total)
+
+    def cache_size_forget(self) -> None:
+        """让缓存体积的内存缓存失效（清理后调用，界面立刻拿到新值而不是 60 秒前的）。"""
+        self._cache_size_cache = (0.0, 0)
+
+    def check_state(self, rule: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """订阅检查的限流状态（只读展示，判定仍由 `RateLimiter.check_allowed` 负责）。
+
+        界面要显示「现在能不能检查、下次什么时候能检查」，所以把判定结果翻译成一个时间点：
+        现在允许 → `nextAt=0`；因每日上限被拒 → 今天 24:00；因间隔不足被拒 → 上次检查 + 最小间隔。
+
+        :param rule: 已取到的全局默认规则；不传就现取一份
+        """
+        rule = rule if isinstance(rule, dict) else self.global_rule()
+        max_per_day = int(rule.get("maxPerDay") or 6)
+        min_interval = int(rule.get("minIntervalMin") or 240)
+        allowed, reason = self.limiter.check_allowed(max_per_day, min_interval)
+        state = self.limiter.state()
+        checked_today = int(state.get("checked_today") or 0)
+        last_check = float(state.get("last_check") or 0)
+        next_at = 0
+        if not allowed:
+            if checked_today >= max_per_day:
+                # 计数键按本地日期分桶（rate_limit 里用 strftime），所以这里也按本地时间取今天 24:00
+                next_at = time.mktime(time.strptime(time.strftime("%Y-%m-%d"), "%Y-%m-%d")) + 86400
+            elif last_check:
+                next_at = last_check + min_interval * 60
+        return {
+            "allowed": bool(allowed),
+            "reason": "" if allowed else str(reason),
+            "nextAt": int(next_at),
+            "checkedToday": checked_today,
+            "lastCheck": int(last_check),
+            "maxPerDay": max_per_day,
+            "minIntervalMin": min_interval,
+        }
+
     # ---------- API：只读数据 ----------
 
     def api_bootstrap(self) -> Dict[str, Any]:
-        """首屏状态聚合：收藏、订阅、任务、队列、通知、站点与默认规则。"""
+        """首屏状态聚合：收藏、订阅、任务、队列、通知、站点、默认规则与运行概况。"""
         queue = self.engine.queue()
+        rule = self.global_rule()
+        size = self.cache_size()
         return {
             "success": True,
             "enabled": self._enabled,
@@ -643,7 +834,11 @@ class AVHelper(_PluginBase):
             "notices": self.store.notice_list(),
             "tasks": self.engine.task_list(),
             "queue": queue,
-            "defaultRule": self.global_rule(),
+            "defaultRule": rule,
+            # 运行概况（设置台「运行与缓存」/ 右栏）：体积带 60 秒内存缓存，检查状态是只读快照
+            "cacheSize": size,
+            "cacheSizeText": size_text(size),
+            "check": self.check_state(rule),
         }
 
     def api_rankings(self, period: str = "week", kind: str = "censored") -> Dict[str, Any]:
@@ -958,32 +1153,6 @@ class AVHelper(_PluginBase):
             return {"success": True, "notices": [], "message": "已清空通知"}
         return {"success": True, "notices": self.store.notice_list()}
 
-    async def api_notices_wait(self, request: Request) -> Dict[str, Any]:
-        """长轮询等新通知：有新的立刻回包，没有就挂到超时（默认 25 秒）再回空。
-
-        界面靠它做「通知一到角标就变」——比定时轮询快一个数量级，也不比轮询费：一次请求
-        最多只回一次包。`after` 是客户端手里最新的通知 id；`wake=True` 表示确实有新通知。
-        超时值封顶 50 秒，给反向代理留余量（长连接挂太久会被网关掐断）。
-        """
-        try:
-            after = int(request.query_params.get("after") or 0)
-        except ValueError:
-            after = 0
-        try:
-            timeout = float(request.query_params.get("timeout") or 25)
-        except ValueError:
-            timeout = 25.0
-        timeout = max(1.0, min(timeout, 50.0))
-        deadline = time.monotonic() + timeout
-        while True:
-            newest = await asyncio.to_thread(self.store.notice_max_id)
-            if newest > after:
-                notices = await asyncio.to_thread(self.store.notice_list)
-                return {"success": True, "wake": True, "notices": notices}
-            if time.monotonic() >= deadline:
-                return {"success": True, "wake": False, "notices": []}
-            await asyncio.sleep(0.5)
-
     @staticmethod
     async def _json_body(request: Request) -> Dict[str, Any]:
         """安全读取 JSON 请求体（空体或非法 JSON 都返回空字典）。"""
@@ -992,6 +1161,25 @@ class AVHelper(_PluginBase):
             return data if isinstance(data, dict) else {}
         except Exception:
             return {}
+
+    # ---------- API：缓存维护 ----------
+
+    def api_cache_clean(self) -> Dict[str, Any]:
+        """手动清理缓存：过期项 → 孤儿文件 → 容量上限淘汰，与定时任务共用同一套逻辑。
+
+        同步磁盘 IO（缓存里可能上万文件）由宿主线程池执行；返回本次释放量、清理后的占用，
+        并顺手让体积内存缓存失效，免得界面最长 60 秒还显示旧值。
+        """
+        freed = self.job_cacheclean()
+        size = self.cache_size(force=True)
+        return {
+            "success": True,
+            "message": f"已清理，释放 {size_text(freed)}",
+            "freed": int(freed),
+            "freedText": size_text(freed),
+            "cacheSize": int(size),
+            "cacheSizeText": size_text(size),
+        }
 
     # ---------- 定时任务 ----------
 
@@ -1004,8 +1192,14 @@ class AVHelper(_PluginBase):
         if result.get("limited"):
             logger.info(f"AVHelper 订阅检查被限流：{result.get('message')}")
 
-    def job_cacheclean(self) -> None:
-        """缓存清理：过期文件 → 孤儿文件 → 容量上限淘汰（§8.1）。"""
+    def job_cacheclean(self) -> int:
+        """缓存清理：过期文件 → 孤儿文件 → 容量上限淘汰（§8.1）。
+
+        定时任务与界面上的「清理缓存」共用本方法；SQLite 库与它的事务副产物（同目录下的
+        `avhelper.db*`）永远跳过——它们不在缓存索引里，按孤儿删会连订阅/收藏/任务一起丢。
+
+        :return: 本次释放的字节数（cron 调用方忽略该值）
+        """
         removed_bytes = 0
         # 1. 过期项
         expired = self.store.cache_expired()
@@ -1022,9 +1216,14 @@ class AVHelper(_PluginBase):
         self.store.cache_drop(keys)
         removed_bytes += freed
 
-        # 2. 孤儿文件（在缓存目录里但不在索引里）
+        # 2. 孤儿文件（在缓存目录里但不在索引里；数据库文件除外）
+        #
+        # **只扫 META_DIR，不扫 images**：图片缓存从不登记索引（`imgproxy.fetch()` 与 `/img`
+        # 路由都不调 `cache_put`），所以"不在索引里"对图片而言恒真 —— 把 images 一起扫等于
+        # 每晚把整个图片缓存删光（2026-10-10 实测：847 个文件被判孤儿）。图片本该由下面第 3 步
+        # 的「容量上限 + 按 mtime 淘汰」来兜底。原实现两处并存，属既有缺陷，本次修正。
         indexed = {item["path"] for item in self.store.cache_all()}
-        for folder in (META_DIR, CACHE_ROOT / "images"):
+        for folder in (META_DIR,):
             if not folder.exists():
                 continue
             for path in folder.glob("*"):
@@ -1035,7 +1234,7 @@ class AVHelper(_PluginBase):
                     except Exception:
                         pass
 
-        # 3. 容量上限：按 mtime 由旧到新淘汰
+        # 3. 容量上限：按 mtime 由旧到新淘汰（同样不碰数据库文件）
         limit = CACHE_MAX_GB * 1024 ** 3
         files = [p for p in CACHE_ROOT.rglob("*") if p.is_file() and not is_keep_file(p)]
         total = sum(p.stat().st_size for p in files)
@@ -1051,9 +1250,11 @@ class AVHelper(_PluginBase):
                 except Exception:
                     pass
 
+        self.cache_size_forget()      # 体积变了，让 /bootstrap 的 60 秒缓存失效
         if removed_bytes > 5 * 1024 ** 3:
             self.notifier.info("缓存清理", f"本次清理释放 {removed_bytes / 1024 ** 3:.1f} GB")
         logger.info(f"AVHelper 缓存清理完成，释放 {removed_bytes / 1024 ** 2:.1f} MB")
+        return int(removed_bytes)
 
     def trigger_check_now(self) -> None:
         """界面“立即检查”入口：挂一次性任务，避免阻塞请求线程。"""
