@@ -30,6 +30,7 @@ import DiscoverView from './views/DiscoverView.vue'
 import DetailDrawer from './detail/DetailDrawer.vue'
 import NotifyDrawer from './detail/NotifyDrawer.vue'
 import SearchDialog from './detail/SearchDialog.vue'
+import BottomToast from './common/BottomToast.vue'
 import { usePluginStore } from '../composables/usePluginStore'
 import { countUnread } from '../composables/noticesSeen'
 import { takePendingSettingsSection } from '../composables/settingsJump'
@@ -1056,6 +1057,14 @@ onBeforeUnmount(() => {
       @close="notifyOpen = false"
       @clear="clearNoticesFromDrawer"
     />
+
+    <!--
+      底部居中的提示条（0.6.0）：只有它和宿主 toast 两条通道。
+      宿主 toast 是右下角（`vue-toastification` + MP 的 `position:"bottom-right"`），
+      而「PT 站未找到资源」这类提示按用户要求要在界面中间下方 —— 见
+      `composables/bottomToast.ts` 的文件头。挂在这里，任何子组件都能推。
+    -->
+    <BottomToast />
   </div>
 </template>
 

@@ -34,7 +34,10 @@
  * 与老实现的行为差异（都在下面各自位置有注释）：
  * 1. **Esc**：抽屉由 `v-navigation-drawer` 自己关（先关灯箱、再关抽屉，与老实现同先后）；
  * 2. 「下载该影片」的提示：老实现是底部浮动 hint（`ui/views/tasks.js` 的 `hint()`），
- *    宿主合同（`moviepilot:toast`）里没有那个通道，改成按后端 `toasts` 依次弹（0.6.0）；
+ *    宿主 toast（`moviepilot:toast`）里没有那个通道，而且真机实测宿主 toast 落在**右下角**
+ *    （vue-toastification + `position:"bottom-right"`）—— 于是 0.6.0 起这条链路改用
+ *    插件自带的**底部居中提示条**（`common/BottomToast.vue` + `composables/bottomToast.ts`），
+ *    文案与顺序仍由后端 `toasts` 给；
  * 3. 骨架里 `Thumb` 在封面缺失时给 `.noimg` 占位，而老 `skeletonHtml` 是一句
  *    「正在获取封面…」的文字提示；文案保留在同一位置（缺封面时才出现）；
  * 4. 老实现 `renderPills()` 之后还要等整应用重绘；这里 `emit('refreshSide')` 请壳去刷右栏概况。
@@ -44,7 +47,8 @@ import EmptyState from '../common/EmptyState.vue'
 import ErrorState from '../common/ErrorState.vue'
 import Thumb from '../common/Thumb.vue'
 import Lightbox from './Lightbox.vue'
-import { hostToast, playToasts, type PluginApi } from '../../composables/usePluginApi'
+import { hostToast, type PluginApi } from '../../composables/usePluginApi'
+import { playBottomToasts, pushBottomToast } from '../../composables/bottomToast'
 import { cssUrl } from '../../composables/cssUrl'
 import {
   cachedDetail,
@@ -389,7 +393,11 @@ async function downloadMagnet(magnet: any): Promise<void> {
  * 0.6.0 起这颗按钮不再只是"搜一下"（老 `ptSearch(number, actor, thumb, btn)` 只把候选丢进
  * 「任务」页）：后端 `POST /tasks/acquire` 会按全局规则的「命中之后」当场决定 ——
  * 自动下载就直接下单，仅通知或没找到就落一条待确认任务。**提示语与顺序由后端给**
- * （`toasts`：先「PT 站未找到资源」，再按 BT 兜底的结果补一句），前端只负责弹。
+ * （`toasts`：先「PT 站未找到资源」，再按 BT 兜底的结果补一句）。
+ *
+ * 提示走**插件自带的底部居中提示条**（`playBottomToasts`），不走宿主 toast：
+ * 真机产物实测宿主 toast 是 vue-toastification + `position:"bottom-right"`（右下角），
+ * 而这两句提示按用户要求要出现在界面中间下方，见 `composables/bottomToast.ts`。
  */
 const ptSearching = ref(false)
 /** 已提交下载：按钮停在「✅ 已提交」，与磁力那颗同一套写法（不复位）。 */
@@ -404,12 +412,12 @@ async function ptSearch(): Promise<void> {
       thumb: String(movie.value.thumb || ''),
     })
     if (!res.ok) {
-      t.warning('下载失败')
-      t.info(res.message || '抓取失败，请稍后重试')
+      pushBottomToast('warning', '下载失败')
+      pushBottomToast('info', res.message || '抓取失败，请稍后重试')
       return
     }
     const payload: any = res.data || {}
-    playToasts(t, payload.toasts)
+    playBottomToasts(payload.toasts)
     if (payload.outcome === 'downloaded') acquired.value = true
     emit('refreshSide')
   } finally {
