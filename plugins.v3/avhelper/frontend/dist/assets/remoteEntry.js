@@ -2,11 +2,11 @@ const currentImports = {};
       const exportSet = new Set(['Module', '__esModule', 'default', '_export_sfc']);
       let moduleMap = {
 "./Page":()=>{
-      dynamicLoadingCss(["Console-B9mtHYBJ.css"], false, './Page');
-      return __federation_import('./__federation_expose_Page-TRasM50f.js').then(module =>Object.keys(module).every(item => exportSet.has(item)) ? () => module.default : () => module)},
+      dynamicLoadingCss(["Console-De2288Ro.css"], false, './Page');
+      return __federation_import('./__federation_expose_Page-_VURaQX-.js').then(module =>Object.keys(module).every(item => exportSet.has(item)) ? () => module.default : () => module)},
 "./Config":()=>{
-      dynamicLoadingCss(["Console-B9mtHYBJ.css"], false, './Config');
-      return __federation_import('./__federation_expose_Config-Ct_T8DB1.js').then(module =>Object.keys(module).every(item => exportSet.has(item)) ? () => module.default : () => module)},};
+      dynamicLoadingCss(["Console-De2288Ro.css"], false, './Config');
+      return __federation_import('./__federation_expose_Config-CZ1rjyom.js').then(module =>Object.keys(module).every(item => exportSet.has(item)) ? () => module.default : () => module)},};
       const seen = {};
       const dynamicLoadingCss = (cssFilePaths, dontAppendStylesToHead, exposeItemName) => {
         const metaUrl = import.meta.url;

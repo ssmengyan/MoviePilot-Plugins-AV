@@ -592,12 +592,24 @@ function resetLongLoad(): void {
   longNaturalH.value = 0
 }
 
-/** 代理地址（老 `apiUrl('/img', {url})`）。 */
-const longProxySrc = computed(() => {
-  const raw = String(long.value?.url || '')
-  if (!raw || !props.pluginId) return ''
-  return `/api/v1/plugin/${props.pluginId}/img?url=${encodeURIComponent(raw)}`
-})
+/**
+ * 插件图片代理地址（老 `apiUrl('/img', {url})`）。
+ *
+ * 抽成函数是因为**两条链都要用同一个拼法**：① 渲染时的回落（`longSrcAttr`）；
+ * ② `paintLong()` 预载时的代理那一跳。各写一份迟早会漂（2026-10-14 实测就吃过：
+ * 预载的回落那一跳用的是**直连地址**，于是直连失败 → 回落 → 又直连 → 无限重试，
+ * 6 秒打出 4443 条 403，界面上永远停在「⏳ 正在加载长缩略图…」）。
+ *
+ * 优先用 `longSrc`（本次真正要画的地址），它为空时才退回 `longState` 里的地址 ——
+ * 这样"预载用的地址"与"渲染用的地址"始终是同一个。
+ */
+function proxySrcOf(raw: unknown): string {
+  const url = String(raw || '')
+  if (!url || !props.pluginId) return ''
+  return `/api/v1/plugin/${props.pluginId}/img?url=${encodeURIComponent(url)}`
+}
+
+const longProxySrc = computed(() => proxySrcOf(String(longSrc.value || long.value?.url || '')))
 
 const longSrcAttr = computed(() => (longUseProxy.value ? longProxySrc.value : longSrc.value))
 
@@ -632,16 +644,26 @@ const longImgKey = computed(
  *
  * 顺带恢复了老实现的一个副作用：预载用的是同一个 `Image()`，浏览器的解码缓存因此
  * 是热的，`loadLong(true)` 重画时不会又等一遍网络。
+ *
+ * :param useProxy: 这一次预载走**插件代理**。只有"直连失败后的那一跳"才传 true ——
+ *   回落必须真的换地址重来，否则就是拿同一个直连地址反复重试（见 `proxySrcOf()` 的注释）。
  */
-function paintLong(url: string): void {
-  const src = String(url || '')
-  if (!src) return
+function paintLong(url: string, useProxy = false): void {
+  const raw = String(url || '')
+  if (!raw) return
   const token = ++longLoadId
+  const target = useProxy ? proxySrcOf(raw) : raw
   longSrc.value = ''
-  longUseProxy.value = false
+  longUseProxy.value = useProxy
   longError.value = null
   longNaturalW.value = 0
   longNaturalH.value = 0
+  // 拿不到插件 id（没有可用代理）时直接判失败：不能退回直连，那会变成无限重试。
+  if (!target) {
+    longLoading.value = false
+    longFail('长缩略图加载失败：浏览器直连与插件代理都没取到。')
+    return
+  }
   longLoading.value = true
   const probe = new Image()
   probe.decoding = 'async'
@@ -651,20 +673,19 @@ function paintLong(url: string): void {
     longNaturalW.value = probe.naturalWidth
     longNaturalH.value = probe.naturalHeight
     longLoading.value = false
-    longSrc.value = src
+    longSrc.value = raw                       // 渲染时由 `longUseProxy` 决定直连还是代理
   }
   probe.onerror = () => {
     if (token !== longLoadId) return
-    // 直连失败 → 换插件代理地址再预载一次（**只回落一次**，与老 `im.onerror` 同序）。
-    if (!longUseProxy.value && longProxySrc.value) {
-      longUseProxy.value = true
-      paintLong(String(long.value?.url || ''))
+    // 直连失败 → 用**代理地址**再预载一次；代理也失败才判失败（与老 `im.onerror` 同序，只回落一次）。
+    if (!useProxy && proxySrcOf(raw)) {
+      paintLong(raw, true)
       return
     }
     longLoading.value = false
     longFail('长缩略图加载失败：浏览器直连与插件代理都没取到。')
   }
-  probe.src = src
+  probe.src = target
 }
 
 /** 老 `longFail(text, url)`。 */

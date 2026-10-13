@@ -6166,24 +6166,31 @@ const _sfc_main$3 = /* @__PURE__ */ _defineComponent$3({
       longNaturalW.value = 0;
       longNaturalH.value = 0;
     }
-    const longProxySrc = computed$4(() => {
-      const raw = String(long.value?.url || "");
-      if (!raw || !props.pluginId) return "";
-      return `/api/v1/plugin/${props.pluginId}/img?url=${encodeURIComponent(raw)}`;
-    });
+    function proxySrcOf(raw) {
+      const url = String(raw || "");
+      if (!url || !props.pluginId) return "";
+      return `/api/v1/plugin/${props.pluginId}/img?url=${encodeURIComponent(url)}`;
+    }
+    const longProxySrc = computed$4(() => proxySrcOf(String(longSrc.value || long.value?.url || "")));
     const longSrcAttr = computed$4(() => longUseProxy.value ? longProxySrc.value : longSrc.value);
     const longImgKey = computed$4(
       () => `${activeNumber.value}|${longUseProxy.value ? "p" : "d"}#${longSrc.value}`
     );
-    function paintLong(url) {
-      const src = String(url || "");
-      if (!src) return;
+    function paintLong(url, useProxy = false) {
+      const raw = String(url || "");
+      if (!raw) return;
       const token = ++longLoadId;
+      const target = useProxy ? proxySrcOf(raw) : raw;
       longSrc.value = "";
-      longUseProxy.value = false;
+      longUseProxy.value = useProxy;
       longError.value = null;
       longNaturalW.value = 0;
       longNaturalH.value = 0;
+      if (!target) {
+        longLoading.value = false;
+        longFail("长缩略图加载失败：浏览器直连与插件代理都没取到。");
+        return;
+      }
       longLoading.value = true;
       const probe = new Image();
       probe.decoding = "async";
@@ -6193,19 +6200,18 @@ const _sfc_main$3 = /* @__PURE__ */ _defineComponent$3({
         longNaturalW.value = probe.naturalWidth;
         longNaturalH.value = probe.naturalHeight;
         longLoading.value = false;
-        longSrc.value = src;
+        longSrc.value = raw;
       };
       probe.onerror = () => {
         if (token !== longLoadId) return;
-        if (!longUseProxy.value && longProxySrc.value) {
-          longUseProxy.value = true;
-          paintLong(String(long.value?.url || ""));
+        if (!useProxy && proxySrcOf(raw)) {
+          paintLong(raw, true);
           return;
         }
         longLoading.value = false;
         longFail("长缩略图加载失败：浏览器直连与插件代理都没取到。");
       };
-      probe.src = src;
+      probe.src = target;
     }
     function longFail(text) {
       longError.value = text;
@@ -6637,7 +6643,7 @@ const _sfc_main$3 = /* @__PURE__ */ _defineComponent$3({
   }
 });
 
-const DetailDrawer = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-aa3ee325"]]);
+const DetailDrawer = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-1a0a40f4"]]);
 
 const {defineComponent:_defineComponent$2} = await importShared('vue');
 
