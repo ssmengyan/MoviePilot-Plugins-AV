@@ -3723,7 +3723,7 @@ const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
   }
 });
 
-const NumCard = /* @__PURE__ */ _export_sfc(_sfc_main$b, [["__scopeId", "data-v-78f1229c"]]);
+const NumCard = /* @__PURE__ */ _export_sfc(_sfc_main$b, [["__scopeId", "data-v-aaa42289"]]);
 
 const {reactive: reactive$2} = await importShared('vue');
 

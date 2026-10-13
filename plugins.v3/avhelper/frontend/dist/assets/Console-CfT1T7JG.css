@@ -743,7 +743,7 @@
 }
 
 /* 对齐 `app.css` 的 `.card`（网格列由父级 `.grid` 提供） */
-.avh-card[data-v-78f1229c] {
+.avh-card[data-v-aaa42289] {
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -753,35 +753,42 @@
   background: rgb(var(--v-theme-surface));
   transition: 0.15s;
 }
-.avh-card[data-v-78f1229c]:hover {
+.avh-card[data-v-aaa42289]:hover {
   border-color: rgb(var(--v-theme-primary));
   transform: translateY(-2px);
 }
 
 /* `.thumb`：3:4 竖版封面 + 渐变底（缺图时不至于一片死黑） */
-.avh-card__thumb[data-v-78f1229c] {
+.avh-card__thumb[data-v-aaa42289] {
   position: relative;
   aspect-ratio: 3 / 4;
   overflow: hidden;
 }
 
 /*
- * 图源是 javdb 的「封套展开图」时，盒子比例要收到 **5:7**（≈0.714），不能是 3:4。
+ * 图源是 javdb 的「封套展开图」时，盒子比例必须是 **377 / 538**（≈0.7007），不是 3:4、也不是 5:7。
  *
- * 为什么（2026-10-13 实测 61 张）：展开图里封面那半幅稳定只占图像宽度的 **48%**，
- * 比例 w/h 中位 0.7138（60/61 张都窄于 3:4）。盒子比例决定裁切窗口的宽度
- * —— `cover` 的窗口宽 = 图高 × 盒子比例 —— 用 3:4 时窗口 538×0.75 = 403px，
- * 而封面只有 384px，贴右之后左边必然多出约 19px 的封底（卡片上约 9px 的一条边，
- * 用户 2026-10-13 就是这样看到"每张都露一条左边"的）。
+ * 展开图的真实结构是 **封底 | 书脊 | 封面** 三段（2026-10-13 用"整列竖直边缘"检测 61 张量出来的）：
+ *   封底 [0, 419]　折痕 [419, 422]　封面 [423, 800]　（800 宽那档；840×568 那档同比例：
+ *   折痕 [438, 441]、封面 [442, 840]）
+ * 折痕是图像高度上的一条整竖线、宽度稳定 **4px**（61 张里绝大多数都是 [419,422]），
+ * 印刷上它是书脊与封面的折边——所以它会显示成卡片左边的一条亮/彩色竖条。
  *
- * 5:7 → 窗口 538×5/7 = 384.3px，正好等于封面那半幅；实测各图在 382–386px 之间，
- * 误差 0–2px（卡片上不到 1px），左边那条就没了。
+ * 裁切窗口宽由盒子比例决定（窗口宽 = 图高 × 盒子比例），窗口又贴右，所以窗口左缘 = 800 - 窗口宽：
+ *   - 3:4   → 左缘 397 → 露出 22px 封底（用户第一次反馈）
+ *   - 5:7   → 左缘 416 → 啃进折痕 6px（用户第二次反馈"还是有一点点"）
+ *   - 380/538 → 左缘 420 → 还剩 2px 折痕
+ *   - 377/538 → 左缘 423 → **正好在折痕右侧**，封面完整、左边干净
+ *
+ * 为什么不能只靠"和竖图比对"定这个数：那条 MAE 曲线很平（无偏匹配下 ±5px 只差 4–8），
+ * argmin 落在 416（封面宽 385），但折痕本身有 4px 宽，416 仍在折痕里。
+ * 竖直线检测 + 折痕宽度才是能定到 423 的证据；代价是左侧少显示封面最外缘的 7–8px（约 2%）。
  *
  * 只在真有 `cover` 时才收窄：「已入库的番号」栏的行只有 147×200 竖图（比例 0.735，
- * 比 5:7 宽），照 5:7 的盒子会被横向裁掉左边约 5px，没必要为一个不存在的封底付这个代价。
+ * 比 0.7007 宽），照这个盒子会被横向裁掉左边约 9px，没必要为一个不存在的书脊付这个代价。
  */
-.avh-card__thumb.avh-card__thumb--spread[data-v-78f1229c] {
-  aspect-ratio: 5 / 7;
+.avh-card__thumb.avh-card__thumb--spread[data-v-aaa42289] {
+  aspect-ratio: 377 / 538;
 }
 
 /*
@@ -795,10 +802,10 @@
  *   2. 缺图时 `.noimg` 是 `inset:0` 的绝对定位盒，父级零高 → 番号占位**看不见**
  *      （老实现会把番号画在封面位置上）。
  */
-.avh-card__thumb[data-v-78f1229c] .avh-thumb {
+.avh-card__thumb[data-v-aaa42289] .avh-thumb {
   height: 100%;
 }
-.avh-card__badges[data-v-78f1229c] {
+.avh-card__badges[data-v-aaa42289] {
   position: absolute;
   left: 6px;
   top: 6px;
@@ -808,7 +815,7 @@
 }
 
 /* `.badge` 系列：底色走主题语义色 + 半透明，不写死深色值 */
-.avh-badge[data-v-78f1229c] {
+.avh-badge[data-v-aaa42289] {
   padding: 1px 6px;
   font-size: 10px;
   border-radius: 4px;
@@ -816,16 +823,16 @@
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(0, 0, 0, 0.6);
 }
-.avh-badge--cn[data-v-78f1229c] {
+.avh-badge--cn[data-v-aaa42289] {
   background: rgba(var(--v-theme-success), 0.85);
 }
-.avh-badge--uc[data-v-78f1229c] {
+.avh-badge--uc[data-v-aaa42289] {
   background: rgba(var(--v-theme-secondary), 0.85);
 }
-.avh-badge--new[data-v-78f1229c] {
+.avh-badge--new[data-v-aaa42289] {
   background: rgba(var(--v-theme-warning), 0.85);
 }
-.avh-badge--lib[data-v-78f1229c] {
+.avh-badge--lib[data-v-aaa42289] {
   background: rgba(var(--v-theme-primary), 0.85);
 }
 
@@ -837,17 +844,17 @@
  * 取 `info`：与 `primary` 同属冷色、明度接近，落在同一批卡片上既不抢眼又能区分；
  * 其余四颗已占用 success / secondary / warning / primary，`info` 是唯一没被用掉的语义色。
  */
-.avh-badge--dl[data-v-78f1229c] {
+.avh-badge--dl[data-v-aaa42289] {
   background: rgba(var(--v-theme-info), 0.85);
 }
-.avh-card__meta[data-v-78f1229c] {
+.avh-card__meta[data-v-aaa42289] {
   padding: 8px 9px 10px;
 }
-.avh-card__num[data-v-78f1229c] {
+.avh-card__num[data-v-aaa42289] {
   font-size: 13px;
   font-weight: 700;
 }
-.avh-card__sub[data-v-78f1229c] {
+.avh-card__sub[data-v-aaa42289] {
   display: flex;
   justify-content: space-between;
   gap: 6px;
@@ -855,7 +862,7 @@
   font-size: 11px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-card__sub span[data-v-78f1229c] {
+.avh-card__sub span[data-v-aaa42289] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -866,14 +873,14 @@
  * 它**不**继承 `.avh-card__sub span` 的省略号（那条只管 `span`）：链接要整体可见、
  * 不许被压缩，所以 `flex: none`；文件名那一格才吃剩余宽度。
  */
-.avh-card__watch[data-v-78f1229c] {
+.avh-card__watch[data-v-aaa42289] {
   flex: none;
   font-size: 11px;
   color: rgb(var(--v-theme-primary));
   text-decoration: none;
   white-space: nowrap;
 }
-.avh-card__watch[data-v-78f1229c]:hover {
+.avh-card__watch[data-v-aaa42289]:hover {
   text-decoration: underline;
 }
 
