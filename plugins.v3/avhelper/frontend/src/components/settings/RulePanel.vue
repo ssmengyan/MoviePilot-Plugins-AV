@@ -6,11 +6,13 @@
  * 只是搬进设置台常驻，不再每次开弹窗。数据归属：插件自管（`POST /rule`），
  * 点顶条「保存修改」才落库。
  *
- * `minIntervalMin` **只读展示**：它是按用户明确要求定的政策值（间隔 ≥240 分钟），
- * 界面不给编辑入口，保存时原样回传。
+ * `minIntervalMin` **只读展示**、`maxPerDay` **封顶 6**：这两个是按用户明确要求定的政策值
+ * （每天 ≤6 次、间隔 ≥240 分钟），界面不给放宽入口；后端 `merge_rule()` / `check_allowed()`
+ * 还会再夹一道（0.6.0 修：此前每天上限能填 100，写进规则就真按 100 放行）。
  */
+import { computed } from 'vue'
 import type { RuleState } from '../../composables/settingsModel'
-import { POLICY_MIN_INTERVAL_MIN } from '../../composables/settingsPolicy'
+import { POLICY_MAX_PER_DAY, POLICY_MIN_INTERVAL_MIN } from '../../composables/settingsPolicy'
 
 const props = defineProps<{
   rule: RuleState
@@ -30,6 +32,9 @@ const RES_OPTIONS = [
   { value: 'only4k', label: '仅 4K' },
 ] as const
 
+/** 「允许 4K 择优」只在「1080P 优先」下有意义（另两档本身就是 4K 口径）。 */
+const allow4kMatters = computed(() => props.rule.res === '1080p')
+
 function patch<K extends keyof RuleState>(key: K, value: RuleState[K]): void {
   emit('patch', { [key]: value } as Partial<RuleState>)
 }
@@ -38,6 +43,16 @@ function patch<K extends keyof RuleState>(key: K, value: RuleState[K]): void {
 function patchNumber(key: 'minSeeders' | 'maxPerDay', raw: string): void {
   const parsed = Number.parseInt(raw, 10)
   patch(key, Number.isFinite(parsed) ? parsed : 0)
+}
+
+/** 每日检查上限：**封顶政策值**（用户可往下调，不许往上放宽）。 */
+function patchMaxPerDay(raw: string): void {
+  const parsed = Number.parseInt(raw, 10)
+  if (!Number.isFinite(parsed)) {
+    patch('maxPerDay', POLICY_MAX_PER_DAY)
+    return
+  }
+  patch('maxPerDay', Math.min(Math.max(parsed, 1), POLICY_MAX_PER_DAY))
 }
 </script>
 
@@ -68,7 +83,9 @@ function patchNumber(key: 'minSeeders' | 'maxPerDay', raw: string): void {
           :value="option.value"
         >{{ option.label }}</v-btn>
       </v-btn-toggle>
-
+      <p class="text-caption text-medium-emphasis mb-4">
+        这一项会真正参与打分与淘汰：「仅 4K」把非 4K 的种子直接淘汰。
+      </p>
       <v-switch
         :model-value="props.rule.mustCnsub"
         color="primary"
@@ -97,11 +114,15 @@ function patchNumber(key: 'minSeeders' | 'maxPerDay', raw: string): void {
         color="primary"
         hide-details
         inset
+        :disabled="!allow4kMatters"
         label="允许 4K 择优"
         class="mb-1"
         @update:model-value="(value: any) => patch('allow4k', value === true)"
       />
-      <p class="text-caption text-medium-emphasis mb-3">1080P 没有好种时升级 4K。</p>
+      <p class="text-caption text-medium-emphasis mb-3">
+        <template v-if="allow4kMatters">1080P 没有好种时升级 4K。</template>
+        <template v-else>已选「4K 优先 / 仅 4K」，这一项不再起作用。</template>
+      </p>
 
       <div class="avh-grid mb-2">
         <v-text-field
@@ -119,12 +140,13 @@ function patchNumber(key: 'minSeeders' | 'maxPerDay', raw: string): void {
           :model-value="String(props.rule.maxPerDay)"
           type="number"
           min="1"
+          :max="POLICY_MAX_PER_DAY"
           label="每日检查上限"
-          hint="每天最多检查订阅几次"
+          :hint="`每天最多检查订阅几次（政策上限 ${POLICY_MAX_PER_DAY}）`"
           persistent-hint
           variant="outlined"
           density="comfortable"
-          @update:model-value="(value: any) => patchNumber('maxPerDay', String(value ?? ''))"
+          @update:model-value="(value: any) => patchMaxPerDay(String(value ?? ''))"
         />
         <v-text-field
           :model-value="String(props.policyMinInterval || POLICY_MIN_INTERVAL_MIN)"
@@ -143,10 +165,14 @@ function patchNumber(key: 'minSeeders' | 'maxPerDay', raw: string): void {
         color="primary"
         hide-details
         inset
-        label="PT 搜不到时允许 BT 磁力兜底"
-        class="mb-3"
+        label="PT 搜不到时用 BT 兜底"
+        class="mb-1"
         @update:model-value="(value: any) => patch('btFallback', value === true)"
       />
+      <p class="text-caption text-medium-emphasis mb-3">
+        关：PT 没搜到就直接进「任务」页待确认（标记「PT/BT 待确认」），不试 BT。<br>
+        开：自动再去 javdb 搜磁力；BT 也没有则进「任务」页并提示「该资源在所有源中均未找到」。
+      </p>
 
       <div class="text-caption text-medium-emphasis mb-1">命中之后</div>
       <v-btn-toggle
@@ -162,6 +188,7 @@ function patchNumber(key: 'minSeeders' | 'maxPerDay', raw: string): void {
         <v-btn value="auto">自动下载</v-btn>
       </v-btn-toggle>
       <p class="text-caption text-medium-emphasis mb-4">
+        「自动下载」＝ 详情页「⬇ 下载该影片」与订阅检查命中时都直接提交下载（挑打分最高的合格候选）；
         「仅通知」时命中的片进「任务」页等你手动下载。
       </p>
 

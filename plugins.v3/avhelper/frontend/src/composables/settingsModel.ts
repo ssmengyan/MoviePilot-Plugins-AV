@@ -5,7 +5,7 @@
  * 右栏和设置台都要读同一批 `/bootstrap` 字段（`cacheSize*` / `check`），
  * 归一逻辑只能有一份，否则两边会各自解释字段。
  */
-import { POLICY_MIN_INTERVAL_MIN } from './settingsPolicy'
+import { POLICY_MAX_PER_DAY, POLICY_MIN_INTERVAL_MIN } from './settingsPolicy'
 
 /** 后端 `POST/GET /rule` 的规则对象（字段名照抄后端，不许改名）。 */
 export interface RuleState {
@@ -147,9 +147,11 @@ export function toRuleState(raw: unknown): RuleState {
     prefSites: strList(src.prefSites),
     btFallback: bool(src.btFallback, RULE_FALLBACK.btFallback),
     trigger: str(src.trigger) === 'auto' ? 'auto' : 'notify',
-    maxPerDay: num(src.maxPerDay, RULE_FALLBACK.maxPerDay, true, 1),
-    // 限流参数不由界面放宽：拿不到就把政策固定值原样带回去。
-    minIntervalMin: num(src.minIntervalMin, RULE_FALLBACK.minIntervalMin, true, 1),
+    // 限流参数不由界面放宽：每日上限封顶政策值 6（后端 `merge_rule()` 还会再夹一道），
+    // 间隔拿不到就把政策固定值原样带回去。
+    maxPerDay: Math.min(num(src.maxPerDay, RULE_FALLBACK.maxPerDay, true, 1), POLICY_MAX_PER_DAY),
+    minIntervalMin: Math.max(num(src.minIntervalMin, RULE_FALLBACK.minIntervalMin, true, 1),
+                             POLICY_MIN_INTERVAL_MIN),
     savePath: str(src.savePath, RULE_FALLBACK.savePath),
     category: str(src.category, RULE_FALLBACK.category),
     downloader: str(src.downloader, RULE_FALLBACK.downloader),

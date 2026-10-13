@@ -27,7 +27,7 @@ from app.sdk.network import SitesHelper
 
 from . import emby
 from . import scoring
-from .ratelimit import is_antibot_error
+from .ratelimit import (POLICY_MAX_PER_DAY, POLICY_MIN_INTERVAL_MIN, is_antibot_error)
 from .sitesearch import SiteSearcher
 from .store import Store
 
@@ -74,11 +74,124 @@ QUEUE_DONE_RAW = 99.5
 
 
 def merge_rule(rule: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """把用户规则与默认值合并，缺字段回落默认。"""
+    """把用户规则与默认值合并，缺字段回落默认，并把限流两项夹回政策值。
+
+    `maxPerDay` / `minIntervalMin` 是规则里**用户可写**的字段，而政策要求每天 ≤6 次、
+    间隔 ≥240 分钟：在合并这一处夹一次，这样「存进 kv 的规则」「界面读回来的规则」
+    「限流判定用的规则」三处永远是同一个数（2026-10-13 修：早先界面能填 100）。
+    间隔只抬不降，所以想调**紧**（比如改成 480 分钟）依然可以。
+    """
     merged = dict(DEFAULT_RULE)
     if isinstance(rule, dict):
         merged.update({k: v for k, v in rule.items() if v is not None})
+    merged["maxPerDay"] = min(max(_int_or(merged.get("maxPerDay"), POLICY_MAX_PER_DAY), 1),
+                              POLICY_MAX_PER_DAY)
+    merged["minIntervalMin"] = max(_int_or(merged.get("minIntervalMin"), POLICY_MIN_INTERVAL_MIN),
+                                   POLICY_MIN_INTERVAL_MIN)
     return merged
+
+
+def _int_or(value: Any, default: int) -> int:
+    """规则里的数字字段 → 整数；认不出来用默认值（合法 JSON 里也可能是字符串）。"""
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+# ---------- 搜种结论（手动「下载该影片」与订阅检查共用同一套判定） ----------
+
+def split_segments(cands: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """按来源把候选切成（PT 段, BT 兜底段）；`src` 缺省当 PT。"""
+    pt = [c for c in cands if str(c.get("src") or "") != "BT"]
+    bt = [c for c in cands if str(c.get("src") or "") == "BT"]
+    return pt, bt
+
+
+def rule_verdict(cands: List[Dict[str, Any]], rule: Dict[str, Any]) -> Dict[str, Any]:
+    """按候选与规则判定「PT 中没中、BT 兜底试没试/中没中」，并给出待确认标记。
+
+    - `pt`：`hit` = PT 段至少一条合格候选；`miss` = 0 条，或结果全被规则淘汰；
+    - `bt`：`skipped`（PT 已命中，不必兜底）/ `off`（兜底开关关着，根本没试）/
+      `hit`（兜底段有合格候选）/ `miss`（试了但没有合格候选，含"javdb 上没有磁力"）；
+    - `pending`：进「任务」页时卡片上的标记 —— `''` 普通待确认（有候选可挑）、
+      `pt-only` = 「PT/BT 待确认」（PT 没中且没试 BT）、
+      `none` = 「所有源均未找到」（PT 与 BT 都没有可用资源）。
+    """
+    pt, bt = split_segments(cands or [])
+    pt_pass = any(c.get("pass") for c in pt)
+    bt_pass = any(c.get("pass") for c in bt)
+    if pt_pass:
+        bt_state = "skipped"
+    elif not rule.get("btFallback"):
+        bt_state = "off"
+    elif bt_pass:
+        bt_state = "hit"
+    else:
+        bt_state = "miss"
+    if pt_pass or bt_pass:
+        pending = ""
+    elif bt_state == "off":
+        pending = "pt-only"
+    else:
+        pending = "none"
+    return {
+        "pt": "hit" if pt_pass else "miss",
+        "bt": bt_state,
+        "pending": pending,
+        "pt_total": len(pt), "pt_pass": sum(1 for c in pt if c.get("pass")),
+        "bt_total": len(bt), "bt_pass": sum(1 for c in bt if c.get("pass")),
+    }
+
+
+def acquire_feedback(task: Dict[str, Any], verdict: Dict[str, Any],
+                     result: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
+    """「下载该影片」按完要说的话（级别 + 文案），顺序就是界面弹出顺序。
+
+    **文案由后端定**：前端只把 `toasts` 依次弹出来，不自己判断该说什么 ——
+    这样"PT 没找到"「所有源都没找到」这两句只有一处实现，改文案不用两头找。
+    """
+    cands = [c for c in (task.get("cands") or []) if isinstance(c, dict)]
+    pt, _bt = split_segments(cands)
+    pt_hit = verdict.get("pt") == "hit"
+    toasts: List[Dict[str, str]] = []
+
+    if not pt_hit:
+        toasts.append({"level": "warning", "text": "PT 站未找到资源"})
+        rejected = [c for c in pt if not c.get("pass")]
+        if rejected:
+            # PT 其实搜到了，只是全被规则淘汰：主提示照旧，第二行把实情说清楚，
+            # 否则用户会以为站点上一条都没有（那种情况可以点「仍要下载」硬下）。
+            sites = "、".join(dict.fromkeys(str(c.get("site") or "") for c in rejected if c.get("site")))
+            toasts.append({
+                "level": "info",
+                "text": f"{sites + ' ' if sites else ''}有 {len(rejected)} 条候选但不满足规则，"
+                        f"可在「任务」页点「仍要下载」",
+            })
+
+    if result and result.get("ok"):
+        if pt_hit:
+            toasts.append({"level": "success", "text": "已提交下载"})
+            detail = " · ".join(x for x in (str(result.get("site") or ""),
+                                            str(result.get("spec") or "")) if x)
+            toasts.append({"level": "info", "text": (detail + " · " if detail else "") + "进度见「下载」页"})
+        else:
+            toasts.append({"level": "success", "text": "已用 BT 磁力兜底提交下载"})
+            toasts.append({"level": "info", "text": "进度见「下载」页"})
+        return toasts
+
+    if pt_hit:
+        toasts.append({"level": "info",
+                       "text": f"已找到 {int(verdict.get('pt_pass') or 0)} 个候选，去「任务」页挑一个"})
+    elif verdict.get("bt") == "hit":
+        toasts.append({"level": "info", "text": "已用 BT 磁力兜底找到候选，去「任务」页挑一个"})
+    elif verdict.get("bt") == "off":
+        toasts.append({"level": "info",
+                       "text": "已放进「任务」页：可手动挑一条，或点「订阅该影片」等资源出现"})
+    else:
+        toasts.append({"level": "warning", "text": "该资源在所有源中均未找到"})
+        toasts.append({"level": "info", "text": "已放进「任务」页：可点「订阅该影片」等资源出现"})
+    return toasts
 
 
 # 台账的 size 列是字节，而队列/候选里的 size 是 `scoring.human_size()` 的展示文本（"1.2 GB"）
@@ -275,6 +388,9 @@ class TaskEngine:
             "auto": bool(auto),
             "rule": rule,
             "source": str(source or "manual"),
+            # 卡片上的标记：'' = 普通待确认、'pt-only' = PT/BT 待确认、'none' = 所有源均未找到
+            # （口径见 `rule_verdict()`；老任务没有这个字段，前端按空处理）
+            "pending": rule_verdict(cands, rule)["pending"],
         }
         self.store.task_add(task)
         return task
@@ -383,8 +499,60 @@ class TaskEngine:
             task["number"], cand, image=self._absolute(task.get("thumb"), image_base)
         )
         # 带上 number：接口层要靠它给「该番号已下载过」的提示（任务页那条路以前拿不到番号）
+        # 带上 site/spec/src：`acquire()` 的成功提示要写清"下的是哪一条"
         return {"ok": True, "message": str(message or "已提交下载"), "notice": notice,
-                "hash": torrent_hash, "downloader": downloader_name, "number": task["number"]}
+                "hash": torrent_hash, "downloader": downloader_name, "number": task["number"],
+                "site": str(cand.get("site") or ""), "spec": str(cand.get("spec") or ""),
+                "src": str(cand.get("src") or "")}
+
+    def acquire(self, number: str, actor: str = "", rule: Optional[Dict[str, Any]] = None,
+                thumb: str = "", image_base: str = "",
+                only_sites: Optional[List[str]] = None) -> Dict[str, Any]:
+        """「下载该影片」：搜种 → 按规则判定 → 当场下载，或落一条待确认任务。
+
+        与 `build_task()` 的区别只有一个，但正是用户报的那个问题：**它按规则里的
+        `trigger` 决定要不要当场下单**。手动这条路以前在接口层恒传 `auto=False`
+        （`__init__.py` 的 `api_task_search`），规则写着「自动下载」也不会下。
+
+        :param image_base: 通知附图的绝对地址前缀（同 `download()`）。
+        """
+        rule = merge_rule(rule)
+        auto = str(rule.get("trigger") or "notify") == "auto"
+        task = self.build_task(number, actor, rule, auto, thumb, only_sites, source="manual")
+        verdict = rule_verdict(task.get("cands") or [], rule)
+
+        result: Optional[Dict[str, Any]] = None
+        if auto and (verdict["pt"] == "hit" or verdict["bt"] == "hit"):
+            # `download()` 不传站点 = 取排序后 `picked` 的那条，也就是打分最高的合格候选
+            result = self.download(str(task.get("id") or ""), image_base=image_base)
+
+        downloaded = bool(result and result.get("ok"))
+        if downloaded:
+            # 状态已变成 pushed，回给界面的应当是刷新过的那一份
+            task = self.store.task_get(str(task.get("id") or "")) or task
+
+        toasts = acquire_feedback(task, verdict, result if downloaded else None)
+        if result is not None and not result.get("ok"):
+            toasts.append({"level": "warning",
+                           "text": f"自动下载失败：{result.get('message') or '请稍后重试'}"})
+        logger.info(f"AVHelper 下载该影片 {number}：pt={verdict['pt']} bt={verdict['bt']} "
+                    f"pending={verdict['pending']!r} 候选 {len(task.get('cands') or [])} 条 "
+                    f"→ {'已提交下载' if downloaded else '待确认'}")
+        return {
+            "task": task,
+            "outcome": "downloaded" if downloaded else "pending",
+            "pt": verdict["pt"],
+            "bt": verdict["bt"],
+            "pending": verdict["pending"],
+            "candCount": len(task.get("cands") or []),
+            "passCount": int(verdict["pt_pass"]) + int(verdict["bt_pass"]),
+            "hash": str((result or {}).get("hash") or "") if downloaded else "",
+            "downloader": str((result or {}).get("downloader") or "") if downloaded else "",
+            "site": str((result or {}).get("site") or "") if downloaded else "",
+            "spec": str((result or {}).get("spec") or "") if downloaded else "",
+            "toasts": toasts,
+            "message": "；".join(t["text"] for t in toasts),
+        }
 
     def download_magnet(self, number: str, info_hash: str, name: str = "") -> Dict[str, Any]:
         """详情页磁力直接推给下载器（界面上的「下载」，省掉复制再粘贴）。

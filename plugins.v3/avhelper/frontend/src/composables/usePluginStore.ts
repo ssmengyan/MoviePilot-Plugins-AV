@@ -69,6 +69,34 @@ export interface MagnetDownloadResult {
   message?: string
 }
 
+/** 后端给的提示语（`acquire` 的 `toasts`）：前端只管按序弹，不判逻辑。 */
+export interface PluginToast {
+  level?: string
+  text?: string
+}
+
+/** `POST plugin/tasks/acquire` 的返回（后端 `api_task_acquire`，0.6.0）。 */
+export interface AcquireResult {
+  /** `downloaded` = 已按规则当场下单；`pending` = 落进「任务」页待确认。 */
+  outcome?: string
+  /** PT 段：`hit` 有合格候选 / `miss` 没有。 */
+  pt?: string
+  /** BT 兜底：`hit` / `miss` / `off`（开关关着）/ `skipped`（PT 已命中，不必兜底）。 */
+  bt?: string
+  /** 任务卡上的标记：`''` | `pt-only` | `none`。 */
+  pending?: string
+  task?: SearchTask
+  candCount?: number
+  passCount?: number
+  hash?: string
+  downloader?: string
+  site?: string
+  spec?: string
+  toasts?: PluginToast[]
+  queue?: QueueItem[]
+  message?: string
+}
+
 /** 每次请求的形状判定结果。 */
 type Outcome = { ok: true; res: Record<string, any> } | { ok: false; message: string }
 
@@ -457,6 +485,49 @@ export function usePluginStore(api: PluginApi) {
   }
 
   /**
+   * `POST plugin/tasks/acquire`：详情页「下载该影片」——**按规则当场决定**。
+   *
+   * 与 `searchKeyword` 的分工（别合并）：那个是「检索」（站点搜索页用，只搜不下种），
+   * 这个走全局规则的 `trigger` —— 自动下载就当场下单，仅通知（或没找到）就落一条待确认。
+   * 提示文案由后端 `toasts` 给，调用方用 `playToasts()` 依次弹。
+   */
+  function acquireMovie(
+    number: string,
+    extra: { actor?: string; thumb?: string } = {},
+  ): Promise<ActionResult<AcquireResult>> {
+    return guarded('acquire', async () => {
+      const target = String(number ?? '').trim()
+      if (!target) return { ok: false, kind: 'error' as ActionResultKind, message: '缺少番号' }
+      const body: Record<string, unknown> = { number: target }
+      if (extra.actor) body.actor = extra.actor
+      if (extra.thumb) body.thumb = extra.thumb
+      const outcome = await send('post', 'tasks/acquire', body)
+      if (!outcome.ok) return { ok: false, kind: 'error' as ActionResultKind, message: outcome.message }
+      if (outcome.res.success !== true) {
+        return { ok: false, kind: 'error' as ActionResultKind, message: textOf(outcome.res) || '请稍后重试' }
+      }
+      const payload = (outcome.res.data ?? outcome.res) as AcquireResult
+      const nextQueue = listOf<QueueItem>(outcome.res.queue)
+      if (nextQueue) queue.value = nextQueue
+      const task = payload.task
+      if (task && typeof task === 'object' && task.id) {
+        // 后端回的就是这条任务的最新状态（自动下单后是 pushed）：就地替换/插到最前，
+        // 待确认列表与左栏角标立刻对齐，不必再打一次 `/tasks`。
+        tasks.value = [
+          task,
+          ...tasks.value.filter(item => String(item.id ?? '') !== String(task.id)),
+        ]
+      }
+      return {
+        ok: true,
+        kind: 'ok' as ActionResultKind,
+        message: textOf(outcome.res) || '',
+        data: payload,
+      }
+    })
+  }
+
+  /**
    * `POST plugin/tasks/download`：提交下载（按任务 id + 站点）。
    *
    * :param force: `true` = 「仍要下载」（允许下载被规则淘汰的候选）。
@@ -636,6 +707,7 @@ export function usePluginStore(api: PluginApi) {
     delFav,
     subscribeNumber,
     searchKeyword,
+    acquireMovie,
     startDownload,
     cancelTask,
     downloadMagnet,

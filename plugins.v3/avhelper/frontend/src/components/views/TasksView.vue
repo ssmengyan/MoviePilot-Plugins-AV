@@ -21,6 +21,13 @@
  * | 轮询：`startTaskPolling()` 每 5 秒 `loadTasks(false)`，靠 `S.view` 是 tasks 或 downloads 判断"只在任务/下载页" | 本视图挂载且 `document.visibilityState === 'visible'` 时每 5 秒 `store.refreshTasks(true)`；**卸载或不可见即停**（与 S6-2 下载页同一套规则） |
  * | 老 `bindUi` 的 nav 点击分支：切到任务/下载栏目立刻 `loadTasks(false)`（静默） | 挂载时补一次静默 `store.refreshTasks(true)`（下载页没补、靠 5 秒轮询兜住；任务页补上是因为待确认列表变化最快，见下面"与 S6-2 的一处不同"） |
  *
+ * 0.6.0 加的两样（用户要求，见 `docs/AVHelper-下载流程交互设计.md`，都是"卡片内"改动、
+ * **不新增卡片也不新增弹窗**）：
+ * - 卡片头部按 `task.pending` 画标记：「PT/BT 待确认」/「所有源均未找到」，
+ *   取值口径在后端 `tasks.rule_verdict()`，前端不自己推断；
+ * - 没得挑的卡片（没有任何合格候选）多一颗「📌 订阅该影片」，走 `store.subscribeNumber`
+ *   （与详情抽屉那颗同一个动作，规则都是全局默认规则）。
+ *
  * 与 S6-2 的一处不同（刻意，可回退）：挂载时多发一次静默 `GET plugin/tasks`，对齐老实现
  * 「点左栏立刻 `loadTasks(false)`」那一行；它**不是**右栏概况刷新（见下），失败也不 toast。
  *
@@ -39,6 +46,7 @@ import CandTable from '../common/CandTable.vue'
 import EmptyState from '../common/EmptyState.vue'
 import { queueMissingThumbs } from '../common/common'
 import { hostToast, type PluginApi } from '../../composables/usePluginApi'
+import { normKey } from '../../composables/downloadHistory'
 import type { PluginStore } from '../../composables/usePluginStore'
 import type { SearchTask } from '../../composables/storeTypes'
 
@@ -79,6 +87,31 @@ const pending = computed<SearchTask[]>(() => {
 /** 行 key：老实现按数组顺序画、没有 key 概念；这里优先用任务 id，保证刷新时行不被重建。 */
 function rowKey(task: SearchTask, index: number): string {
   return String(task.id ?? `${task.number || ''}#${index}`)
+}
+
+/** 已订阅的番号集合（`type='number'` 的订阅，按后端同一套番号归一化比对）。 */
+const subscribedKeys = computed<Set<string>>(() => {
+  const out = new Set<string>()
+  const subs = Array.isArray(props.store.subs.value) ? props.store.subs.value : []
+  for (const sub of subs) {
+    if (String(sub.type || '') !== 'number') continue
+    const key = normKey(sub.name)
+    if (key) out.add(key)
+  }
+  return out
+})
+
+/**
+ * 「📌 订阅该影片」的状态（0.6.0）：
+ * 卡片里**有合格候选**就不画（那是"有得挑"，不是"没资源"）；没得挑时，
+ * 已订阅过 → `done`（禁用显示「已订阅」），否则 `ready`。
+ */
+function subscribeStateOf(task: SearchTask): 'hidden' | 'ready' | 'done' {
+  const cands = Array.isArray(task.cands) ? task.cands : []
+  if (cands.some(item => item.pass !== false)) return 'hidden'
+  const key = normKey(task.number)
+  if (!key) return 'hidden'
+  return subscribedKeys.value.has(key) ? 'done' : 'ready'
 }
 
 /** 清掉所有候选表的行内 loading（老实现是整块重绘，所有按钮都回到初始态）。 */
@@ -137,6 +170,31 @@ async function onCancel(payload: { taskId: string }): Promise<void> {
     void props.store.refreshTasks(false)
   }
   tables.value.forEach(table => table?.clearCanceling())
+}
+
+/**
+ * 卡片上的「📌 订阅该影片」（0.6.0 加）：建一条**番号订阅**，等这部片有资源时订阅检查兜住它。
+ *
+ * 与详情抽屉那颗「📌 订阅这个番号」走同一个 `store.subscribeNumber`，规则都是全局默认规则；
+ * 订阅成功由后端回传整份 `subs` 刷新，按钮随 `subscribeStateOf()` 变成禁用的「已订阅」。
+ */
+async function onSubscribe(payload: { taskId: string }): Promise<void> {
+  const task = pending.value.filter(item => String(item.id ?? '') === payload.taskId)[0]
+  const number = String(task?.number || '')
+  if (!number) {
+    t.warning('订阅失败')
+    t.info('这条任务缺少番号')
+  } else {
+    const res = await props.store.subscribeNumber(number, 'number', String(task?.actor || ''))
+    if (!res.ok) {
+      t.warning('订阅失败')
+      t.info(res.message || '请稍后重试')
+    } else {
+      t.success('订阅已创建')
+      t.info(`${number} · 有资源时自动下载`)
+    }
+  }
+  tables.value.forEach(table => table?.clearSubscribing())
 }
 
 /** 每轮列表变化补一轮缺图：老实现是在 `renderTasks` 末尾调一次 `queueMissingThumbs(pend)`。 */
@@ -201,9 +259,11 @@ onBeforeUnmount(() => {
         ref="tables"
         :task="task"
         :plugin-id="pluginId"
+        :subscribe-state="subscribeStateOf(task)"
         cancelable
         @download="onDownload"
         @cancel="onCancel"
+        @subscribe="onSubscribe"
       />
     </template>
 

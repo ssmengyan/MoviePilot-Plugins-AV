@@ -10,6 +10,9 @@
  *     <div><div class="tno">{番号}</div><div class="hint">来自订阅：{演员} · 搜到 n · 合格 m</div></div>
  *     <div style="flex:1"></div>
  *     [订阅为自动下载，但无候选合格]
+ *     [待确认标记 chip「PT/BT 待确认」/「所有源均未找到」 ← 0.6.0 加]
+ *     [📌 订阅该影片 ← 0.6.0 加，只有"没得挑"的卡片才画]
+ *     [取消任务]
  *   </div>
  *   <table><colgroup>7 个 col</colgroup><thead><tr>
  *     站点 | 标记 | 规格 | 大小 | 做种 | 匹配分 | 操作
@@ -53,8 +56,13 @@ const props = withDefaults(
     pluginId?: string
     /** 是否画「取消任务」（只有任务页那颗；站点搜索页不画）。 */
     cancelable?: boolean
+    /**
+     * 「📌 订阅该影片」按钮的状态（0.6.0 加）：
+     * `hidden` = 不画（这张卡片有得挑，不需要订阅等资源）、`ready` = 可点、`done` = 已订阅（禁用）。
+     */
+    subscribeState?: 'hidden' | 'ready' | 'done'
   }>(),
-  { pluginId: '', cancelable: false },
+  { pluginId: '', cancelable: false, subscribeState: 'hidden' },
 )
 
 const emit = defineEmits<{
@@ -62,6 +70,8 @@ const emit = defineEmits<{
   (event: 'download', payload: { taskId: string; site: string; force: boolean }): void
   /** 点「取消任务」：把这条待确认任务从任务页与角标里去掉。 */
   (event: 'cancel', payload: { taskId: string }): void
+  /** 点「📌 订阅该影片」：由任务页去建一条番号订阅（组件自己不碰 store）。 */
+  (event: 'subscribe', payload: { taskId: string }): void
 }>()
 
 /**
@@ -178,6 +188,36 @@ function clearCanceling(): void {
 }
 
 /**
+ * 任务卡上的待确认标记（0.6.0 加）—— 取值口径与后端 `tasks.rule_verdict()` 的
+ * `pending` 一一对应，前端不自己推断（`''` = 有候选可挑，不画标记）：
+ * `pt-only` = PT 没搜到且 BT 兜底关着；`none` = PT 与 BT 都没有可用资源。
+ */
+const pendingMark = computed<{ text: string; color: string; hint: string } | null>(() => {
+  const kind = String(props.task.pending || '')
+  if (kind === 'pt-only') {
+    return { text: 'PT/BT 待确认', color: 'info', hint: 'PT 没搜到，BT 兜底已关闭' }
+  }
+  if (kind === 'none') {
+    return { text: '所有源均未找到', color: 'warning', hint: 'PT 与 BT 都没有可用资源' }
+  }
+  return null
+})
+
+/** 「📌 订阅该影片」在飞：与取消任务同一套"自己置灰、动作结束后由父组件解锁"。 */
+const subscribing = ref(false)
+
+function onSubscribe(): void {
+  if (subscribing.value || !taskId.value) return
+  subscribing.value = true
+  emit('subscribe', { taskId: taskId.value })
+}
+
+/** 解除「订阅该影片」的进行中态（成功失败都要调）。 */
+function clearSubscribing(): void {
+  subscribing.value = false
+}
+
+/**
  * 解除按钮的进行中态（成功或失败都要调，否则按钮永远转圈）。
  * 不传 `site` 表示整表解锁（常用于「刷新任务」之后）。
  */
@@ -193,7 +233,7 @@ function clearPending(site?: string): void {
   pending.value = next
 }
 
-defineExpose({ clearPending, clearCanceling })
+defineExpose({ clearPending, clearCanceling, clearSubscribing })
 
 /**
  * 封面地址：任务自带优先，其次用 `queueThumb` 后台补回来的那张。
@@ -229,6 +269,29 @@ const poster = computed(() => {
       <span v-if="task.auto && task.source === 'sub'" class="avh-cand__hint">
         订阅为自动下载，但无候选合格
       </span>
+      <!-- 待确认标记：PT 没中且兜底关着 → 「PT/BT 待确认」；PT 与 BT 都没有 → 「所有源均未找到」 -->
+      <template v-if="pendingMark">
+        <v-chip
+          class="avh-cand__mark"
+          :color="pendingMark.color"
+          variant="tonal"
+          size="small"
+          label
+        >{{ pendingMark.text }}</v-chip>
+        <span class="avh-cand__hint">{{ pendingMark.hint }}</span>
+      </template>
+      <!-- 「📌 订阅该影片」：只在"这张卡片没得挑"时由任务页传 ready/done 才画。
+           类名别用 `avh-cand__sub` —— 那是种子原名行的既有类名（行样式已占用）。 -->
+      <v-btn
+        v-if="subscribeState !== 'hidden'"
+        class="avh-cand__subscribe"
+        variant="outlined"
+        size="small"
+        :disabled="subscribeState === 'done'"
+        :loading="subscribing"
+        title="等这部片有资源时自动下载（订阅检查会盯它）"
+        @click="onSubscribe"
+      >{{ subscribeState === 'done' ? '已订阅' : '📌 订阅该影片' }}</v-btn>
       <!-- 老 `data-cancel` 那颗 .danger 按钮：只有任务页传 cancelable 才画 -->
       <v-btn
         v-if="cancelable"

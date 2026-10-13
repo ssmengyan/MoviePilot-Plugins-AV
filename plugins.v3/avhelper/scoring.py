@@ -183,11 +183,33 @@ def score_candidate(cand: Dict[str, Any], rule: Dict[str, Any]) -> Dict[str, Any
     passed = True
     why: List[str] = []
 
+    # 分辨率策略（规则里的 `res`）**参与打分**：'1080p' 优先 / '2160p' 4K 优先 / 'only4k' 仅 4K。
+    # 2026-10-13 修：此前这里从不读 `rule['res']`，于是「4K 优先」与「1080P 优先」打分一模一样
+    # （1080P 恒 +30、4K 恒 +16），「仅 4K」也不排除 1080P —— 选项摆着却不起作用。
+    strategy = str(rule.get("res") or "1080p")
     res = cand.get("res") or ""
-    if res == "1080p":
+    if strategy == "only4k":
+        if res == "2160p":
+            score += 30
+            why.append("4K +30（仅 4K）")
+        else:
+            passed = False
+            why.append(f"{res or '未知'} ✗（仅 4K）")
+    elif strategy == "2160p":
+        if res == "2160p":
+            score += 30
+            why.append("4K +30（4K 优先）")
+        elif res == "1080p":
+            score += 16
+            why.append("1080P 次选 +16")
+        else:
+            score += 5
+            why.append(f"{res or '未知'} +5")
+    elif res == "1080p":
         score += 30
         why.append("1080P +30")
     elif res == "2160p":
+        # 「允许 4K 择优」只在这个策略下有意义（1080P 没有好种时才升级 4K）
         if rule.get("allow4k"):
             score += 16
             why.append("4K 择优 +16")
