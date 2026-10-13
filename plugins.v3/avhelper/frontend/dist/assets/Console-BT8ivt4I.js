@@ -3656,6 +3656,7 @@ const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
     const emit = __emit;
     const number = () => String(props.movie.number || "");
     const id = () => String(props.movie.id || "");
+    const cardCover = () => String(props.movie.cover || props.movie.thumb || "");
     const library = () => props.mode === "library";
     const durationText = () => {
       const value = props.movie.duration;
@@ -3677,7 +3678,7 @@ const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
         _createElementVNode$b("div", _hoisted_2$b, [
           _createVNode$9(Thumb, {
             variant: "thumb",
-            src: _ctx.movie.thumb,
+            src: cardCover(),
             alt: number(),
             "plugin-id": _ctx.pluginId
           }, null, 8, ["src", "alt", "plugin-id"]),
@@ -3721,7 +3722,7 @@ const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
   }
 });
 
-const NumCard = /* @__PURE__ */ _export_sfc(_sfc_main$b, [["__scopeId", "data-v-08471911"]]);
+const NumCard = /* @__PURE__ */ _export_sfc(_sfc_main$b, [["__scopeId", "data-v-9d1ee74e"]]);
 
 const {reactive: reactive$2} = await importShared('vue');
 

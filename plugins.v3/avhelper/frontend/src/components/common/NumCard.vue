@@ -98,6 +98,23 @@ const emit = defineEmits<{
 const number = () => String(props.movie.number || '')
 const id = () => String(props.movie.id || '')
 
+/**
+ * 卡片封面图源：优先 javdb 的大图档 `cover`，没有才退回小竖图 `thumb`（方案 B，2026-10-13）。
+ *
+ * 为什么换：卡片盒子是 3:4、列宽约 188px，而 `thumb` 实测只有 147×200 / 约 11 KB ——
+ * 1× 屏就已经放大 1.28×，125%/150%/200% 缩放的屏上要放大 1.6–2.6 倍，糊是必然的。
+ * `cover` 是 800×538 / 约 150 KB 的横图，配盒子上的 `object-fit: cover` 会**居中裁**出
+ * 中间约 403×538，2× 屏下几乎 1:1，清晰度约是原来的 2.7 倍。
+ *
+ * 代价（用户 2026-10-13 明确选定此方案，知道并接受）：只看得到横图的中间约一半，
+ * 两侧通常印着片名 / 厂商文字，会被裁掉；单图流量也从约 11 KB 涨到约 150 KB
+ * （60 张首屏约 9 MB，之后走浏览器 30 天缓存 + NAS 图片缓存，只付一次）。
+ *
+ * 退回分支不是摆设：「已入库的番号」栏的行来自 Emby（`emby.library_rows()` 只有 `thumb`），
+ * 演员作品史的卡片走 `variant="film"` 的 `contain` 版式也不吃这条路。后端 `_movie()` 两个字段都给。
+ */
+const cardCover = () => String(props.movie.cover || props.movie.thumb || '')
+
 /** 是不是库模式（「已入库的番号」栏）。 */
 const library = () => props.mode === 'library'
 
@@ -128,7 +145,7 @@ const watchUrl = () => String(props.movie.lib?.url || '')
     @mouseenter="emit('hover', { number: number(), id: id() })"
   >
     <div class="avh-card__thumb">
-      <Thumb variant="thumb" :src="movie.thumb" :alt="number()" :plugin-id="pluginId" />
+      <Thumb variant="thumb" :src="cardCover()" :alt="number()" :plugin-id="pluginId" />
       <div class="avh-card__badges">
         <span v-if="movie.cnsub" class="avh-badge avh-badge--cn">中字</span>
         <span v-if="movie.uncensored" class="avh-badge avh-badge--uc">破解</span>
