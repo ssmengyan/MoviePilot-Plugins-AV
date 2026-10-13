@@ -119,6 +119,38 @@ def bin_dir() -> Path:
     return data_root() / "bin"
 
 
+# 随包内置的资源目录（映射表、简繁词典等）：`plugins.v3/avhelper/resources/`。
+# 与「数据根」分开：这些文件是**发行的代码资产**，随插件一起分发、不随用户数据变化；
+# 用户想覆盖某一份时，把同名文件放进 `{data_root}/resources/` 即可（见 resource_file）。
+BUILTIN_RESOURCES = Path(__file__).resolve().parent / "resources"
+
+
+def resources_dir() -> Path:
+    """资源目录：用户覆盖目录存在就用它，否则用随包内置的那份。
+
+    只判断**目录是否已存在**：`{data_root}/resources` 是我们自己不会创建的位置，
+    它一旦存在就一定是用户手工放的（打包与测试都不会凭空生成），可以放心当覆盖信号。
+    """
+    override = data_root() / "resources"
+    return override if override.is_dir() else BUILTIN_RESOURCES
+
+
+def resource_file(name: str) -> Path:
+    """按「用户覆盖 → 内置」逐文件解析一份资源，返回第一个**已存在**的路径。
+
+    逐文件而不是逐目录：用户可能只覆盖 `zhcdict.json` 一份，另外两份仍旧走内置。
+    两份都没有时返回内置路径（调用方按「文件不存在」处理，不要在这里抛异常 ——
+    资源缺失只该让刮削降级，不该让插件起不来）。
+    """
+    text = str(name or "").strip()
+    if not text:
+        return BUILTIN_RESOURCES
+    override = data_root() / "resources" / text
+    if override.is_file():
+        return override
+    return BUILTIN_RESOURCES / text
+
+
 def cache_limit_gb(value: Any = None) -> float:
     """把「缓存上限（GB）」配置归一成一个安全值（默认 `DEFAULT_CACHE_MAX_GB`）。
 

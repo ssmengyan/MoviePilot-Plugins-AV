@@ -87,6 +87,32 @@ WARM_KV_KEY = "warmup_at"  # 上次预热完成时间（防抖用）
 # 台账「已下载番号」的内存缓存时长（秒）：`_movie()` **每条电影**都要问一次（榜单一次 60 条），
 # 直查库等于把一次请求放大成几十次 SQLite 读；台账只在下载完成时变，晚 30 秒打徽标没有影响
 DOWNLOAD_KEYS_TTL = 30
+# 刮削线 v4（契约 §3.7 / §4）：读侧统一投影 `film_view` 的进程内缓存时长（秒）。
+# 与 `DOWNLOAD_KEYS_TTL` 同一套写法：`/library` 一次上百行、界面又是 15 秒轮询，
+# 投影要么走 S7 的 `scraper.film_view()`、要么走本模块的**一次** meta/item/台账批量读，
+# 两条路都吃这份缓存；刮削写完（`/scrape/run`）主动失效，不靠它收敛。
+FILM_VIEW_TTL = 30
+# `/scrape/status` 的队列计数探测条数：`store.meta_due()` 没有 COUNT 口子（limit<=0 按 5 处理），
+# 取一批再数；两档队列都是给人看的规模提示，200 条足够、也不至于把整表 raw_json 拉进内存。
+SCRAPE_QUEUE_PROBE = 200
+# 依赖模块（S4 的 translator / S7 的 scraper）还没落盘时的统一对外文案
+SCRAPE_NOT_READY = "刮削模块未就绪"
+# 没配 Emby（插件与 MP 两处都取不到连接信息）时 `/scrape/*` 的文案：写线离开 Emby 没有意义
+EMBY_NOT_READY = "Emby 未配置"
+# 配置里的枚举项（任务书 E）：不认识的值一律回落默认，老配置缺这个键也不会报错
+SCRAPE_MODES = ("off", "fill", "hybrid", "own")
+CROP_ANCHORS = ("auto", "right", "center", "left", "raw")
+TRAILER_MODES = ("off", "remote", "local")
+# `states{}`（契约 §4）三个字段各自的合法取值，投影时用来兜底
+DOWNLOAD_STATES = ("downloading", "paused", "completed", "failed", "cancelled", "none")
+LIBRARY_STATES = ("in_library", "pending_import", "not_in_library")
+SCRAPE_STATES = ("scraped_full", "scraped_partial", "unscraped")
+# 台账 `state` → `film_view().states.download`（契约 §4 的取值集）
+_DOWNLOAD_STATE_MAP = {"downloaded": "completed", "downloading": "downloading",
+                       "paused": "paused", "failed": "failed", "cancelled": "cancelled"}
+# `meta.completeness` → `states.scrape`（老行没有 media_item 时按作品级完整度兜底）
+_SCRAPE_STATE_MAP = {"full": "scraped_full", "missing_plot": "scraped_partial",
+                     "missing_core": "unscraped"}
 
 
 def num_key(number: Any) -> str:
@@ -94,9 +120,137 @@ def num_key(number: Any) -> str:
     return str(number or "").strip().upper()
 
 
+def canon_of(number: Any) -> str:
+    """跨层匹配键：`emby.canon_key()`（干净号，`IPZZ-912-UC` → `IPZZ912`）优先。
+
+    与 `tasks._canon()` 同一口径；函数不在（老 host 里那份 emby 还没升级）时退回旧口径
+    `norm_key()`，绝不在这里自己发明第三套规则（D1 裁决）。
+    """
+    fn = getattr(emby, "canon_key", None)
+    if callable(fn):
+        try:
+            return str(fn(number) or "")
+        except Exception:
+            pass
+    return emby.norm_key(number)
+
+
+def shown_of(number: Any) -> str:
+    """展示番号：`emby.parse_av_number()` 解析得出就用它（`IPOK-025L` → `IPOK-025`），
+    解析不出就原样回传 —— 不在这一层发明写法。"""
+    fn = getattr(emby, "parse_av_number", None)
+    if callable(fn):
+        try:
+            return str(getattr(fn(number), "display_number", "") or "")
+        except Exception:
+            pass
+    return str(number or "").strip()
+
+
+def pick_choice(value: Any, choices: Iterable[str], default: str) -> str:
+    """配置里的枚举项：不认识（含老配置没这个键）一律回默认值，绝不抛。"""
+    text = str(value or "").strip().lower()
+    return text if text in tuple(choices) else default
+
+
+def pick_bool(value: Any, default: bool) -> bool:
+    """配置里的开关：缺键/空串回落默认；`"false"` / `0` / `off` / `no` 这类字符串写法也认。"""
+    if value is None or value == "":
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in ("false", "0", "off", "no", "none"):
+        return False
+    if text in ("true", "1", "on", "yes"):
+        return True
+    return bool(default)
+
+
+def to_int(value: Any, default: int = 0) -> int:
+    """容错的整数转换：读接口拿到字符串/None 也不抛（`^0` 除外，一律按默认值）。"""
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def version_labels(tags: Any) -> List[str]:
+    """`version_tags` 字典 → 展示角标数组（契约 §4 的 `version_tags` / `badge`）。
+
+    顺序固定（中字 → 流出 → 分辨率 → VR → 版本/分集），拼法与 §3.6.1 的 `Name` 角标同一套词；
+    认不出形状（串、None、别的对象）回空数组，**不在这一层自己解释 JSON**。
+    """
+    if not isinstance(tags, dict):
+        return []
+    out: List[str] = []
+
+    def add(label: str) -> None:
+        if label and label not in out:
+            out.append(label)
+
+    if tags.get("is_zh_sub"):
+        add("中字")
+    if tags.get("is_uncensored_leak"):
+        add("流出")
+    add(str(tags.get("resolution") or "").strip())
+    if tags.get("is_vr"):
+        add("VR")
+    add(str(tags.get("edition") or "").strip())
+    part = tags.get("part_no")
+    if part not in (None, "", 0, "0"):
+        text = str(part).strip().upper()
+        add(text if text.startswith("CD") else f"CD{text}")
+    if tags.get("is_iso"):
+        add("ISO")
+    return out
+
+
+def json_tags(value: Any) -> Dict[str, Any]:
+    """`downloads.version_tags` 是 **JSON 串**（S1 报告 §2.1），`media_item` 那份是 dict：
+
+    这里统一成 dict 给 `version_labels()` 用；解析失败回空字典。
+    """
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            loaded = json.loads(value)
+        except ValueError:
+            return {}
+        return loaded if isinstance(loaded, dict) else {}
+    return {}
+
+
+def download_state_name(value: Any) -> str:
+    """台账 `state` → `film_view().states.download`（契约 §4 的取值集）。"""
+    text = _DOWNLOAD_STATE_MAP.get(str(value or "").strip().lower(), "")
+    return text if text in DOWNLOAD_STATES else "none"
+
+
+def scrape_state_of(meta: Any, item: Any = None) -> str:
+    """`states.scrape`：实例行有 `scrape_state` 就用它，否则按作品级 `completeness` 兜底。"""
+    if isinstance(item, dict):
+        state = str(item.get("scrape_state") or "").strip()
+        if state in SCRAPE_STATES:
+            return state
+    completeness = str((meta or {}).get("completeness") or "").strip() if isinstance(meta, dict) else ""
+    return _SCRAPE_STATE_MAP.get(completeness, "unscraped")
+
+
 # 展示番号（`display_number`）与「一部片挑哪个键」（`emby.key_rank` / `emby.best_keys`）
 # 2026-10-12 起都住在 `emby.py`：与 `emby.norm_key()` 是同一套番号口径的几半，放一处才不会漂，
 # 顺带让「Emby 库 → 界面行」（`emby.library_rows()`）能脱离宿主被单测直接加载。
+
+# 映射表（S3 的 `namemap`）的**进程内就绪闸门**（S10 验收缺口）：`namemap.load()` 原先在插件
+# 启动路径上从来没被调用过，后果是**静默**的 —— `ready()=False`、`actor_lookup()/tag_lookup()`
+# 恒 None、`to_simplified('騎乗位')` 原样返回（繁→简失效）、`clean_tags()` 不过滤删除规则，
+# 而且一声不响。现在：第一次用到映射表时 `load()` + `sync_store()` 各跑一次（实测 76ms + 43ms，
+# 都幂等），成功与否都只在这一个进程里试一次，避免坏资源文件把日志刷爆。
+_NAMEMAP_TRIED = False
+_NAMEMAP_LOCK = threading.Lock()
 
 
 def ui_file(path: str) -> Optional[Path]:
@@ -155,8 +309,8 @@ class AVHelper(_PluginBase):
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
     plugin_icon = ("https://raw.githubusercontent.com/ssmengyan/"
                    "MoviePilot-Plugins-AV/main/icons/avhelper.png")
-    # 版本：0.6.3 = 任务页候选行显示副标题/发布时间 + 「原帖」链接；缓存上限改配置项（默认 1G）
-    plugin_version = "0.6.3"
+    # 版本：0.7.0 = 自建刮削层（番号解析/中文简介/翻译/封面裁切/Emby 安全写入与回滚）
+    plugin_version = "0.7.0"
     plugin_label = "发现"
     plugin_author = "ssmengyan"
     plugin_config_prefix = "avhelper_"
@@ -178,11 +332,24 @@ class AVHelper(_PluginBase):
     _emby_apikey = ""
     _emby_lib: Optional[emby.EmbyLibrary] = None
     _emby_sig: Optional[Tuple[str, str]] = None
+    # 写侧客户端（S2 的 `EmbyClient`）：同样按连接信息惰性创建，见 emby_client()
+    _emby_client: Optional[Any] = None
+    _emby_client_sig: Optional[Tuple[str, str]] = None
     _cache_size_cache: Tuple[float, int] = (0.0, 0)   # (取样时间, 字节数)：缓存体积的内存缓存
     # (取样时间, 已下载番号键)：台账「已下载」徽标的 30 秒内存缓存，见 _downloaded_keys()
     _download_keys: Tuple[float, Set[str]] = (0.0, set())
     _warm_thread: Optional[threading.Thread] = None   # 启动预热线程（守护线程，见 warm_up）
     _warm_stop: Optional[threading.Event] = None      # 当前这次预热的停机信号（每次新建一份）
+    # 刮削线 v4 的 11 项配置**存在 kv 的 `global_rule` 里**（前端设置台 S9 已在用这套 camelCase
+    # 键名），不落宿主配置、也不进 `DEFAULT_RULE`：只由 `scrape_conf()` 读 + 回落默认值，见它。
+    # film_view 投影的进程内缓存：(取样时间, {meta/media_item/台账 索引})，见 _film_index()
+    _film_cache: Tuple[float, Dict[str, Any]] = (0.0, {})
+    # 逐番号的投影结果缓存（S7 的 `scraper.film_view()` 那条路也吃它，见 film_views）
+    _view_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+    # 数据源自检的内存缓存：(取样时间, 行表)，见 _scrape_sources()
+    _sources_cache: Tuple[float, List[Dict[str, Any]]] = (0.0, [])
+    # `/scrape/run` 的单飞闸门：全库写入不允许并发（与限流政策无关，是"别自己踩自己"）
+    _scrape_busy = threading.Lock()
 
     # ---------- 生命周期 ----------
 
@@ -216,6 +383,8 @@ class AVHelper(_PluginBase):
 
         self._emby_lib = None
         self._emby_sig = None
+        self._emby_client = None
+        self._emby_client_sig = None
         self._client = JavdbClient(bin_path=self._javdb_bin or None, proxy=self._proxy)
         # 失败冷却挂在 client 模块级：改完代理重跑 init_plugin 时一并清零，
         # 否则「改完代理点重试」还要再等满 1 小时，等于告诉用户没修好
@@ -228,6 +397,13 @@ class AVHelper(_PluginBase):
         # 清掉上次留的抓取失败负缓存：刚改完代理/换完网络，第一次打开就该真抓一次，
         # 而不是继续吃 120 秒前的旧结论（进程内的 1 小时冷却会随 reload 一起归零）
         self.drop_fail_cache()
+        # 映射表预热（S10 验收缺口）：`namemap.load()` 历史上从来没被调用过，导致启动后
+        # 繁简转换/标签清洗/演员中文名全是**静默**空操作。这里 best-effort 跑一次（幂等，约 120ms），
+        # 端点上（`_namemap_rows()` / `actor_zh()`）还有同一道闸门兜底；失败不让 init_plugin 抛。
+        try:
+            self.namemap_module()
+        except Exception as error:
+            logger.warning(f"AVHelper 映射表预热失败（端点首次访问会再试一次）：{error}")
         self.start_javdb_bootstrap()
         self.start_warm_up()
 
@@ -501,10 +677,13 @@ class AVHelper(_PluginBase):
             {"path": "/tasks/download", "endpoint": self.api_task_download, "methods": ["POST"],
              "auth": "bear", "summary": "提交下载"},
             {"path": "/tasks/cancel", "endpoint": self.api_task_cancel, "methods": ["POST"],
-             "auth": "bear", "summary": "取消待确认任务"},
+             "auth": "bear", "summary": "取消任务／不要了",
+             "description": "{id} = 老行为，只取消待确认任务；{number|key, cancel_sub:true} = "
+                            "三出口联动（删种子/台账/订阅/known），cancel_sub 默认 false，结果在 steps"},
             {"path": "/downloads", "endpoint": self.api_downloads, "methods": ["GET", "DELETE"],
              "auth": "bear", "summary": "下载台账(下载历史)",
-             "description": "GET 列出**本插件下载过**的台账条目并迁移老队列；DELETE ?key= 移除一条记录后回最新列表"},
+             "description": "GET 列出**本插件下载过**的台账条目并迁移老队列；DELETE ?key= 移除一条记录后回最新列表"
+                            "（?cancel_sub=true 才连种子/订阅一起清＝三出口联动，默认 false，结果在 steps）"},
             {"path": "/library", "endpoint": self.api_library, "methods": ["GET"],
              "auth": "bear", "summary": "已入库的番号",
              "description": "Emby 媒体库**实时**列表（已删除的不在其中）；?fresh=1 丢掉索引缓存重抓"},
@@ -518,6 +697,35 @@ class AVHelper(_PluginBase):
              "summary": "已配置站点"},
             {"path": "/cache/clean", "endpoint": self.api_cache_clean, "methods": ["POST"],
              "auth": "bear", "summary": "清理缓存"},
+            # ---- 刮削线 v4（契约 §3.7）：工作台 / 映射表，全部 bear 鉴权 ----
+            {"path": "/scrape/status", "endpoint": self.api_scrape_status, "methods": ["GET"],
+             "auth": "bear", "summary": "刮削状态",
+             "description": "workspace：stats/sources/queue/last_run/items（支持 limit/offset/filter）"},
+            {"path": "/scrape/preview", "endpoint": self.api_scrape_preview, "methods": ["GET"],
+             "auth": "bear", "summary": "刮削字段级预览",
+             "description": "?key= 单条试跑：只算 diff 不写 Emby（scraper.preview_one）"},
+            {"path": "/scrape/run", "endpoint": self.api_scrape_run, "methods": ["POST"],
+             "auth": "bear", "summary": "执行刮削",
+             "description": "POST {keys?[],all?,force?,anchor?}；all=true 必须带 confirm=true（防误点全库写入）"},
+            {"path": "/scrape/rollback", "endpoint": self.api_scrape_rollback, "methods": ["POST"],
+             "auth": "bear", "summary": "回滚 Emby 元数据",
+             "description": "POST {item_key}：用写前备份的完整 DTO 原样回灌（D7 闸门）"},
+            {"path": "/scrape/log", "endpoint": self.api_scrape_log, "methods": ["GET"],
+             "auth": "bear", "summary": "刮削日志与数据源汇总",
+             "description": "?limit= 取 scrape_log 最近若干条 + 各源成功/失败/耗时汇总"},
+            {"path": "/scrape/selfcheck", "endpoint": self.api_scrape_selfcheck, "methods": ["POST"],
+             "auth": "bear", "summary": "翻译模型自检",
+             "description": "POST {model?} → translator.selfcheck()：「模型自检」按钮；"
+                            "另有 POST {sources:true} → scraper.sources_selfcheck()（真探针，3~5 秒）"},
+            {"path": "/namemap/actors", "endpoint": self.api_namemap_actors, "methods": ["GET"],
+             "auth": "bear", "summary": "演员映射表",
+             "description": "?q=&limit= 查 name_map 的 actor 行（三语 + 别名 + 来源）"},
+            {"path": "/namemap/tags", "endpoint": self.api_namemap_tags, "methods": ["GET"],
+             "auth": "bear", "summary": "标签映射表",
+             "description": "?q=&limit= 查 name_map 的 tag 行（含 is_delete_rule 删除规则）"},
+            {"path": "/namemap/set", "endpoint": self.api_namemap_set, "methods": ["POST"],
+             "auth": "bear", "summary": "写入用户映射",
+             "description": "POST {name,zh,jp?,entity_type?}：写 source=user_custom 的最高优先级映射"},
         ]
 
     # ---------- 基础设施 ----------
@@ -587,6 +795,19 @@ class AVHelper(_PluginBase):
         if not url:
             return ""
         return f"/api/v1/plugin/{PLUGIN_ID}/img?url={quote(str(url), safe='')}"
+
+    def emby_image_url(self, item_id: Any, img_type: str = "Primary") -> str:
+        """Emby 原图的插件代理地址（契约 §3.5 的 `?emby=` 分支）。
+
+        **服务端回源**：Emby 主机名与 API Key 只在这一侧用，浏览器拿到的就是这个地址
+        （所以 `/img` 才能保持匿名）。`item_id` 为空回空串（调用方据此回落远程图）。
+        """
+        target = str(item_id or "").strip()
+        if not target:
+            return ""
+        kind = str(img_type or "Primary").strip() or "Primary"
+        return (f"/api/v1/plugin/{PLUGIN_ID}/img?emby={quote(target, safe='')}"
+                f"&type={quote(kind, safe='')}")
 
     def _raw_image(self, url: Any) -> str:
         """把插件图片代理地址还原成图床原地址（本来就是原地址时原样返回）。"""
@@ -670,6 +891,37 @@ class AVHelper(_PluginBase):
         """全局默认规则：用户在界面编辑、存 kv 表；手动搜种与新建订阅都以它为基准。"""
         rule = self.store.kv_get(GLOBAL_RULE_KEY) or {}
         return merge_rule(rule)
+
+    def scrape_conf(self) -> Dict[str, Any]:
+        """刮削设置的 11 项（**存放在 kv 的 `global_rule` 里**，不是宿主插件配置）。
+
+        口径（主统筹 2026-10-14 更正，覆盖任务书 E 段）：前端设置台 S9 已经在用这套
+        camelCase 键名读写 `global_rule`，所以这里**只读不写**、缺键逐项回落默认值 ——
+        老用户在 0.6.3 存下的规则里没有这些键，照样不能报错。`merge_rule()` 不认识也会
+        原样透传（它只补默认 + 夹限流两项），所以 `/rule` POST 写进来的这些键能存住。
+
+        键名一个字母都不许改（前端按这套读）：`scrapeMode` / `plotJavtxt` / `plotMetatube` /
+        `translateModel` / `translateModelFallback` / `cropAnchor` / `trailerMode` /
+        `autoScrapeTier1` / `autoScrapeTier2` / `cleanSuffixes` / `nameTemplate`。
+        """
+        rule = self.global_rule() or {}
+        suffixes = rule.get("cleanSuffixes")
+        return {
+            "scrapeMode": pick_choice(rule.get("scrapeMode"), SCRAPE_MODES, "fill"),
+            "plotJavtxt": pick_bool(rule.get("plotJavtxt"), True),
+            "plotMetatube": pick_bool(rule.get("plotMetatube"), True),
+            "translateModel": str(rule.get("translateModel") or "").strip() or "hy3",
+            "translateModelFallback": (str(rule.get("translateModelFallback") or "").strip()
+                                       or "deepseek-v4.1-flash"),
+            "cropAnchor": pick_choice(rule.get("cropAnchor"), CROP_ANCHORS, "auto"),
+            "trailerMode": pick_choice(rule.get("trailerMode"), TRAILER_MODES, "off"),
+            "autoScrapeTier1": pick_bool(rule.get("autoScrapeTier1"), True),
+            "autoScrapeTier2": pick_bool(rule.get("autoScrapeTier2"), True),
+            "cleanSuffixes": [str(x).strip() for x in suffixes if str(x).strip()]
+                             if isinstance(suffixes, list) else [],
+            "nameTemplate": (str(rule.get("nameTemplate") or "").strip()
+                             or "{number}{badge} {title}"),
+        }
 
     def magnets_cached(self, number: str) -> Optional[List[Dict[str, Any]]]:
         """磁力列表：优先读 7 天文件缓存（与详情页共用同一个 key），未命中才起子进程。
@@ -1064,16 +1316,27 @@ class AVHelper(_PluginBase):
             logger.error(f"AVHelper 读取 Emby 索引失败（台账库状态一律算不在库）：{error}")
             library = {}
         items: List[Dict[str, Any]] = []
+        # 读侧统一（契约 §3.7 末段）：行**追加** display_number/version_tags[]/states{}+
+        # key/original_title/actors[]/cover，原有字段一个不改。批量投影走 film_views()。
+        try:
+            views = self.film_views([str(r.get("number") or r.get("key") or "")
+                                     for r in rows if isinstance(r, dict)])
+        except Exception as error:
+            logger.error(f"AVHelper 组装 film_view 失败（台账只给原有字段）：{error}")
+            views = {}
         for row in rows:
             if not isinstance(row, dict):
                 continue
             key = str(row.get("key") or "")
             try:
-                items.append({
+                lib = library.get(key) or {}
+                emby_id = str((lib or {}).get("id") or row.get("emby_id") or "")
+                number = str(row.get("number") or "")
+                item = {
                     "key": key,
                     # 台账里是什么就是什么：Emby 补种拼不出展示番号的键留着空串，
                     # 前端 `displayNumber()` 自会退回 `key`（契约允许空），别在这一层二次发明
-                    "number": str(row.get("number") or ""),
+                    "number": number,
                     "title": str(row.get("title") or ""),
                     "actor": str(row.get("actor") or ""),
                     "thumb": self.image_url(row.get("thumb")),
@@ -1086,16 +1349,38 @@ class AVHelper(_PluginBase):
                     "completedAt": str(row.get("completed_at") or ""),
                     "path": str(row.get("path") or ""),
                     "lib": library.get(key),
-                })
+                    # 下载失败的原因（S6：台账 state='failed' 时必须有话可说，别显示成"下载中 0%"）
+                    "failed_reason": str(row.get("failed_reason") or ""),
+                }
+                extra = self._film_extra(views.get(number) or views.get(key),
+                                         number=number or key, emby_id=emby_id,
+                                         download_state=item["state"])
+                if not extra["version_tags"]:
+                    # 台账行自己那份是 **JSON 串**（S1 报告 §2.1；media_item 那份才是 dict）
+                    extra["version_tags"] = version_labels(json_tags(row.get("version_tags")))
+                item.update(extra)
+                items.append(item)
             except Exception as error:      # 一条烂数据不该把整页打挂（items 是列表，不是全有才给）
                 logger.error(f"AVHelper 组装台账条目失败 {key}：{error}")
         in_library = sum(1 for item in items if item.get("lib"))
-        return {
+        payload = {
             "success": True,
             "items": items,
             "counts": {"total": len(items), "inLibrary": in_library,
                        "missing": len(items) - in_library},
         }
+        # 下载器失联要能透出（v4.1 §9.2-3）：只挂 `/downloads`，**别挂 `/bootstrap`** 那条
+        # 15 秒轮询 —— `downloader_state()` 每次调用都真问一次下载器（0.1~0.6 秒）。
+        # 探测失败也只影响这两个字段，绝不把台账页打成 500。
+        try:
+            state = self.engine.downloader_state() or {}
+            payload["downloader_offline"] = not bool(state.get("online"))
+            payload["downloader_error"] = str(state.get("error") or "")
+        except Exception as error:
+            logger.error(f"AVHelper 探测下载器状态失败（按在线处理）：{error}")
+            payload["downloader_offline"] = False
+            payload["downloader_error"] = ""
+        return payload
 
     def api_downloads(self, request: Request) -> Dict[str, Any]:
         """下载台账：GET 列表（顺带幂等迁移老队列）/ DELETE 移除一条记录（`?key=<归一化键或番号>`）。
@@ -1104,6 +1389,12 @@ class AVHelper(_PluginBase):
         GET 每次都跑一次 `seed_downloads()`（只做老队列迁移，2026-10-12 起不再从 Emby 补种，
         见它的说明）；DELETE 按契约只删记录并回一份**最新**列表（复用同一个组装函数），
         不跑迁移：刚删掉的东西立刻被自己补回来，比不补更让人困惑。
+
+        DELETE 还带**可选**的三出口联动（v4.1 §9.2 第 4 条）：`?cancel_sub=true`（**默认 false**）
+        时才交给 `engine.cancel_all(key, cancel_sub=True)` —— 删下载器种子 → 台账打墓碑 →
+        删番号/演员订阅 → 写 `known`，四步结果放在返回的 `steps` 里。
+        **不带参数就是老行为**：只打台账墓碑（`store.download_delete()`）—— 界面上现有的
+        「移除记录」按钮不带这个参数，绝不能因为一次改版就顺手把种子和订阅删掉。
         """
         if request.method == "DELETE":
             key = str(request.query_params.get("key") or "").strip()
@@ -1112,16 +1403,282 @@ class AVHelper(_PluginBase):
                 payload["success"] = False
                 payload["message"] = "缺少 key"
                 return payload
-            try:
-                removed = bool(self.store.download_delete(key))
-            except Exception as error:
-                logger.error(f"AVHelper 移除台账记录失败 {key}：{error}")
-                removed = False
+            cancel_sub = pick_bool(request.query_params.get("cancel_sub"), False)
+            steps: Dict[str, Any] = {}
+            if cancel_sub:
+                try:
+                    result = self.engine.cancel_all(key, cancel_sub=True) or {}
+                    steps = result.get("steps") or {}
+                    message = self._cancel_message(key, result)
+                except Exception as error:
+                    logger.error(f"AVHelper「不要了」执行失败（{key}）：{error}")
+                    try:
+                        removed = bool(self.store.download_delete(key))
+                    except Exception as inner:
+                        logger.error(f"AVHelper 移除台账记录失败 {key}：{inner}")
+                        removed = False
+                    message = ("已移除记录（清种子/订阅失败）" if removed
+                               else f"取消失败：{error}")
+            else:
+                try:
+                    removed = bool(self.store.download_delete(key))
+                except Exception as error:
+                    logger.error(f"AVHelper 移除台账记录失败 {key}：{error}")
+                    removed = False
+                message = "已移除记录" if removed else f"台账里没有 {key} 这条记录"
             payload = self._downloads_payload()
-            payload["message"] = "已移除记录" if removed else f"台账里没有 {key} 这条记录"
+            payload["steps"] = steps
+            payload["message"] = message
             return payload
         self.seed_downloads()
         return self._downloads_payload()
+
+    # ---------- 读侧统一投影（film_view，契约 §4 / §3.7 末段） ----------
+
+    def film_cache_forget(self) -> None:
+        """丢掉 film_view 与数据源自检的进程内缓存（刮削写完之后调用，界面立刻看到新数据）。"""
+        self._film_cache = (0.0, {})
+        self._view_cache = {}
+        self._sources_cache = (0.0, [])
+
+    def _film_index(self) -> Dict[str, Any]:
+        """一次读齐 meta / media_item / 下载台账建索引（进程内 TTL 缓存，见 `FILM_VIEW_TTL`）。
+
+        **性能红线**（契约 §3.7 末段）：`/library` `/downloads` `/tasks` 是 15 秒轮询的热路径，
+        绝不允许"每个番号一次 SQL"。所以投影只有两条路：S7 的 `scraper.film_view()`（逐番号，
+        但吃 `_view_cache` 的 TTL 缓存），或这里的**三次全表读 + 内存索引**（S1 的
+        `meta_list()` / `item_list()` 都支持一次拿全表，正好用上）。
+        """
+        now = time.time()
+        stamp, cached = self._film_cache
+        if stamp and now - stamp < FILM_VIEW_TTL and isinstance(cached, dict) and cached:
+            return cached
+        metas: Dict[str, Dict[str, Any]] = {}
+        items: Dict[str, List[Dict[str, Any]]] = {}
+        ledger: Dict[str, Dict[str, Any]] = {}
+        try:
+            for row in (self.store.meta_list() or []):
+                if isinstance(row, dict) and str(row.get("key") or ""):
+                    metas[str(row["key"])] = row
+        except Exception as error:
+            logger.error(f"AVHelper 读 meta 表失败（film_view 投影降级为零行）：{error}")
+        try:
+            for row in (self.store.item_list() or []):
+                if isinstance(row, dict) and str(row.get("key") or ""):
+                    items.setdefault(str(row["key"]), []).append(row)
+        except Exception as error:
+            logger.error(f"AVHelper 读 media_item 表失败（film_view 投影降级为零行）：{error}")
+        try:
+            ledger = dict(self.store.download_map(PLUGIN_SOURCES) or {})
+        except Exception as error:
+            logger.error(f"AVHelper 读下载台账失败（film_view 的下载态一律算 none）：{error}")
+        index = {"meta": metas, "items": items, "ledger": ledger}
+        self._film_cache = (now, index)
+        return index
+
+    @staticmethod
+    def _pick_item(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """同一番号的多个实例里挑「代表实例」（契约 §4）：在库的 emby 实例 → 任意 emby 实例。"""
+        if not rows:
+            return {}
+
+        def rank(row: Dict[str, Any]) -> Tuple[int, int, str]:
+            in_lib = 0 if str(row.get("library_state") or "") == "in_library" else 1
+            has_emby = 0 if str(row.get("emby_id") or "") else 1
+            return (in_lib, has_emby, str(row.get("item_key") or ""))
+
+        return sorted(rows, key=rank)[0]
+
+    def _film_view_local(self, index: Dict[str, Any], text: str) -> Dict[str, Any]:
+        """本地批量投影（契约 §4 的形状）：索引里三张表都没有这个番号时回空字典。
+
+        这是 **S7 的 `scraper.film_view()` 未落地时的降级实现**：字段名与 §4 逐字一致，
+        值取 `meta` / `media_item` / `downloads` 三张表里已经有的东西，绝不在这里发网络请求。
+        """
+        keys = [k for k in (canon_of(text), emby.norm_key(text)) if k]
+        keys = list(dict.fromkeys(keys))
+        if not keys:
+            return {}
+        meta: Dict[str, Any] = {}
+        for key in keys:
+            hit = (index.get("meta") or {}).get(key)
+            if isinstance(hit, dict):
+                meta = hit
+                break
+        rows: List[Dict[str, Any]] = []
+        for key in keys:
+            rows.extend((index.get("items") or {}).get(key) or [])
+        ledger: Dict[str, Any] = {}
+        for key in keys + [str(text or "").strip().upper()]:
+            hit = (index.get("ledger") or {}).get(key)
+            if isinstance(hit, dict):
+                ledger = hit
+                break
+        if not meta and not rows and not ledger:
+            return {}
+        key = keys[0]
+        number = str(meta.get("display_number") or "") or shown_of(text) or str(text or "").strip()
+        item = self._pick_item(rows)
+        emby_id = str(item.get("emby_id") or "")
+        raw_tags = item.get("version_tags") if isinstance(item.get("version_tags"), dict) else {}
+        if not raw_tags:
+            # 实例行还没写版本标签时，从番号写法本身解析（`IPZZ-912-UC.mp4` → 中字/流出）
+            parse = getattr(emby, "parse_av_number", None)
+            if callable(parse):
+                try:
+                    raw_tags = json_tags(getattr(parse(text), "version_tags", None))
+                except Exception:
+                    raw_tags = {}
+        labels = version_labels(raw_tags)
+        title_zh = str(meta.get("title_zh") or "")
+        title_jp = str(meta.get("title_jp") or "")
+        library = str(item.get("library_state") or "").strip()
+        if library not in LIBRARY_STATES:
+            library = "in_library" if emby_id else "not_in_library"
+        cover = self.emby_image_url(emby_id) or self.image_url(meta.get("cover_raw_url"))
+        states = {
+            "download": download_state_name(ledger.get("state")),
+            "library": library,
+            "scrape": scrape_state_of(meta, item),
+        }
+        return {
+            "key": key,
+            "number": number,
+            "title": title_zh or title_jp,
+            "original_title": title_jp,
+            "plot": str(meta.get("plot_zh") or ""),
+            "actors": [self._view_actor(a) for a in (meta.get("actors") or [])
+                       if isinstance(a, dict)],
+            "cover": cover,
+            "cover_raw": str(meta.get("cover_raw_url") or ""),
+            "crop_anchor": str(item.get("crop_anchor") or "auto"),
+            "version_tags": labels,
+            "badge": "/".join(labels),
+            "states": states,
+            "emby_id": emby_id,
+            "item_key": str(item.get("item_key") or ""),
+            "updated_at": str(meta.get("updated_at") or ""),
+        }
+
+    def _view_actor(self, raw: Dict[str, Any]) -> Dict[str, str]:
+        """`meta.actors_json` 的一条 → 契约 §4 的 `{'name','jp','avatar'}`（头像走 `/img` 代理）。"""
+        zh = str(raw.get("zh") or "")
+        jp = str(raw.get("jp") or "")
+        name = zh or jp or str(raw.get("name") or "")
+        return {"name": name, "jp": jp,
+                "avatar": self.image_url(raw.get("avatar") or raw.get("avatar_url"))}
+
+    def film_views(self, numbers: Iterable[Any]) -> Dict[str, Dict[str, Any]]:
+        """批量取统一投影：`{调用方传进来的原串: film_view}`（取不到的键不在表里）。
+
+        两条路（契约 §3.7 末段）：
+
+        1. **S7 的 `scraper.film_view()` 已落地** → 用它（唯一权威投影），逐个番号调，
+           结果进 `_view_cache`（TTL = `FILM_VIEW_TTL`），所以 15 秒轮询不会每次都重算；
+        2. **未落地** → 本模块的本地批量投影（`_film_index()` 一次读全表 + `_film_view_local()`）。
+        """
+        wanted: List[str] = []
+        for item in (numbers or []):
+            text = str(item or "").strip()
+            if text and text not in wanted:
+                wanted.append(text)
+        if not wanted:
+            return {}
+        cache = self._view_cache
+        if not isinstance(cache, dict):
+            cache = self._view_cache = {}
+        now = time.time()
+        out: Dict[str, Dict[str, Any]] = {}
+        missing: List[str] = []
+        for text in wanted:
+            stamp, view = cache.get(text) or (0.0, {})
+            if stamp and now - stamp < FILM_VIEW_TTL and isinstance(view, dict) and view:
+                out[text] = dict(view)
+            else:
+                missing.append(text)
+        if not missing:
+            return out
+        mod = self.scrape_module()
+        if mod is not None and callable(getattr(mod, "film_view", None)):
+            # S7 的实现签名是 `film_view(key_or_number, item_key=None, store=None, library=None)`
+            # （契约 §3.6 的两参形状拿不到数据，见它自己的 docstring）；`library` 给
+            # `EmbyLibrary` 实例：已建好索引时是纯内存查询，没配 Emby 时 `lookup()` 直接回 None。
+            library = self.emby()
+            for text in missing:
+                try:
+                    view = mod.film_view(text, None, self.store, library)
+                except Exception as error:
+                    logger.error(f"AVHelper film_view 失败（{text}）：{error}")
+                    continue
+                if isinstance(view, dict) and view:
+                    cache[text] = (now, dict(view))
+                    out[text] = dict(view)
+            return out
+        index = self._film_index()
+        for text in missing:
+            try:
+                view = self._film_view_local(index, text)
+            except Exception as error:
+                logger.error(f"AVHelper 本地 film_view 投影失败（{text}）：{error}")
+                continue
+            if view:
+                cache[text] = (now, dict(view))
+                out[text] = dict(view)
+        return out
+
+    def _film_extra(self, view: Any, number: Any = "", emby_id: str = "",
+                    download_state: str = "") -> Dict[str, Any]:
+        """`film_view` → 行上要**追加**的那几个字段（契约 §3.7 末段，`/library` 与 `/downloads` 共用）。
+
+        只给点名的键（`key`/`display_number`/`original_title`/`actors`/`cover`/`version_tags`/
+        `states`），原有字段一个都不碰；`emby_id` 传进来时封面一律走 Emby 原图
+        （`?emby={id}&type=Primary`），否则回落投影里的远程图。
+        """
+        data = view if isinstance(view, dict) else {}
+        states = dict(data.get("states") or {}) if isinstance(data.get("states"), dict) else {}
+        for name, allowed, fallback in (("download", DOWNLOAD_STATES, "none"),
+                                        ("library", LIBRARY_STATES, "not_in_library"),
+                                        ("scrape", SCRAPE_STATES, "unscraped")):
+            if str(states.get(name) or "") not in allowed:
+                states[name] = fallback
+        if download_state:
+            states["download"] = download_state_name(download_state)
+        if emby_id:
+            states["library"] = "in_library"
+        return {
+            "key": str(data.get("key") or "") or canon_of(number),
+            "display_number": str(data.get("number") or "") or shown_of(number),
+            "original_title": str(data.get("original_title") or ""),
+            "actors": list(data.get("actors") or []),
+            "cover": self.emby_image_url(emby_id) or str(data.get("cover") or ""),
+            "version_tags": list(data.get("version_tags") or []),
+            "states": states,
+        }
+
+    def actor_zh(self, name: Any) -> str:
+        """演员名的中文写法：`namemap.actor_display()` 优先，缺失退回 `name_map` 表。
+
+        查不到回空串（界面显示原名，**不发明音译**）——`/detail` 的 `actors[].zh` 用它。
+        `namemap` 还没落盘时也会退回库里的用户映射（S1 的迁移把 `actor_alias` 写进去了）。
+        """
+        text = str(name or "").strip()
+        if not text:
+            return ""
+        mod = self.namemap_module()
+        if mod is not None and callable(getattr(mod, "actor_display", None)):
+            try:
+                info = mod.actor_display(text) or {}
+                zh = str(info.get("zh") or "").strip()
+                if zh:
+                    return zh
+            except Exception as error:
+                logger.warning(f"AVHelper 查演员中文名失败（{text}）：{error}")
+        try:
+            row = self.store.namemap_find("actor", text) or {}
+        except Exception as error:
+            logger.warning(f"AVHelper 查 name_map 失败（{text}）：{error}")
+            return ""
+        return str(row.get("zh_cn") or "").strip()
 
     # ---------- API：已入库的番号（Emby 库实时列表） ----------
 
@@ -1161,7 +1718,22 @@ class AVHelper(_PluginBase):
         except Exception as error:
             logger.error(f"AVHelper 取演员索引失败：{error}")
             known_actors = {}
-        return emby.library_rows(index, thumbs, known_actors)
+        rows = emby.library_rows(index, thumbs, known_actors)
+        # 读侧统一（契约 §3.7 末段）：每行**追加** key/original_title/actors[]/cover/version_tags[]/
+        # states{}，原有字段一个不改。Emby 库的行天然知道条目 id，所以封面一律走原图。
+        numbers = [str(r.get("number") or "") for r in rows if isinstance(r, dict)]
+        try:
+            views = self.film_views(numbers)
+        except Exception as error:
+            logger.error(f"AVHelper 组装 film_view 失败（已入库列表只给原有字段）：{error}")
+            views = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            lib = row.get("lib") if isinstance(row.get("lib"), dict) else {}
+            row.update(self._film_extra(views.get(str(row.get("number") or "")),
+                                        number=row.get("number"), emby_id=str(lib.get("id") or "")))
+        return rows
 
     def api_library(self, fresh: int = 0) -> Dict[str, Any]:
         """`/library`：已入库的番号（Emby 库实时列表，删除的不在其中）。
@@ -1243,13 +1815,24 @@ class AVHelper(_PluginBase):
         return Response(content=blob, media_type=ui_media_type(target),
                         headers={"Cache-Control": "no-cache"})
 
-    def api_img(self, url: str) -> Response:
+    def api_img(self, url: str = "", emby: str = "", emby_person: str = "",
+                type: str = "Primary") -> Response:
         """图片代理：白名单内 URL → XOR 解包后的图片，否则 404。
 
         平时只服务 javdb 封面/预览图；长缩略图在浏览器直连失败时才退回这里（WebP 原样透传）。
+
+        3.7 起多两个分支（**服务端回源，仍然匿名**，契约 §3.5 / v4.1 C2）：
+        `?emby={item_id}&type=Primary`（影片原图）与 `?emby_person={person_id}`（演员原图）。
+        Emby 的 host/apikey 只在服务端用，**绝不进 URL**（URL 里那两个参数只是条目 id）。
         """
-        # 走插件配置里那份代理：这条路是「浏览器直连失败」的兜底，服务端同样可能需要代理
-        blob = imgproxy.fetch(url or "", proxy=self._proxy)
+        target = str(emby_person or emby or "").strip()
+        if target:
+            host, apikey = self._emby_conn()
+            blob = (imgproxy.emby_image(host, apikey, target, type or "Primary")
+                    if host and apikey else None)
+        else:
+            # 走插件配置里那份代理：这条路是「浏览器直连失败」的兜底，服务端同样可能需要代理
+            blob = imgproxy.fetch(url or "", proxy=self._proxy)
         if blob is None:
             return Response(status_code=404)
         return Response(content=blob, media_type=imgproxy.media_type(blob),
@@ -1461,8 +2044,8 @@ class AVHelper(_PluginBase):
             return {"success": False, "message": message}
         self.remember_thumbs(data)     # 打开过的番号都进封面索引，任务/队列补图就有源了
         actors = [
-            {"name": a.get("name") or "", "zh": "", "avatar": self.image_url(a.get("avatar_url")),
-             "id": a.get("id") or ""}
+            {"name": a.get("name") or "", "zh": self.actor_zh(a.get("name")),
+             "avatar": self.image_url(a.get("avatar_url")), "id": a.get("id") or ""}
             for a in (data.get("actors") or []) if isinstance(a, dict) and a.get("name")
         ]
         movie = self._movie(data, actor=(actors[0]["name"] if actors else ""))
@@ -1485,7 +2068,7 @@ class AVHelper(_PluginBase):
                         "cnsub": bool(item.get("cnsub")),
                         "hd": bool(item.get("hd")),
                     })
-        return {
+        payload = {
             "success": True,
             "movie": movie,
             "actors": actors,
@@ -1493,6 +2076,19 @@ class AVHelper(_PluginBase):
             "magnets": magnets,
             "longimage": self.long_cached(number),
         }
+        # 读侧统一（契约 §3.7 末段）：已入库时**追加** `emby_id` 与 Emby 原图的 `cover`
+        # （`movie.cover` 仍是 javdb 那张，语义不动）；`actors[].zh` 上面已经填上了。
+        try:
+            lib = self.emby().lookup(number) or {}
+        except Exception as error:
+            logger.error(f"AVHelper 查详情入库状态失败（按未入库处理）：{error}")
+            lib = {}
+        if lib:
+            payload["emby_id"] = str(lib.get("id") or "")
+            payload["cover"] = self.emby_image_url(lib.get("id"))
+            # 备注/中文名以库里那份为准（`/detail` 的调用方是详情抽屉，拿它显示演员）
+            payload["lib"] = lib
+        return payload
 
     def long_cached(self, number: str) -> str:
         """只读长图 URL 缓存（不抓取）；未命中返回空串。"""
@@ -1592,15 +2188,47 @@ class AVHelper(_PluginBase):
             return {"success": True, "subs": self.store.sub_list(), "message": "已取消订阅"}
         return {"success": True, "subs": self.store.sub_list()}
 
+    def fill_posters(self, *groups: Any) -> bool:
+        """给任务 / 下载队列行补 `poster`（契约 §3.7：`/tasks` 行额外带它）。
+
+        已入库的番号用 Emby 原图（`/img?emby={id}`），没入库的沿用行里那个 thumb 代理地址
+        —— 与 `fill_thumbs()` 一样全程不发网络请求，只批量读一次投影。
+
+        :return: 是否有条目被改
+        """
+        items = [x for group in groups for x in (group or []) if isinstance(x, dict)]
+        missing = [str(x.get("number") or "") for x in items if x.get("number")]
+        if not missing:
+            return False
+        try:
+            views = self.film_views(missing)
+        except Exception as error:
+            logger.error(f"AVHelper 组装 poster 失败（任务行只给原有字段）：{error}")
+            return False
+        changed = False
+        for item in items:
+            view = views.get(str(item.get("number") or "")) or {}
+            poster = str(view.get("cover") or "") or str(item.get("thumb") or "")
+            if poster and item.get("poster") != poster:
+                item["poster"] = poster
+                changed = True
+        return changed
+
     def api_tasks(self) -> Dict[str, Any]:
         """任务列表 + 下载队列（队列进度取自下载器真实状态；两者都补上番号封面）。
 
         界面上这是两个页面，但一次请求同时给两份数据：任务页的「待确认」角标与
         下载页的「下载中」角标用的都是同一份快照，前端一次轮询两边都刷新。
+        `poster` 是 v4 读侧统一追加的字段（已入库→Emby 原图，否则 thumb 代理地址）。
         """
-        return {"success": True, "tasks": self.engine.task_list(),
-                # 用户主动打开任务页/下载页：同步问一次下载器，宁可等这 0.6 秒
-                "queue": self.engine.queue(fresh=True)}
+        tasks = self.engine.task_list()
+        # 用户主动打开任务页/下载页：同步问一次下载器，宁可等这 0.6 秒
+        queue = self.engine.queue(fresh=True)
+        try:
+            self.fill_posters(tasks, queue)
+        except Exception as error:      # 补图失败不该让任务页整个挂掉
+            logger.error(f"AVHelper 补任务封面失败：{error}")
+        return {"success": True, "tasks": tasks, "queue": queue}
 
     async def api_rule(self, request: Request) -> Dict[str, Any]:
         """全局默认规则：GET 读取、POST 保存（以已存规则为基准合并）。"""
@@ -1682,18 +2310,51 @@ class AVHelper(_PluginBase):
                 "downloader": result.get("downloader"), "queue": self.engine.queue(fresh=True)}
 
     async def api_task_cancel(self, request: Request) -> Dict[str, Any]:
-        """取消待确认任务（任务卡右侧的「取消任务」）。
+        """「不要了」三出口联动 / 老「取消任务」，由一个显式开关分开。
 
-        只对还没提交下载的任务（state=await）生效：置成 canceled 后任务页与角标都不再算它，
-        记录仍留在库里。已推送下载的种子要停得去下载器里操作，这里不假称已取消。
+        - `cancel_sub=true`（请求体优先，其次查询串；**默认 false**）**且**带 `number` / `key`
+          → 转调 `engine.cancel_all(number_or_key, cancel_sub=True)`：删下载器种子 →
+          台账打墓碑 → 删番号/演员订阅 → 写 `known`，四步独立成败，结果在返回的 `steps` 里。
+          **默认不联动**：界面上现有的「取消任务」按钮不带这个参数，绝不能因为一次改版就
+          顺手把种子和订阅删掉（主统筹 2026-10-14 裁决；等前端做显式「不要了」时再传 true）。
+        - 否则 → 老行为一字不改：`engine.cancel_task(tid)` 只把 `state='await'` 的待确认
+          任务置成 `canceled`（因此这条路**必须带 `id`**），不碰下载器与订阅、返回形状不变。
         """
         payload = await self._json_body(request)
+        cancel_sub = pick_bool(payload.get("cancel_sub")
+                               if payload.get("cancel_sub") is not None
+                               else request.query_params.get("cancel_sub"), False)
+        number = str(payload.get("number") or payload.get("key") or "").strip()
+        if cancel_sub and number:
+            try:
+                result = await asyncio.to_thread(self.engine.cancel_all, number,
+                                                 cancel_sub=True)
+            except Exception as error:
+                logger.error(f"AVHelper「不要了」执行失败（{number}）：{error}")
+                return {"success": False, "message": f"取消失败：{error}", "steps": {},
+                        "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+            return {"success": bool(result.get("ok")), "message": self._cancel_message(number, result),
+                    "steps": result.get("steps") or {}, "error": str(result.get("error") or ""),
+                    "tasks": self.engine.task_list(), "queue": self.engine.queue()}
         tid = str(payload.get("id") or "").strip()
         if not tid:
-            return {"success": False, "message": "缺少任务 id"}
+            return {"success": False,
+                    "message": ("缺少任务 id（三出口联动请带 number/key + cancel_sub=true）"
+                                if number else "缺少任务 id 或番号"),
+                    "tasks": self.engine.task_list(), "queue": self.engine.queue()}
         result = await asyncio.to_thread(self.engine.cancel_task, tid)
         return {"success": bool(result.get("ok")), "message": result.get("message") or "",
                 "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+
+    @staticmethod
+    def _cancel_message(number: str, result: Dict[str, Any]) -> str:
+        """把 `cancel_all()` 的四步结果拼成一句能贴到界面上的话（失败步骤逐条点名）。"""
+        steps = result.get("steps") if isinstance(result.get("steps"), dict) else {}
+        failed = [f"{name}：{str((step or {}).get('detail') or '未完成')}"
+                  for name, step in steps.items() if not (step or {}).get("ok")]
+        if not failed:
+            return f"已取消 {number}"
+        return f"已取消 {number}（{len(failed)} 步未完成：{'；'.join(failed)}）"
 
     async def api_magnet_download(self, request: Request) -> Dict[str, Any]:
         """把详情页某条磁力直接推给下载器（界面上的「下载」按钮）。
@@ -1744,6 +2405,559 @@ class AVHelper(_PluginBase):
             return data if isinstance(data, dict) else {}
         except Exception:
             return {}
+
+    # ---------- API：刮削工作台与映射表（v4 写线，契约 §3.7） ----------
+
+    def scrape_module(self) -> Any:
+        """延迟导入 S7 的 `scraper`：缺失/导入失败一律回 None，**绝不让插件在 import 期崩掉**。"""
+        try:
+            from . import scraper  # noqa: F401  pylint: disable=import-outside-toplevel
+            return scraper
+        except Exception as error:
+            logger.warning(f"AVHelper 刮削模块不可用（延迟导入 scraper 失败）：{error}")
+            return None
+
+    def translator_module(self) -> Any:
+        """延迟导入 S4 的 `translator`（模型自检用）：同上，回 None 让端点给明确错误。"""
+        try:
+            from . import translator  # noqa: F401  pylint: disable=import-outside-toplevel
+            return translator
+        except Exception as error:
+            logger.warning(f"AVHelper 翻译模块不可用（延迟导入 translator 失败）：{error}")
+            return None
+
+    def namemap_module(self) -> Any:
+        """延迟导入 S3 的 `namemap`，并**保证映射表已就绪**（load + 内置映射入库，各只跑一次）。
+
+        为什么必须在这里做（S10 独立验收抓到的功能性缺口）：`namemap.load()` 原先在插件启动
+        路径上**从来没被调用过** —— 未 load 时 `ready()=False`、`actor_lookup()/tag_lookup()`
+        恒 None、`to_simplified('騎乗位')` 原样返回（繁→简静默失效）、`clean_tags()` 不过滤删除
+        规则、`stats()` 全 0，**无异常也无日志**；`name_map` 里只剩 `actor_alias` 搬来的那几行。
+
+        所以导入成功 → `prepare_namemap()`：`load()`（实测 76ms，幂等、有内部缓存）+
+        `sync_store(self.store)`（实测 43ms，幂等；库里已有内置记录时不重复灌）。
+        **全程 best-effort**：失败只 warning（+ 一条 `scrape_log`），绝不抛 —— 映射缺位时读接口
+        退回"只有用户映射"的老样子，总好过 500。
+        """
+        global _NAMEMAP_TRIED
+        try:
+            from . import namemap  # noqa: F401  pylint: disable=import-outside-toplevel
+        except Exception as error:
+            logger.warning(f"AVHelper 映射表模块不可用（延迟导入 namemap 失败）：{error}")
+            return None
+        if not _NAMEMAP_TRIED:
+            with _NAMEMAP_LOCK:
+                if not _NAMEMAP_TRIED:
+                    _NAMEMAP_TRIED = True      # 先置位：坏资源文件不该每个请求都刷一遍日志
+                    self.prepare_namemap(namemap)
+        return namemap
+
+    def prepare_namemap(self, mod: Any) -> bool:
+        """跑一次 `load()` + `sync_store()`（幂等；失败只 warning + `scrape_log`）。
+
+        :return: `load()` 是否成功（`sync_store()` 的成败不影响返回值，它只是把内置映射
+                 灌进库；灌失败时 `/namemap/*` 仍能显示库里已有的用户映射）
+        """
+        ok = False
+        loader = getattr(mod, "load", None)
+        if callable(loader):
+            try:
+                loader()
+                ok = True
+            except Exception as error:
+                logger.warning(f"AVHelper 加载映射表失败（繁简转换/标签清洗会退化成空操作）：{error}")
+                self._namemap_note("load", error)
+        syncer = getattr(mod, "sync_store", None)
+        if callable(syncer):
+            try:
+                rows = syncer(self.store)
+                logger.info(f"AVHelper 内置映射已同步进 name_map：{rows} 行")
+            except Exception as error:
+                logger.warning(f"AVHelper 同步内置映射失败（/namemap/* 只有用户映射）：{error}")
+                self._namemap_note("sync", error)
+        return ok
+
+    def _namemap_note(self, status: str, error: Any) -> None:
+        """映射表初始化失败往 `scrape_log` 记一条（读接口本身不报错，事后要查得到）。"""
+        try:
+            self.store.scrape_log_add("namemap", status, "", 0,
+                                      f"{type(error).__name__}: {error}"[:200])
+        except Exception:
+            pass
+
+    def emby_client(self) -> Any:
+        """S2 的 `EmbyClient`（写侧）入口：惰性创建，连接信息变了就换实例（照 `emby()` 的写法）。
+
+        **全仓库唯一的 `EmbyClient(...)` 构造点**（S2 报告点名：`scraper.py` 只收注入的实例）。
+        没配 Emby（插件与 MP 两处都取不到）、或类还没落地一律回 None —— `/scrape/*` 据此回
+        「Emby 未配置」；**绝不把空 host/apikey 传进去**（`ready()` 为假时那些方法全是空操作，
+        拿不到真实 DTO 的预览/回滚只会更误导）。
+        """
+        host, apikey = self._emby_conn()
+        cls = getattr(emby, "EmbyClient", None)
+        if not host or not apikey or not callable(cls):
+            self._emby_client = None
+            self._emby_client_sig = None
+            return None
+        sig = (host, apikey)
+        if self._emby_client is None or self._emby_client_sig != sig:
+            try:
+                self._emby_client = cls(host, apikey)
+                self._emby_client_sig = sig
+            except Exception as error:
+                logger.error(f"AVHelper 创建 EmbyClient 失败：{error}")
+                self._emby_client = None
+                self._emby_client_sig = None
+        return self._emby_client
+
+    def scrape_opts(self) -> Dict[str, Any]:
+        """给 `scraper.*` 的 `opts`：设置台那 11 项（`scrape_conf()`）+ 代理。
+
+        **待 S7 报告复核**：契约 §3.6 只写了 `opts=None`，键名这里就用设置台那套
+        （`scrapeMode`/`plotJavtxt`/…）另附 `proxy`（抓 Javtxt / MetaTube 必须走它）。
+        """
+        opts = dict(self.scrape_conf())
+        opts["proxy"] = self._proxy
+        return opts
+
+    def scrape_deps(self) -> Dict[str, Any]:
+        """刮削编排的依赖注入包（契约 §3.6 的四个关键字：`store`/`cli`/`emby_client`/`opts`）。"""
+        return {"store": self.store, "cli": self.cli(),
+                "emby_client": self.emby_client(), "opts": self.scrape_opts()}
+
+    @staticmethod
+    def api_error(message: str, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """统一错误体：`success:false` + 一句话；契约点名的键由 `extra` 补齐（前端不必猜缺哪个）。"""
+        out: Dict[str, Any] = {"success": False, "message": message}
+        if extra:
+            out.update(extra)
+        return out
+
+    @classmethod
+    def scrape_not_ready(cls, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """依赖模块没落盘时的统一错误体（`success:false` + 明确文案），处理器照它返回。"""
+        return cls.api_error(SCRAPE_NOT_READY, extra)
+
+    @classmethod
+    def emby_not_ready(cls, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Emby 连接信息缺失时的统一错误体（`/scrape/preview|run|rollback` 要先过这一关）。"""
+        return cls.api_error(EMBY_NOT_READY, extra)
+
+    def _scrape_sources(self, deep: bool = False) -> List[Dict[str, Any]]:
+        """数据源健康表。
+
+        **默认廉价**（`/scrape/status` 与 `/scrape/log` 用）：`store.scrape_log_summary()`
+        —— 一条 SQL、零网络。这两个端点会被工作台轮询，**绝不能在这里打站点**：
+        S7 的 `sources_selfcheck()` 是真探针（javdb 子进程 + javtxt + MetaTube + LLM 自检，
+        3~5 秒，还会吃掉站点限流与 javdb 的 1 小时冷却）。
+
+        `deep=True`（只由 `/scrape/selfcheck` 的「数据源自检」按钮触发）才跑那套探针，
+        结果吃 30 秒内存缓存；探针失败或模块缺失时退回日志汇总，绝不抛。
+        """
+        now = time.time()
+        stamp, cached = self._sources_cache
+        if deep:
+            if stamp and now - stamp < FILM_VIEW_TTL and cached:
+                return list(cached)
+            rows: List[Dict[str, Any]] = []
+            mod = self.scrape_module()
+            if mod is not None and callable(getattr(mod, "sources_selfcheck", None)):
+                try:
+                    rows = [dict(r) for r in (mod.sources_selfcheck(self.store, self.cli(),
+                                                                    self.scrape_opts()) or [])
+                            if isinstance(r, dict)]
+                except Exception as error:
+                    logger.error(f"AVHelper 数据源自检失败（退回 scrape_log 汇总）：{error}")
+                    rows = []
+            if rows:
+                self._sources_cache = (now, rows)
+                return list(rows)
+        try:
+            raw = [dict(r) for r in (self.store.scrape_log_summary() or []) if isinstance(r, dict)]
+        except Exception as error:
+            logger.error(f"AVHelper 读 scrape_log 汇总失败：{error}")
+            return []
+        # 汇总行的列名是 `last_status`/`avg_latency_ms`/`last_error`/`last_created_at`，
+        # 而前端（S9 的 `ScrapeView.vue`）按自检行那四个名字容错读：`status`/`latency_ms`/
+        # `error`/`checked_at`。这里**补一份**给界面用（原始列名一个不删，诊断还要看它）。
+        out: List[Dict[str, Any]] = []
+        for row in raw:
+            item = dict(row)
+            item["source"] = str(row.get("source") or row.get("source_name") or "")
+            item["status"] = str(row.get("last_status") or row.get("status") or "")
+            item["latency_ms"] = to_int(row.get("avg_latency_ms") or row.get("latency_ms"))
+            item["error"] = str(row.get("last_error") or row.get("error") or "")
+            item["checked_at"] = str(row.get("last_created_at") or row.get("checked_at") or "")
+            out.append(item)
+        return out
+
+    def _resolve_item_key(self, value: Any) -> str:
+        """番号 / 作品键 / `emby:12598` → `media_item` 的**实例键**（回滚按钮只给一个键）。
+
+        工作台列表给的是作品键（`items[].key`），而 `rollback_item()` 要的是实例键；
+        这里按 `_pick_item()` 的同一套规则挑代表实例。解析不出来就原样回传 ——
+        让 S7 去报"没有写前备份"，而不是在这里假装成功。
+        """
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        if ":" in text:
+            try:
+                if self.store.item_get(text):
+                    return text
+            except Exception as error:
+                logger.error(f"AVHelper 取实例行失败（{text}）：{error}")
+        try:
+            index = self._film_index()
+            rows: List[Dict[str, Any]] = []
+            for key in [k for k in (canon_of(text), emby.norm_key(text)) if k]:
+                rows.extend((index.get("items") or {}).get(key) or [])
+            picked = self._pick_item(rows)
+            if picked.get("item_key"):
+                return str(picked["item_key"])
+        except Exception as error:
+            logger.error(f"AVHelper 解析实例键失败（{text}）：{error}")
+        return text
+
+    def _scrape_items(self, limit: int = 0, offset: int = 0,
+                      filter_text: str = "") -> List[Dict[str, Any]]:
+        """`/scrape/status` 的 `items[]`：`meta` 行 + 代表实例（`media_item`）合并。
+
+        字段名与主统筹跟前端定死的那份**逐字一致**：`key` / `number` / `title` / `emby_id` /
+        `completeness` / `scrape_state` / `has_backup` / `crop_anchor` / `version_tags[]` /
+        `updated_at`。
+
+        - `has_backup` 取 S1 的**布尔位**（`item_list()` 给的，不是 `emby_backup_json` 本体）
+          —— 回滚按钮的判据就是它，`False` 才禁用；
+        - `version_tags` 用 **media_item 行的 dict**（S1 提过：`downloads` 行那个同名键是 JSON 串，
+          两份别混用）；
+        - 只有实例、没有作品行（`media_item` 里有、`meta` 里没有）的 key 也算一条，
+          `completeness` 按 `missing_core` 计（作品级元数据确实什么都没有）。
+        """
+        index = self._film_index()
+        metas: Dict[str, Any] = index.get("meta") or {}
+        items: Dict[str, Any] = index.get("items") or {}
+        rows: List[Dict[str, Any]] = []
+        for key in list(metas.keys()) + [k for k in items.keys() if k not in metas]:
+            meta = metas.get(key) if isinstance(metas.get(key), dict) else {}
+            item = self._pick_item(items.get(key) or [])
+            completeness = str(meta.get("completeness") or "") or "missing_core"
+            rows.append({
+                "key": key,
+                "number": (str(meta.get("display_number") or "")
+                           or str(item.get("display_number") or "") or key),
+                "title": str(meta.get("title_zh") or "") or str(meta.get("title_jp") or ""),
+                "emby_id": str(item.get("emby_id") or ""),
+                "completeness": completeness,
+                "scrape_state": scrape_state_of(meta, item),
+                "has_backup": bool(item.get("has_backup")),
+                "crop_anchor": str(item.get("crop_anchor") or "auto"),
+                "version_tags": version_labels(item.get("version_tags")),
+                "updated_at": str(meta.get("updated_at") or ""),
+            })
+        rows.sort(key=lambda row: str(row.get("updated_at") or ""), reverse=True)
+        wanted = str(filter_text or "").strip()
+        if wanted:
+            rows = [row for row in rows if str(row.get("completeness") or "") == wanted]
+        skip = max(to_int(offset), 0)
+        size = max(to_int(limit), 0)
+        if skip:
+            rows = rows[skip:]
+        return rows[:size] if size else rows
+
+    def api_scrape_status(self, limit: int = 0, offset: int = 0,
+                          filter: str = "") -> Dict[str, Any]:
+        """`/scrape/status`：工作台首屏（契约 §3.7 + 主统筹 2026-10-14 补充的 `items[]`）。
+
+        `?limit=&offset=&filter=` 三个参数（`filter` 就是 completeness 档位：前端点状态卡片筛选）。
+
+        `stats.unscraped` 的口径是**本模块定的**（契约没写怎么算）：「作品表里 completeness
+        落在三档之外的行」＋「Emby 库里已经入库、但 `meta` 表里还没有的番号」，于是
+        `full + missing_plot + missing_core + unscraped == total`，四张状态卡能对上账。
+        拿不到 Emby 索引时只算前半部分，不影响出数。
+        """
+        try:
+            raw = self.store.meta_stats() or {}
+        except Exception as error:
+            logger.error(f"AVHelper 读刮削统计失败：{error}")
+            raw = {}
+        full = int(raw.get("full") or 0)
+        missing_plot = int(raw.get("missing_plot") or 0)
+        missing_core = int(raw.get("missing_core") or 0)
+        meta_total = int(raw.get("total") or 0)
+        others = max(meta_total - full - missing_plot - missing_core, 0)
+        unscraped = others
+        try:
+            index = self.emby().index() or {}
+            meta_keys = {str(k) for k in (self._film_index().get("meta") or {})}
+            lib_keys = {canon_of(key) for key in index.keys()}
+            unscraped += len({k for k in lib_keys if k and k not in meta_keys})
+        except Exception as error:
+            logger.error(f"AVHelper 统计未刮条目失败（只按 meta 表算）：{error}")
+        stats = {"full": full, "missing_plot": missing_plot, "missing_core": missing_core,
+                 "unscraped": unscraped,
+                 "total": full + missing_plot + missing_core + unscraped}
+        try:
+            queue = {"tier1": len(self.store.meta_due(tier=1, limit=SCRAPE_QUEUE_PROBE)),
+                     "tier2": len(self.store.meta_due(tier=2, limit=SCRAPE_QUEUE_PROBE))}
+        except Exception as error:
+            logger.error(f"AVHelper 读重刮队列失败：{error}")
+            queue = {"tier1": 0, "tier2": 0}
+        last_run = ""
+        try:
+            recent = self.store.scrape_log_recent(limit=1) or []
+            if recent and isinstance(recent[0], dict):
+                last_run = str(recent[0].get("created_at") or "")
+        except Exception as error:
+            logger.error(f"AVHelper 读最近一次刮削时间失败：{error}")
+        try:
+            items = self._scrape_items(limit=limit, offset=offset, filter_text=filter)
+        except Exception as error:
+            logger.error(f"AVHelper 组装刮削列表失败：{error}")
+            items = []
+        return {"success": True, "stats": stats, "sources": self._scrape_sources(),
+                "queue": queue, "last_run": last_run, "items": items,
+                "scraper": bool(self.scrape_module() is not None)}
+
+    def api_scrape_preview(self, key: str = "") -> Dict[str, Any]:
+        """`/scrape/preview?key=`：单条字段级 diff（`scraper.preview_one()`，**只算不写**）。
+
+        出参照契约：`{key, number, fields:[{name,current,target,changed}],
+        sources:{javdb,javtxt,metatube}, warnings:[]}`。
+        """
+        target = str(key or "").strip()
+        if not target:
+            return {"success": False, "message": "缺少番号 key"}
+        mod = self.scrape_module()
+        if mod is None or not callable(getattr(mod, "preview_one", None)):
+            return self.scrape_not_ready({"key": target})
+        if self.emby_client() is None:
+            # 预览要拿 Emby 的**当前值**做 diff，没有连接信息时给不了有意义的对比
+            return self.emby_not_ready({"key": target, "number": "", "fields": [],
+                                        "sources": {}, "warnings": []})
+        try:
+            view = mod.preview_one(target, **self.scrape_deps())
+        except Exception as error:
+            logger.error(f"AVHelper 刮削预览失败（{target}）：{error}")
+            return {"success": False, "message": f"预览失败：{error}", "key": target}
+        data = dict(view) if isinstance(view, dict) else {}
+        data.setdefault("key", target)
+        data.setdefault("fields", [])
+        data.setdefault("sources", {})
+        data.setdefault("warnings", [])
+        return {"success": True, **data}
+
+    async def api_scrape_run(self, request: Request) -> Dict[str, Any]:
+        """`/scrape/run`：执行刮削（`{keys?[], all?, force?, anchor?}`）。
+
+        **闸门**（任务书 A）：`all=true` 必须同时带 `confirm=true`，否则直接拒绝 ——
+        这个端点是真往 Emby 写元数据的，界面上一次误点不该把全库都改一遍。
+        另外同一时刻只允许一路（`_scrape_busy` 单飞），返回形状照契约
+        `{ok, results:[{key,status,changed:[],error}]}`。
+        """
+        payload = await self._json_body(request)
+        keys_raw = payload.get("keys")
+        keys = [str(x).strip() for x in keys_raw if str(x).strip()] if isinstance(keys_raw, list) else []
+        all_flag = pick_bool(payload.get("all"), False)
+        if all_flag and not pick_bool(payload.get("confirm"), False):
+            return {"success": False, "ok": False, "results": [], "message":
+                    "全库刮削需要确认：请求体里带 confirm=true 才会执行"}
+        if all_flag and not keys:
+            try:
+                keys = [str(row.get("key") or "") for row in (self.store.meta_list() or [])
+                        if isinstance(row, dict) and str(row.get("key") or "")]
+            except Exception as error:
+                logger.error(f"AVHelper 取全库待刮清单失败：{error}")
+                return {"success": False, "ok": False, "results": [],
+                        "message": f"读取全库清单失败：{error}"}
+        if not keys:
+            return {"success": True, "ok": True, "results": [], "message": "没有待刮削的条目"}
+        mod = self.scrape_module()
+        if mod is None or not callable(getattr(mod, "scrape_batch", None)):
+            return self.scrape_not_ready({"ok": False, "results": []})
+        if self.emby_client() is None:
+            return self.emby_not_ready({"ok": False, "results": []})
+        if not self._scrape_busy.acquire(blocking=False):
+            return {"success": False, "ok": False, "results": [],
+                    "message": "上一次刮削还在进行中，请稍候"}
+        try:
+            deps = self.scrape_deps()
+            opts = dict(deps.get("opts") or {})
+            if payload.get("anchor") not in (None, ""):
+                opts["anchor"] = str(payload.get("anchor") or "").strip()
+            opts["force"] = pick_bool(payload.get("force"), False)
+            deps["opts"] = opts
+            raw = await asyncio.to_thread(mod.scrape_batch, keys, **deps)
+        except Exception as error:
+            logger.error(f"AVHelper 执行刮削失败：{error}")
+            return {"success": False, "ok": False, "results": [], "message": f"刮削失败：{error}"}
+        finally:
+            self._scrape_busy.release()
+            # 写完了：投影缓存立刻失效，界面刷新就能看到新字段（不靠 30 秒 TTL 收敛）
+            self.film_cache_forget()
+        results: List[Dict[str, Any]] = []
+        for row in (raw or []):
+            if not isinstance(row, dict):
+                continue
+            item = dict(row)
+            item["key"] = str(item.get("key") or "")
+            item["status"] = str(item.get("status") or "")
+            item["changed"] = list(item.get("changed") or [])
+            item["error"] = str(item.get("error") or "")
+            results.append(item)
+        failed = sum(1 for row in results if str(row.get("error") or ""))
+        return {"success": True, "ok": True, "results": results,
+                "message": f"已处理 {len(results)} 条" + (f"，其中 {failed} 条失败" if failed else "")}
+
+    async def api_scrape_rollback(self, request: Request) -> Dict[str, Any]:
+        """`/scrape/rollback`：用写前备份的完整 DTO 回灌（`scraper.rollback_item()`）。
+
+        入参 `{item_key}`（`emby:12598` 这种实例键）；`key` 是兼容写法，两者都收 ——
+        工作台列表（`/scrape/status.items[]`）给的是**作品键**，所以这里先把番号/作品键
+        解析成代表实例键（`_resolve_item_key()`），回滚按钮不必自己拼 `emby:` 前缀。
+        判据在 `store.item_backup_save()` 那道 D7 闸门里：没有备份的实例由 S7 拒绝回滚。
+        """
+        payload = await self._json_body(request)
+        raw_key = str(payload.get("item_key") or payload.get("key") or "").strip()
+        if not raw_key:
+            return {"success": False, "ok": False, "restored": [], "error": "缺少 item_key"}
+        mod = self.scrape_module()
+        if mod is None or not callable(getattr(mod, "rollback_item", None)):
+            return self.scrape_not_ready({"ok": False, "restored": [], "error": SCRAPE_NOT_READY})
+        if self.emby_client() is None:
+            return self.emby_not_ready({"ok": False, "restored": [], "error": EMBY_NOT_READY})
+        item_key = self._resolve_item_key(raw_key)
+        try:
+            result = await asyncio.to_thread(mod.rollback_item, item_key, store=self.store,
+                                             emby_client=self.emby_client())
+        except Exception as error:
+            logger.error(f"AVHelper 回滚失败（{item_key}）：{error}")
+            return {"success": False, "ok": False, "restored": [], "error": str(error)}
+        data = dict(result) if isinstance(result, dict) else {}
+        restored = list(data.get("restored") or [])
+        self.film_cache_forget()
+        return {"success": bool(data.get("ok")), "ok": bool(data.get("ok")),
+                "restored": restored, "error": str(data.get("error") or "")}
+
+    def api_scrape_log(self, limit: int = 50) -> Dict[str, Any]:
+        """`/scrape/log`：最近若干条刮削日志 + 各源汇总（契约 §3.7）。
+
+        `items[]` 的键名照契约（`source`/`status`/`key`/`latency_ms`/`error`/`created_at`）；
+        S1 的行里 `source`/`error` 与 `source_name`/`error_summary` 两份都给，这里取前者。
+        """
+        size = min(max(to_int(limit, 50), 1), 500)
+        try:
+            rows = self.store.scrape_log_recent(limit=size) or []
+        except Exception as error:
+            logger.error(f"AVHelper 读刮削日志失败：{error}")
+            return {"success": False, "message": "刮削日志读取失败", "items": [], "summary": []}
+        items = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            items.append({
+                "source": str(row.get("source") or row.get("source_name") or ""),
+                "status": str(row.get("status") or ""),
+                "key": str(row.get("key") or ""),
+                "latency_ms": to_int(row.get("latency_ms")),
+                "error": str(row.get("error") or row.get("error_summary") or ""),
+                "created_at": str(row.get("created_at") or ""),
+            })
+        return {"success": True, "items": items, "summary": self._scrape_sources()}
+
+    async def api_scrape_selfcheck(self, request: Request) -> Dict[str, Any]:
+        """`/scrape/selfcheck`：翻译模型自检（设置台的「模型自检」按钮）。
+
+        出参照契约 `{ok, model, latency_ms, error}`，转 `translator.selfcheck(model)`；
+        `model` 留空就用设置台配的主模型（`translateModel`）。
+        """
+        payload = await self._json_body(request)
+        # `{"sources": true}`：顺带跑一次真探针（S7 的 `sources_selfcheck`，3~5 秒 + 吃限流），
+        # 它是「数据源自检」页签那个按钮的入口；不带该键时就是契约 §3.7 的模型自检。
+        if pick_bool(payload.get("sources"), False):
+            rows = await asyncio.to_thread(self._scrape_sources, True)
+            ok = bool(rows) and all(str(row.get("status") or "") in ("ok", "skipped")
+                                    for row in rows)
+            return {"success": ok, "ok": ok, "model": "", "latency_ms": 0,
+                    "error": "" if ok else "有数据源自检未通过", "sources": rows}
+        model = str(payload.get("model") or "").strip() or str(self.scrape_conf()["translateModel"])
+        mod = self.translator_module()
+        if mod is None or not callable(getattr(mod, "selfcheck", None)):
+            return self.scrape_not_ready({"ok": False, "model": model, "latency_ms": 0,
+                                          "error": SCRAPE_NOT_READY})
+        try:
+            result = await asyncio.to_thread(mod.selfcheck, model)
+        except Exception as error:
+            logger.error(f"AVHelper 模型自检失败（{model}）：{error}")
+            return {"success": False, "ok": False, "model": model, "latency_ms": 0,
+                    "error": str(error)}
+        data = dict(result) if isinstance(result, dict) else {}
+        return {"success": bool(data.get("ok")), "ok": bool(data.get("ok")),
+                "model": str(data.get("model") or model),
+                "latency_ms": to_int(data.get("latency_ms")),
+                "error": str(data.get("error") or "")}
+
+    def _namemap_rows(self, entity_type: str, q: str, limit: int) -> List[Dict[str, Any]]:
+        """查 `name_map`（`?q=` 走 `namemap_list(like=…)` 的模糊匹配，一 SQL 搞定）。
+
+        先过 `namemap_module()` 这道闸门：它保证内置映射已经 `load()` 且**灌进库**
+        （`sync_store()`）—— 否则首次访问这里只有 `actor_alias` 搬来的那几行（S10 实测）。
+        """
+        self.namemap_module()
+        size = min(max(to_int(limit, 50), 1), 200)
+        try:
+            return [row for row in (self.store.namemap_list(entity_type=entity_type, limit=size,
+                                                            like=str(q or "")) or [])
+                    if isinstance(row, dict)]
+        except Exception as error:
+            logger.error(f"AVHelper 读 {entity_type} 映射表失败：{error}")
+            return []
+
+    def api_namemap_actors(self, q: str = "", limit: int = 50) -> Dict[str, Any]:
+        """`/namemap/actors?q=&limit=`：演员三语映射（契约 §3.7）。"""
+        items = [{
+            "canonical_id": str(row.get("canonical_id") or ""),
+            "zh": str(row.get("zh_cn") or ""),
+            "jp": str(row.get("jp") or ""),
+            "tw": str(row.get("zh_tw") or ""),
+            "avatar": self.image_url(row.get("avatar_url")),
+            "aliases": list(row.get("keywords") or []),
+            "source": str(row.get("source") or ""),
+        } for row in self._namemap_rows("actor", q, limit)]
+        return {"success": True, "items": items}
+
+    def api_namemap_tags(self, q: str = "", limit: int = 50) -> Dict[str, Any]:
+        """`/namemap/tags?q=&limit=`：标签映射（`is_delete_rule=True` = 命中即丢弃，契约 §3.7）。"""
+        items = [{
+            "canonical_id": str(row.get("canonical_id") or ""),
+            "zh": str(row.get("zh_cn") or ""),
+            "jp": str(row.get("jp") or ""),
+            "is_delete_rule": bool(row.get("is_delete_rule")),
+        } for row in self._namemap_rows("tag", q, limit)]
+        return {"success": True, "items": items}
+
+    async def api_namemap_set(self, request: Request) -> Dict[str, Any]:
+        """`/namemap/set`：写入用户映射（`{name, zh, jp?, entity_type?}` → `{ok, canonical_id}`）。
+
+        `name` 是**原名**（日文名/标签原文），`zh` 是用户要显示的中文名；落库走 S1 的
+        `namemap_user_set()`（`source='user_custom'`，最高优先级，内置重导顶不掉）。
+        """
+        payload = await self._json_body(request)
+        name = str(payload.get("name") or "").strip()
+        zh = str(payload.get("zh") or "").strip()
+        jp = str(payload.get("jp") or "").strip()
+        entity = str(payload.get("entity_type") or "actor").strip() or "actor"
+        if not name:
+            return {"success": False, "ok": False, "canonical_id": "", "message": "缺少原名 name"}
+        if not zh:
+            return {"success": False, "ok": False, "canonical_id": "", "message": "缺少中文名 zh"}
+        try:
+            cid = await asyncio.to_thread(self.store.namemap_user_set, entity, zh, jp or name)
+        except Exception as error:
+            logger.error(f"AVHelper 写映射失败（{name} → {zh}）：{error}")
+            return {"success": False, "ok": False, "canonical_id": "", "message": str(error)}
+        return {"success": True, "ok": True, "canonical_id": str(cid or ""),
+                "message": f"已保存 {name} → {zh}"}
 
     # ---------- API：缓存维护 ----------
 

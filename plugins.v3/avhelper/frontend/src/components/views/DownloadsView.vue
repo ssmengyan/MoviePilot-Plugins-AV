@@ -43,6 +43,13 @@
  * - **只在「下载中」页签里轮询**：5 秒一次的进度轮询是为进度条服务的，看历史时白打
  *   `/tasks` 没有意义（`syncPolling()`）。
  *
+ * **v4 刮削线（0.7.0）在本栏加的两样**（都在「下载中」页签里，`QueueItem` 之外的字段全部可选读）：
+ * - **「下载失败」独立一节**（v4.1 §9.2-1，主统筹点名要画）：`state === 'failed'` 的行
+ *   既不是"下载中"（画 0% 进度条会让人以为还在下）也不是"已完成"，所以单开一节：
+ *   红色描边 + `下载失败` 徽标 + `失败原因：{failed_reason}`（悬浮也给全文），**没有进度条**；
+ * - **版本角标**（v4.1 §9.2-6）：行卡片右上角画 `中字` / `流出` / `4K` / `2版本`
+ *   （数据来自 `badge` 或 `version_tags`，与 `LibraryView` 同一口径；**缺字段整颗不渲染**）。
+ *
  * 刻意**不做**（老实现也没有，别顺手加）：
  * - 没有行内动作（取消下载 / 重试 / 打开目录）：老下载页只有 `↻ 刷新进度` 一个按钮；
  * - 不渲染 `item.category` / `item.hash` / `item.downloader` / `item.id`：老 `queueRow` 没用它们；
@@ -129,6 +136,14 @@ type DoneRow = QueueItem & {
   completedAt?: string
   /** 实时 Emby 命中（`null` = 不在库），与契约 §4 的 `lib` 同名同形。 */
   lib?: { id?: string; name?: string; path?: string; url?: string } | null
+  /** 失败原因（v4.1 §9.2-1：`state === 'failed'` 时后端记的那个字段）。 */
+  failed_reason?: string
+  failedReason?: string
+  /** 版本角标数据（v4.1 §9.2-6；老后端没有这两个字段时什么都不画）。 */
+  version_tags?: unknown
+  versionTags?: unknown
+  badge?: string
+  version_count?: number
 }
 
 /** 完成判定就是 `state === 'done'`（老实现同款，不认别的字符串）。 */
@@ -136,11 +151,70 @@ function isDone(item: QueueItem): boolean {
   return item.state === 'done'
 }
 
-/** 「下载中」：`state !== 'done'` —— 老实现画的那一套（百分比 + 进度条）只留给这一节（契约 §5.3）。 */
-const activeRows = computed<QueueItem[]>(() => rows.value.filter(item => !isDone(item)))
+/**
+ * 失败判定：`state === 'failed'`（v4.1 §9.2-1 要求后端把 qB 的 error/missingFiles/unknown
+ * 落成这个状态并记 `failed_reason`；主统筹 2026-10-14 明确"必须画出来"）。
+ *
+ * 为什么单开一节：它既不是"下载中"（画进度条会给 0% 的假象），也不是"已完成"
+ * —— 混进任一边都会让用户误判这一条到底成没成。
+ */
+function isFailed(item: QueueItem): boolean {
+  return item.state === 'failed'
+}
+
+/** 「下载中」：还没完成、也还没失败。 */
+const activeRows = computed<QueueItem[]>(() =>
+  rows.value.filter(item => !isDone(item) && !isFailed(item)),
+)
+
+/** 「失败」：`state === 'failed'`，红色徽标 + 悬浮/正文给出 `failed_reason`。 */
+const failedRows = computed<DoneRow[]>(() => rows.value.filter(item => isFailed(item)) as DoneRow[])
 
 /** 「已完成」：`state === 'done'` —— 静态历史行，没有进度条与一切"进行中"交互（契约 §5.3）。 */
 const doneRows = computed<DoneRow[]>(() => rows.value.filter(item => isDone(item)) as DoneRow[])
+
+/** 失败原因（两种写法都认；都没有就写「原因未知」，不编造）。 */
+function failReasonOf(item: DoneRow): string {
+  return String(item.failed_reason || item.failedReason || '').trim() || '原因未知'
+}
+
+/** 是否画版本角标（`badge` / `version_tags` 任一有值；老后端两个都没有 → false）。 */
+function hasBadge(item: QueueItem): boolean {
+  return !!versionBadgeOf(item)
+}
+
+/**
+ * 版本角标（v4.1 §9.2 第 6 条）：与 `LibraryView` 同一口径（那份在卡片网格里，这份在行卡片上）。
+ * 数据来自 `badge`（优先）或 `version_tags`（数组 / 字典）；**缺字段时返回空串、什么都不画**。
+ */
+function versionBadgeOf(item: QueueItem): string {
+  const row = item as unknown as Record<string, any>
+  const direct = String(row.badge ?? '').trim()
+  const labels: string[] = []
+  const push = (value: unknown) => {
+    const label = String(value ?? '').trim()
+    if (label && !labels.includes(label)) labels.push(label)
+  }
+  if (!direct) {
+    const tags = row.version_tags ?? row.versionTags
+    if (Array.isArray(tags)) tags.forEach(push)
+    else if (tags && typeof tags === 'object') {
+      const dict = tags as Record<string, any>
+      if (dict.is_zh_sub) push('中字')
+      if (dict.is_uncensored_leak) push('流出')
+      const resolution = String(dict.resolution ?? '').trim()
+      if (resolution) push(/2160|4k/i.test(resolution) ? '4K' : resolution.toUpperCase())
+      if (dict.is_iso) push('ISO')
+      if (dict.is_vr) push('VR')
+      if (dict.part_no) push(String(dict.part_no))
+      if (dict.edition) push(String(dict.edition))
+    }
+  }
+  const merged = [direct, labels.join('/')].filter(Boolean).join(' ')
+  const count = Number(row.version_count ?? row.versions ?? 0)
+  if (count > 1) return merged ? `${merged} ${count}版本` : `${count}版本`
+  return merged
+}
 
 /** 进度百分比：老实现 `Math.max(0, Math.min(100, Number(q.progress) || 0))`（NaN 也归 0）。 */
 function progressOf(item: QueueItem): number {
@@ -301,7 +375,14 @@ onBeforeUnmount(() => {
         <div class="avh-downloads__secttl">下载中（{{ activeRows.length }}）</div>
 
         <template v-if="activeRows.length">
-          <div v-for="(item, index) in activeRows" :key="rowKey(item, index)" class="avh-q">
+          <div
+            v-for="(item, index) in activeRows"
+            :key="rowKey(item, index)"
+            class="avh-q"
+            :class="{ 'avh-q--vtag': hasBadge(item) }"
+          >
+            <!-- 版本角标（v4.1 §9.2-6）：卡片右上角；没有 version_tags / badge 就整颗不渲染 -->
+            <span v-if="hasBadge(item)" class="avh-vbadge">{{ versionBadgeOf(item) }}</span>
             <div class="avh-q__hd">
               <Thumb
                 class="avh-q__poster"
@@ -329,6 +410,47 @@ onBeforeUnmount(() => {
         <div v-else class="avh-downloads__hint">没有下载中的任务</div>
 
         <!--
+          ===== 下载失败（v4.1 §9.2-1，2026-10-14 主统筹点名要画）=====
+          `state === 'failed'`（qB 的 error / missingFiles / unknown 被后端如实落成这个状态）：
+          **没有进度条、没有百分比**（画 0% 会让人以为还在下），红色徽标 + `failed_reason`。
+        -->
+        <div v-if="failedRows.length" class="avh-downloads__secttl">
+          <span>下载失败（{{ failedRows.length }}）</span>
+          <span class="avh-downloads__secttl-note">在「任务」页可重新挑种下载</span>
+        </div>
+
+        <template v-if="failedRows.length">
+          <div
+            v-for="(item, index) in failedRows"
+            :key="rowKey(item, index)"
+            class="avh-q avh-q--failed"
+            :class="{ 'avh-q--vtag': hasBadge(item) }"
+          >
+            <span v-if="hasBadge(item)" class="avh-vbadge">{{ versionBadgeOf(item) }}</span>
+            <div class="avh-q__hd">
+              <Thumb
+                class="avh-q__poster"
+                variant="tposter"
+                :src="thumbOf(item)"
+                alt="无图"
+                :plugin-id="pluginId"
+              />
+              <div class="avh-q__main">
+                <div class="avh-q__no">
+                  {{ item.number || '' }}
+                  <v-chip size="x-small" color="error" variant="tonal" class="ms-1">下载失败</v-chip>
+                </div>
+                <div v-if="item.title" class="avh-q__ttl">{{ item.title }}</div>
+                <div class="avh-q__hint avh-q__meta">{{ metaOf(item) }}</div>
+                <div class="avh-q__hint avh-q__path" :title="failReasonOf(item)">
+                  失败原因：{{ failReasonOf(item) }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!--
           ===== 已完成：静态历史行（契约 §5.3）=====
           没有进度条、没有百分比、没有状态文案、没有任何"进行中"交互 —— 用户的诉求就是
           「已完成下载不再显示进度，直接当历史停住」。这一节通常为空：契约 §3 起，条目一变 `done`
@@ -340,7 +462,13 @@ onBeforeUnmount(() => {
         </div>
 
         <template v-if="doneRows.length">
-          <div v-for="(item, index) in doneRows" :key="rowKey(item, index)" class="avh-q avh-q--done">
+          <div
+            v-for="(item, index) in doneRows"
+            :key="rowKey(item, index)"
+            class="avh-q avh-q--done"
+            :class="{ 'avh-q--vtag': hasBadge(item) }"
+          >
+            <span v-if="hasBadge(item)" class="avh-vbadge">{{ versionBadgeOf(item) }}</span>
             <div class="avh-q__hd">
               <Thumb
                 class="avh-q__poster"
@@ -448,13 +576,43 @@ onBeforeUnmount(() => {
   letter-spacing: 0;
 }
 
-/* 对齐 `.q`：卡片底色 + 描边 + 10px 圆角 */
+/* 对齐 `.q`：卡片底色 + 描边 + 10px 圆角。
+   `position: relative` 是给右上角的版本角标（v4.1 §9.2-6）做定位锚点。 */
 .avh-q {
+  position: relative;
   padding: 12px;
   margin-bottom: 10px;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
   border-radius: 10px;
   background: rgba(var(--v-theme-on-surface), 0.04);
+}
+
+/* 失败行：描边与底色走 error 通道（与"下载中""已完成"一眼分得开） */
+.avh-q--failed {
+  border-color: rgba(var(--v-theme-error), 0.4);
+  background: rgba(var(--v-theme-error), 0.08);
+}
+
+/* 版本角标（v4.1 §9.2-6）：贴在卡片右上角；没有 version_tags / badge 时整颗不渲染 */
+.avh-vbadge {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 1;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.6;
+  border-radius: 4px;
+  color: #fff;
+  background: rgba(var(--v-theme-secondary), 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  pointer-events: none;
+}
+
+/* 有角标时把右侧那一列（百分比 / 「下载中…」）压下一行，两者不叠在一起 */
+.avh-q--vtag .avh-q__right {
+  padding-top: 20px;
 }
 
 /* 对齐 `.qhd` */

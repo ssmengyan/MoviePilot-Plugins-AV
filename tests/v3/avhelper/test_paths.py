@@ -201,3 +201,31 @@ class TestCacheLimit:
     def test_bytes_form(self, paths_mod):
         assert paths_mod.cache_limit_bytes("2") == 2 * 1024 ** 3
         assert paths_mod.cache_limit_bytes("") == 1024 ** 3
+
+
+class TestResources:
+    """资源目录解析：内置目录兜底，`{data_root}/resources` 逐文件覆盖。
+
+    这些文件是**随包发行**的代码资产（映射表/词典），所以内置路径必须存在且优先级的
+    判据是「文件在不在」而不是「配置写没写」——用户只覆盖一份时另两份仍走内置。
+    """
+
+    def test_builtin_exists_and_is_used_by_default(self, paths_mod, tmp_path):
+        paths_mod.configure(data_root=str(tmp_path / "root"), javdb_bin="",
+                            fallback_root=tmp_path / "plugin-data")
+        assert paths_mod.resources_dir() == paths_mod.BUILTIN_RESOURCES
+        # 找不到的资源返回内置路径，绝不抛异常（资源缺失只该让刮削降级）
+        assert paths_mod.resource_file("nope.xml") == paths_mod.BUILTIN_RESOURCES / "nope.xml"
+        assert paths_mod.resource_file("") == paths_mod.BUILTIN_RESOURCES
+
+    def test_user_override_wins_per_file(self, paths_mod, tmp_path):
+        root = tmp_path / "root"
+        override = root / "resources"
+        override.mkdir(parents=True)
+        (override / "mapping_actor.xml").write_text("<x/>", encoding="utf-8")
+        paths_mod.configure(data_root=str(root), javdb_bin="", fallback_root=tmp_path / "p")
+        assert paths_mod.resources_dir() == override
+        assert paths_mod.resource_file("mapping_actor.xml") == override / "mapping_actor.xml"
+        # 没被覆盖的那份仍旧走内置
+        assert paths_mod.resource_file("zhcdict.json") == \
+            paths_mod.BUILTIN_RESOURCES / "zhcdict.json"

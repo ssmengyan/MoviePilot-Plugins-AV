@@ -57,44 +57,21 @@
   gap: 12px 16px;
 }
 
-.avh-panel[data-v-fe8afc34] {
+.avh-panel[data-v-7d9bb2f9] {
   margin-bottom: 12px;
 }
-.avh-counts[data-v-fe8afc34] {
+
+/* 与 `RulePanel` 同一套「自动铺列」网格（窄屏自然折成一列） */
+.avh-grid[data-v-7d9bb2f9] {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px 16px;
+}
+.avh-row[data-v-7d9bb2f9] {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
-}
-.avh-notices[data-v-fe8afc34] {
-  max-height: 40vh;
-  overflow-y: auto;
-  background: transparent;
-}
-
-.avh-panel[data-v-d05104fc] {
-  margin-bottom: 12px;
-}
-
-.avh-panel[data-v-0f556e47] {
-  margin-bottom: 12px;
-}
-.avh-cache[data-v-0f556e47] {
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-  flex-wrap: wrap;
-}
-.avh-cache-actions[data-v-0f556e47] {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  margin-left: auto;
-}
-
-.avh-panel[data-v-02ead8f0] {
-  margin-bottom: 12px;
 }
 
 /* 占位与外层尺寸都由使用方决定：这里只保证"图铺满 + 占位居中"两条老规则。 */
@@ -150,6 +127,137 @@
 /* 任务/下载队列的小封面（`.tposter .noimg`）：字号更小 */
 .avh-thumb--tposter .avh-thumb__noimg[data-v-822d7759] {
   font-size: 11px;
+}
+
+.avh-panel[data-v-bf1d7852] {
+  margin-bottom: 12px;
+}
+.avh-row[data-v-bf1d7852] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.avh-chips[data-v-bf1d7852] {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.avh-suffix-input[data-v-bf1d7852] {
+  max-width: 260px;
+}
+.avh-preview[data-v-bf1d7852] {
+  padding: 10px 12px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+  border-radius: 10px;
+  background: rgba(var(--v-theme-on-surface), 0.04);
+}
+.avh-preview__row[data-v-bf1d7852] {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12.5px;
+  line-height: 2;
+}
+.avh-preview__k[data-v-bf1d7852] {
+  flex: 0 0 110px;
+  color: rgba(var(--v-theme-on-surface), 0.6);
+}
+.avh-map[data-v-bf1d7852] {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(240px, 1fr);
+  gap: 12px;
+}
+.avh-map__list[data-v-bf1d7852] {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+  border-radius: 10px;
+}
+.avh-map__item[data-v-bf1d7852] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+}
+.avh-map__item[data-v-bf1d7852]:last-child {
+  border-bottom: 0;
+}
+.avh-map__item[data-v-bf1d7852]:hover,
+.avh-map__item--on[data-v-bf1d7852] {
+  background: rgba(var(--v-theme-primary), 0.12);
+}
+.avh-map__avatar[data-v-bf1d7852] {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 50%;
+}
+.avh-map__main[data-v-bf1d7852] {
+  min-width: 0;
+}
+.avh-map__name[data-v-bf1d7852] {
+  font-size: 13px;
+  font-weight: 600;
+}
+.avh-map__sub[data-v-bf1d7852] {
+  font-size: 11px;
+  color: rgba(var(--v-theme-on-surface), 0.5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.avh-map-q[data-v-bf1d7852] {
+  max-width: 260px;
+}
+.avh-map__right[data-v-bf1d7852] {
+  padding: 10px 12px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+  border-radius: 10px;
+  background: rgba(var(--v-theme-on-surface), 0.04);
+}
+
+.avh-panel[data-v-fe8afc34] {
+  margin-bottom: 12px;
+}
+.avh-counts[data-v-fe8afc34] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.avh-notices[data-v-fe8afc34] {
+  max-height: 40vh;
+  overflow-y: auto;
+  background: transparent;
+}
+
+.avh-panel[data-v-d05104fc] {
+  margin-bottom: 12px;
+}
+
+.avh-panel[data-v-0f556e47] {
+  margin-bottom: 12px;
+}
+.avh-cache[data-v-0f556e47] {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.avh-cache-actions[data-v-0f556e47] {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  margin-left: auto;
+}
+
+.avh-panel[data-v-02ead8f0] {
+  margin-bottom: 12px;
 }
 
 /* 对齐老 `.q`（调用方内联 `padding:0;overflow:hidden`） */
@@ -624,24 +732,24 @@
 }
 
 /* 对齐 `app.css` 的 `.toolbar` / `.hint` / `.spacer` */
-.avh-downloads__toolbar[data-v-822f5d06] {
+.avh-downloads__toolbar[data-v-04ae18cc] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 14px;
 }
-.avh-downloads__hint[data-v-822f5d06] {
+.avh-downloads__hint[data-v-04ae18cc] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-downloads__spacer[data-v-822f5d06] {
+.avh-downloads__spacer[data-v-04ae18cc] {
   flex: 1;
 }
 
 /* 页签：与发现榜单那组 tabs 同一套几何（胶囊容器 + 选中那颗走主色，写法照 `DiscoverView`）。
    两份 scoped CSS 各有各的作用域，抄这一小段比抽公共件划算（本项目的既有做法）。 */
-.avh-tabs[data-v-822f5d06] {
+.avh-tabs[data-v-04ae18cc] {
   display: flex;
   gap: 4px;
   padding: 3px;
@@ -649,7 +757,7 @@
   border-radius: 8px;
   background: rgba(var(--v-theme-on-surface), 0.04);
 }
-.avh-tabs button[data-v-822f5d06] {
+.avh-tabs button[data-v-04ae18cc] {
   padding: 4px 12px;
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
@@ -658,13 +766,13 @@
   border-radius: 6px;
   cursor: pointer;
 }
-.avh-tabs__on[data-v-822f5d06] {
+.avh-tabs__on[data-v-04ae18cc] {
   color: rgb(var(--v-theme-on-primary)) !important;
   background: rgb(var(--v-theme-primary)) !important;
 }
 
 /* 对齐 `app.css` 的 `.secttl`：12px、弱化色、字距 .4px（与 `TasksView` 的小标题同一套口径） */
-.avh-downloads__secttl[data-v-822f5d06] {
+.avh-downloads__secttl[data-v-04ae18cc] {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -675,13 +783,15 @@
 }
 
 /* 小节标题右侧那句指路（契约 §5.3）：靠右、不参与标题的字距，免得挤成标题的一部分 */
-.avh-downloads__secttl-note[data-v-822f5d06] {
+.avh-downloads__secttl-note[data-v-04ae18cc] {
   margin-left: auto;
   letter-spacing: 0;
 }
 
-/* 对齐 `.q`：卡片底色 + 描边 + 10px 圆角 */
-.avh-q[data-v-822f5d06] {
+/* 对齐 `.q`：卡片底色 + 描边 + 10px 圆角。
+   `position: relative` 是给右上角的版本角标（v4.1 §9.2-6）做定位锚点。 */
+.avh-q[data-v-04ae18cc] {
+  position: relative;
   padding: 12px;
   margin-bottom: 10px;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
@@ -689,8 +799,36 @@
   background: rgba(var(--v-theme-on-surface), 0.04);
 }
 
+/* 失败行：描边与底色走 error 通道（与"下载中""已完成"一眼分得开） */
+.avh-q--failed[data-v-04ae18cc] {
+  border-color: rgba(var(--v-theme-error), 0.4);
+  background: rgba(var(--v-theme-error), 0.08);
+}
+
+/* 版本角标（v4.1 §9.2-6）：贴在卡片右上角；没有 version_tags / badge 时整颗不渲染 */
+.avh-vbadge[data-v-04ae18cc] {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 1;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.6;
+  border-radius: 4px;
+  color: #fff;
+  background: rgba(var(--v-theme-secondary), 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  pointer-events: none;
+}
+
+/* 有角标时把右侧那一列（百分比 / 「下载中…」）压下一行，两者不叠在一起 */
+.avh-q--vtag .avh-q__right[data-v-04ae18cc] {
+  padding-top: 20px;
+}
+
 /* 对齐 `.qhd` */
-.avh-q__hd[data-v-822f5d06] {
+.avh-q__hd[data-v-04ae18cc] {
   display: flex;
   align-items: flex-start;
   gap: 12px;
@@ -698,7 +836,7 @@
 }
 
 /* 对齐 `.tposter`：48×64 小封面 */
-.avh-q__poster[data-v-822f5d06] {
+.avh-q__poster[data-v-04ae18cc] {
   width: 48px;
   height: 64px;
   flex: none;
@@ -707,29 +845,29 @@
 }
 
 /* 老实现的内联 `flex:1;min-width:0` */
-.avh-q__main[data-v-822f5d06] {
+.avh-q__main[data-v-04ae18cc] {
   flex: 1;
   min-width: 0;
 }
 
 /* 对齐 `.qhd .qn` */
-.avh-q__no[data-v-822f5d06] {
+.avh-q__no[data-v-04ae18cc] {
   font-size: 14px;
   font-weight: 600;
 }
-.avh-q__hint[data-v-822f5d06] {
+.avh-q__hint[data-v-04ae18cc] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-q__meta[data-v-822f5d06] {
+.avh-q__meta[data-v-04ae18cc] {
   margin-top: 3px;
 }
-.avh-q__path[data-v-822f5d06] {
+.avh-q__path[data-v-04ae18cc] {
   margin-top: 2px;
 }
 
 /* 完成行的片名（台账可选字段，见 `DoneRow` 注释）：比 `.hint` 稍亮一档，读起来像"一行记录" */
-.avh-q__ttl[data-v-822f5d06] {
+.avh-q__ttl[data-v-04ae18cc] {
   margin-top: 3px;
   font-size: 12.5px;
   line-height: 1.5;
@@ -739,12 +877,12 @@
 /*
  * 完成行没有进度条，`.avh-q__hd` 那 8px 的"给进度条留的"下边距就变成了行尾的空档，收掉。
  */
-.avh-q--done .avh-q__hd[data-v-822f5d06] {
+.avh-q--done .avh-q__hd[data-v-04ae18cc] {
   margin-bottom: 0;
 }
 
 /* 对齐 `.qhd .right` */
-.avh-q__right[data-v-822f5d06] {
+.avh-q__right[data-v-04ae18cc] {
   margin-left: auto;
   text-align: right;
   white-space: nowrap;
@@ -753,13 +891,13 @@
 /* 对齐 `.bar` / `.bar i`（老实现是 --acc2 → --acc 的渐变）
    只有「下载中」那一节画进度条：完成行是静态历史行，契约 §5.3 明确要去掉进度，
    所以老实现的 `.bar.done i` 换绿那条规则已随之下线（没有使用者了）。 */
-.avh-bar[data-v-822f5d06] {
+.avh-bar[data-v-04ae18cc] {
   height: 7px;
   border-radius: 99px;
   overflow: hidden;
   background: rgba(var(--v-theme-on-surface), 0.12);
 }
-.avh-bar i[data-v-822f5d06] {
+.avh-bar i[data-v-04ae18cc] {
   display: block;
   width: 0;
   height: 100%;
@@ -914,27 +1052,27 @@
 }
 
 /* 工具条：与下载页 / 历史页同款（`.toolbar` + `.hint` + `.spacer`） */
-.avh-library__toolbar[data-v-a23add17] {
+.avh-library__toolbar[data-v-7e500e86] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 8px;
 }
-.avh-library__hint[data-v-a23add17] {
+.avh-library__hint[data-v-7e500e86] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-library__spacer[data-v-a23add17] {
+.avh-library__spacer[data-v-7e500e86] {
   flex: 1;
 }
 
 /* 搜索框宽度固定：不跟着输入内容长短伸缩，工具条高度就不会跳（照历史页） */
-.avh-library__q[data-v-a23add17] {
+.avh-library__q[data-v-7e500e86] {
   width: 220px;
   flex: none;
 }
-.avh-library__stats[data-v-a23add17] {
+.avh-library__stats[data-v-7e500e86] {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -943,7 +1081,7 @@
 }
 
 /* 与发现榜单同一句「正在抓取…」的位置与字号 */
-.avh-library__loading[data-v-a23add17] {
+.avh-library__loading[data-v-7e500e86] {
   padding: 44px 20px;
   text-align: center;
   font-size: 13px;
@@ -951,10 +1089,37 @@
 }
 
 /* 对齐 `.grid`：`repeat(auto-fill,minmax(172px,1fr))`，卡片本体是 `NumCard`（库模式） */
-.avh-library__grid[data-v-a23add17] {
+.avh-library__grid[data-v-7e500e86] {
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+}
+
+/* 卡片定位盒子（版本角标要贴在卡片右上角）：`flex` 列让卡片撑满同一行的高度，观感与原来一致 */
+.avh-library__cell[data-v-7e500e86] {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.avh-library__cell[data-v-7e500e86] .avh-card {
+  flex: 1 1 auto;
+}
+
+/* 版本角标（v4.1 §9.2-6）：右上角、小而不抢眼；没有 version_tags / badge 时整个不渲染 */
+.avh-vbadge[data-v-7e500e86] {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.6;
+  border-radius: 4px;
+  color: #fff;
+  background: rgba(var(--v-theme-secondary), 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  pointer-events: none;
 }
 
 /* 对齐 `app.css` 的 `.toolbar` / `.hint` / `.spacer` */
@@ -1574,6 +1739,201 @@
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+}
+
+/* 与下载页/订阅页同一套工具条几何 */
+.avh-scrape__toolbar[data-v-caa16cc5] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.avh-scrape__hint[data-v-caa16cc5] {
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.5);
+}
+.avh-scrape__spacer[data-v-caa16cc5] {
+  flex: 1;
+}
+.avh-scrape__meta[data-v-caa16cc5] {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.avh-scrape__actions[data-v-caa16cc5] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.avh-scrape__checkall[data-v-caa16cc5] {
+  flex: none;
+  max-width: 190px;
+}
+.avh-scrape__loading[data-v-caa16cc5] {
+  padding: 44px 20px;
+  text-align: center;
+  font-size: 13px;
+  color: rgba(var(--v-theme-on-surface), 0.5);
+}
+
+/* 状态卡片（照发现榜单那组 tabs 的胶囊观感，改成可点的方块） */
+.avh-stats[data-v-caa16cc5] {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.avh-stat[data-v-caa16cc5] {
+  padding: 10px 12px;
+  cursor: pointer;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+  border-radius: 10px;
+  background: rgba(var(--v-theme-on-surface), 0.04);
+  transition: 0.15s;
+}
+.avh-stat[data-v-caa16cc5]:hover {
+  border-color: rgb(var(--v-theme-primary));
+}
+.avh-stat--on[data-v-caa16cc5] {
+  border-color: rgb(var(--v-theme-primary));
+  background: rgba(var(--v-theme-primary), 0.16);
+}
+.avh-stat__num[data-v-caa16cc5] {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.avh-stat__label[data-v-caa16cc5] {
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.6);
+}
+
+/* 表格（`table-layout: fixed` + 显式列宽：宽屏不把「操作」列挤出去，照 S6 候选表的教训） */
+.avh-tablewrap[data-v-caa16cc5] {
+  overflow-x: auto;
+}
+.avh-table[data-v-caa16cc5] {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.avh-table th[data-v-caa16cc5],
+.avh-table td[data-v-caa16cc5] {
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+}
+.avh-table th[data-v-caa16cc5] {
+  font-weight: 600;
+  color: rgba(var(--v-theme-on-surface), 0.6);
+  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.16);
+}
+.avh-table__right[data-v-caa16cc5] {
+  text-align: right;
+}
+.avh-table__num[data-v-caa16cc5] {
+  font-weight: 600;
+}
+.avh-table__ellipsis[data-v-caa16cc5] {
+  max-width: 0;
+}
+.avh-rowbtns[data-v-caa16cc5] {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+.avh-scrape__secttl[data-v-caa16cc5] {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 18px 0 8px;
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  color: rgba(var(--v-theme-on-surface), 0.5);
+}
+.avh-scrape__ok[data-v-caa16cc5] {
+  color: rgb(var(--v-theme-success));
+}
+.avh-scrape__bad[data-v-caa16cc5] {
+  color: rgb(var(--v-theme-error));
+}
+
+/* 版本角标（与 `LibraryView` / `DownloadsView` 同一套观感） */
+.avh-vbadge[data-v-caa16cc5] {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 500;
+  border-radius: 4px;
+  color: #fff;
+  background: rgba(var(--v-theme-secondary), 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+.avh-vbadge--inline[data-v-caa16cc5] {
+  margin-left: 4px;
+}
+
+/* diff 表：`changed` 的行整行高亮（当前值/目标值两列都看得见） */
+.avh-table--diff td[data-v-caa16cc5] {
+  white-space: normal;
+  word-break: break-word;
+  vertical-align: top;
+}
+.avh-diff__changed[data-v-caa16cc5] {
+  background: rgba(var(--v-theme-warning), 0.16);
+}
+.avh-diff__cell[data-v-caa16cc5] {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.avh-srcgrid[data-v-caa16cc5] {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 6px 16px;
+}
+.avh-srcgrid__item[data-v-caa16cc5] {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+.avh-srcgrid__k[data-v-caa16cc5] {
+  color: rgba(var(--v-theme-on-surface), 0.6);
+}
+
+/* 页签胶囊：与「下载」栏那组同一套（两份 scoped CSS 各有作用域，本项目既有做法） */
+.avh-tabs[data-v-caa16cc5] {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+  border-radius: 8px;
+  background: rgba(var(--v-theme-on-surface), 0.04);
+}
+.avh-tabs button[data-v-caa16cc5] {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.5);
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.avh-tabs__on[data-v-caa16cc5] {
+  color: rgb(var(--v-theme-on-primary)) !important;
+  background: rgb(var(--v-theme-primary)) !important;
 }
 
 /* 老 CSS 是 `#lb{position:fixed;inset:0;background:#000e}` + flex 居中；这里铺满 overlay 内容区 */
@@ -2225,7 +2585,7 @@
   word-break: break-word;
 }
 
-.avh-console[data-v-e225b48d] {
+.avh-console[data-v-d0f35965] {
   display: flex;
   flex-direction: column;
   /*
@@ -2241,14 +2601,14 @@
   background: rgb(var(--v-theme-surface));
   color: rgb(var(--v-theme-on-surface));
 }
-.avh-topbar[data-v-e225b48d] {
+.avh-topbar[data-v-d0f35965] {
   flex: 0 0 auto;
   padding-inline: 0;
 }
 
 /* 三段式顶栏的左块：与右块等宽（flex-basis 0）、内容左对齐。
    `min-width: 0` + `overflow: hidden` 让它在窄弹窗里先被压缩，把宽度让给中间的搜索框。 */
-.avh-topbar__left[data-v-e225b48d] {
+.avh-topbar__left[data-v-d0f35965] {
   flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
@@ -2258,7 +2618,7 @@
 }
 
 /* 右块：与左块严格等宽 + 内容右对齐 —— 两块等宽，夹在中间的搜索框才落在工具条几何中心。 */
-.avh-topbar__right[data-v-e225b48d] {
+.avh-topbar__right[data-v-d0f35965] {
   flex: 1 1 0;
   min-width: 0;
   display: flex;
@@ -2266,7 +2626,7 @@
   justify-content: flex-end;
   gap: 4px;
 }
-.avh-title[data-v-e225b48d] {
+.avh-title[data-v-d0f35965] {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2275,7 +2635,7 @@
 /* 顶栏搜索（老 `.searchbox`：输入框 + 紧贴的「搜索」按钮，占位符同款）。
    三段式里的中段：grow 0 / basis 420px → 固定基准宽，被两侧等宽块顶到几何中心；
    窄弹窗里可一路缩到 200px（工具条本身是 nowrap 的 flex，始终单行不换行）。 */
-.avh-searchbox[data-v-e225b48d] {
+.avh-searchbox[data-v-d0f35965] {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2283,20 +2643,20 @@
   min-width: 200px;
   margin-right: 0;
 }
-.avh-searchbox__input[data-v-e225b48d] {
+.avh-searchbox__input[data-v-d0f35965] {
   flex: 1 1 auto;
   min-width: 120px;
 }
 
 /* 顶栏「🔔 通知」那颗按钮：老实现是 `.ghost`（`white-space:nowrap` + 12px 字号），
    不换行才不会在窄弹窗里折成两行。 */
-.avh-bell[data-v-e225b48d] {
+.avh-bell[data-v-d0f35965] {
   white-space: nowrap;
 }
 
 /* 未读角标：照抄老 `.bellbadge`（圆角胶囊、11px、左侧 6px 间距、最小宽 16px）。
    老实现用 `.zero{display:none}` 在 0 时隐藏，这里等价地 `v-if="notifyUnread() > 0"` 不渲染。 */
-.avh-bellbadge[data-v-e225b48d] {
+.avh-bellbadge[data-v-d0f35965] {
   display: inline-block;
   margin-left: 6px;
   padding: 0 6px;
@@ -2313,7 +2673,7 @@
    圆角 999px、字号 11px、内边距 `0 6px`、行高 16px、最小宽 16px、文字居中。
    配色不搬老界面的写死值（`--acc2:#2f6fd0` / `--warn:#d29922` / `#fff` / `#2b2100`），
    改走 Vuetify 主题变量：普通态 = 老那颗蓝（`primary`），warn 态 = 老那颗琥珀（`warning`）。 */
-.avh-pill[data-v-e225b48d] {
+.avh-pill[data-v-d0f35965] {
   display: inline-block;
   min-width: 16px;
   padding: 0 6px;
@@ -2326,16 +2686,16 @@
 }
 
 /* 老 `.pill.warn`：只有「任务」栏那一颗。 */
-.avh-pill--warn[data-v-e225b48d] {
+.avh-pill--warn[data-v-d0f35965] {
   background: rgb(var(--v-theme-warning));
   color: rgb(var(--v-theme-on-warning));
 }
 
 /* 计数为 0 也照画（老实现 `textContent = n`，不留空），只是弱化到不抢眼。 */
-.avh-pill--zero[data-v-e225b48d] {
+.avh-pill--zero[data-v-d0f35965] {
   opacity: 0.55;
 }
-.avh-body[data-v-e225b48d] {
+.avh-body[data-v-d0f35965] {
   display: flex;
   align-items: stretch;
   /* 根盒子定高后，这一层必须自己吃掉剩余高度：原来是 `flex: 0 1 auto`，
@@ -2348,7 +2708,7 @@
 
 /* 左栏：上 = 滚动区（栏目列表 + 运行概况），下 = 钉底的设置入口。
    216px = 原右栏 264px 的收窄版：概况整块搬进来后，内容区反而拿到了整宽。 */
-.avh-nav[data-v-e225b48d] {
+.avh-nav[data-v-d0f35965] {
   flex: 0 0 216px;
   max-width: 216px;
   display: flex;
@@ -2359,7 +2719,7 @@
 
 /* 左栏滚动区：`min-height: 0` 不能省 —— flex 子项默认 `min-height: auto` 会拒绝收缩，
    内容一多就把左栏顶出根盒子。滚动条只出现在这里，底部那颗按钮永远留在栏底。 */
-.avh-nav__scroll[data-v-e225b48d] {
+.avh-nav__scroll[data-v-d0f35965] {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -2368,17 +2728,17 @@
 /* 栏目行高收到 34px（Vuetify 默认 40）：左栏多装了「运行概况」整张卡片，
    6 行栏目 + 卡片 + 底部按钮要在 78vh 减去工具栏的高度里全部装下 ——
    实测 34px 正好让左栏在 1440×900 下不需要滚动（更矮的窗口仍由 `__scroll` 兜底）。 */
-.avh-nav__scroll > .v-list .v-list-item[data-v-e225b48d] {
+.avh-nav__scroll > .v-list .v-list-item[data-v-d0f35965] {
   min-height: 34px;
 }
 
 /* 「打开设置」：`margin-top: auto` 把它钉在左栏最底部，`flex: 0 0 auto` 保证它不被滚动区挤压。
    位置/样式是本轮唯一改动 —— 它的 `@click="openSettings"` 与文案一字未改。 */
-.avh-nav__switch[data-v-e225b48d] {
+.avh-nav__switch[data-v-d0f35965] {
   margin-top: auto;
   flex: 0 0 auto;
 }
-.avh-content[data-v-e225b48d] {
+.avh-content[data-v-d0f35965] {
   flex: 1 1 auto;
   min-width: 0;
   overflow: auto;
@@ -2392,36 +2752,36 @@
  * 这里**没有** `position: sticky`（右栏那版有）：卡片现在是滚动区里的最后一项，
  * sticky 只会让它在滚动时浮到顶部盖住栏目列表（outlined 卡片还是透明底，会糊在一起）。
  */
-.avh-overview[data-v-e225b48d] .v-card-item {
+.avh-overview[data-v-d0f35965] .v-card-item {
   padding: 8px 10px 4px;
 }
 
 /* 标题图标与文字之间默认 8px，窄栏里收到 6px */
-.avh-overview[data-v-e225b48d] .v-card-item__prepend {
+.avh-overview[data-v-d0f35965] .v-card-item__prepend {
   padding-inline-end: 6px;
 }
-.avh-overview[data-v-e225b48d] .v-card-text {
+.avh-overview[data-v-d0f35965] .v-card-text {
   padding: 4px 10px 8px;
 }
 
 /* 行高从 40px 收到 ~25px：7 行 + 分割线才装得进窄栏。
    只压 `padding-block` 没用（内容行高仍撑着），所以 `min-height` 也归零，
    由「标题行 21px + 上下各 2px」决定行高 —— 216px 窄栏里 7 行刚好排满。 */
-.avh-overview[data-v-e225b48d] .v-list-item {
+.avh-overview[data-v-d0f35965] .v-list-item {
   min-height: 0;
   padding-block: 2px;
 }
-.avh-overview[data-v-e225b48d] .v-list-item-title {
+.avh-overview[data-v-d0f35965] .v-list-item-title {
   line-height: 1.3;
 }
 
 /* 标题列（1fr，长标题仍是 ellipsis）与数值列之间留一点缝，别贴在一起 */
-.avh-overview[data-v-e225b48d] .v-list-item__content {
+.avh-overview[data-v-d0f35965] .v-list-item__content {
   padding-inline-end: 6px;
 }
 
 /* 数值一律不换行：「待确认任务 12」这类行一折行，7 行就把窄栏撑散了 */
-.avh-overview[data-v-e225b48d] .v-list-item__append {
+.avh-overview[data-v-d0f35965] .v-list-item__append {
   white-space: nowrap;
 }
 
@@ -2429,7 +2789,7 @@
  * 设置窗口：窗口自身占满 `v-dialog` 的 `max-width`（1120px），
  * 左栏固定 190px、右栏自适应并各自滚动 —— 与数据台同一套排布，只是换成了独立窗口。
  */
-.avh-settings[data-v-e225b48d] {
+.avh-settings[data-v-d0f35965] {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -2444,23 +2804,23 @@
      `min-height` 的优先级高于 `max-height`，内容被撑到 78vh，那条 `100%` 也跟着变成 78vh。 */
   min-height: 78vh;
 }
-.avh-settings__bar[data-v-e225b48d] {
+.avh-settings__bar[data-v-d0f35965] {
   flex: 0 0 auto;
   padding-inline: 0;
 }
-.avh-settings__body[data-v-e225b48d] {
+.avh-settings__body[data-v-d0f35965] {
   display: flex;
   align-items: stretch;
   min-height: 0;
   padding: 12px;
   gap: 4px;
 }
-.avh-settings__nav[data-v-e225b48d] {
+.avh-settings__nav[data-v-d0f35965] {
   flex: 0 0 190px;
   max-width: 190px;
   overflow-y: auto;
 }
-.avh-settings__content[data-v-e225b48d] {
+.avh-settings__content[data-v-d0f35965] {
   flex: 1 1 auto;
   min-width: 0;
   overflow: auto;
@@ -2468,19 +2828,19 @@
   max-height: 68vh;
 }
 @media (max-width: 1100px) {
-.avh-body[data-v-e225b48d] {
+.avh-body[data-v-d0f35965] {
     flex-wrap: wrap;
 }
 
   /* 窄屏降级：左栏不再钉 216px，交给 flex 分配（`.avh-side` 已随右栏一起删除） */
-.avh-nav[data-v-e225b48d] {
+.avh-nav[data-v-d0f35965] {
     flex: 1 1 auto;
     max-width: none;
 }
-.avh-settings__body[data-v-e225b48d] {
+.avh-settings__body[data-v-d0f35965] {
     flex-wrap: wrap;
 }
-.avh-settings__nav[data-v-e225b48d] {
+.avh-settings__nav[data-v-d0f35965] {
     flex: 1 1 auto;
     max-width: none;
 }

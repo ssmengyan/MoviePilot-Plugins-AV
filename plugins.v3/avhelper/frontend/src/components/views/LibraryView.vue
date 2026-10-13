@@ -36,6 +36,11 @@
  *   插件里给一个"看起来能删"的按钮只会误导（台账那边的「移除记录」是另一回事）；
  * - 不显示磁力/发行日/时长：库索引里没有这些（要抓一遍 javdb 才有），
  *   `NumCard` 的库模式按"有什么画什么"处理（见 `NumCard.vue` 的差异 3）。
+ *
+ * v4 刮削线（0.7.0）加的**版本角标**（v4.1 §9.2 第 6 条）：同番号多版本时在卡片**右上角**画
+ * `中字` / `流出` / `中字流出` / `4K` / `2版本`。`NumCard` 是六栏共用的通用件、不认识
+ * `version_tags` / `badge`，所以这里包一层定位盒子（`.avh-library__cell`）把徽标画在卡片角落，
+ * **不动通用件**。数据缺字段（老后端）时 `versionBadgeOf()` 返回空串、整颗不渲染。
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import EmptyState from '../common/EmptyState.vue'
@@ -164,6 +169,46 @@ function cardKey(movie: CardMovie, index: number): string {
   return `${movie.number || ''}#${index}`
 }
 
+/**
+ * 版本角标（v4.1 §9.2 第 6 条：同番号多版本时在卡片**右上角**画版本徽标，
+ * 如 `中字` / `流出` / `中字流出` / `4K` / `2版本`）。
+ *
+ * 数据三处都认，**缺字段一律什么都不画**（老后端没有这些字段时卡片与以前一模一样）：
+ * 1. `badge`（后端算好的成品串，优先）；
+ * 2. `version_tags` 数组（`["中字","流出"]` → `中字/流出`）；
+ * 3. `version_tags` 字典（契约 §3.1 的键：`is_zh_sub` / `is_uncensored_leak` / `resolution` /
+ *    `is_iso` / `is_vr`）。
+ * 同一番号有多个实例时（`version_count` / `versions` > 1）追加 `N版本`。
+ */
+function versionBadgeOf(movie: CardMovie): string {
+  const row = movie as Record<string, any>
+  const direct = String(row.badge ?? '').trim()
+  const labels: string[] = []
+  const push = (value: unknown) => {
+    const label = String(value ?? '').trim()
+    if (label && !labels.includes(label)) labels.push(label)
+  }
+  if (!direct) {
+    const tags = row.version_tags
+    if (Array.isArray(tags)) tags.forEach(push)
+    else if (tags && typeof tags === 'object') {
+      const dict = tags as Record<string, any>
+      if (dict.is_zh_sub) push('中字')
+      if (dict.is_uncensored_leak) push('流出')
+      const resolution = String(dict.resolution ?? '').trim()
+      if (resolution) push(/2160|4k/i.test(resolution) ? '4K' : resolution.toUpperCase())
+      if (dict.is_iso) push('ISO')
+      if (dict.is_vr) push('VR')
+      if (dict.part_no) push(String(dict.part_no))
+      if (dict.edition) push(String(dict.edition))
+    }
+  }
+  const merged = [direct, labels.join('/')].filter(Boolean).join(' ')
+  const count = Number(row.version_count ?? row.versions ?? 0)
+  if (count > 1) return merged ? `${merged} ${count}版本` : `${count}版本`
+  return merged
+}
+
 // 列表一变就预热前 6 张（与发现榜单同一个 `PREFETCH_N`）；挂载即读一次。
 watch(rows, list => prefetcher.enqueueMany(list), { immediate: true })
 
@@ -234,15 +279,25 @@ void load(false, false)
     />
 
     <div v-else class="avh-library__grid">
-      <NumCard
+      <!--
+        卡片右上角的版本角标（v4.1 §9.2-6）：`NumCard` 自己不认识 `version_tags` / `badge`，
+        所以包一层定位盒子把徽标画在卡片右上角 —— 不动 `NumCard`（它是六栏共用的通用件）。
+        `versionBadgeOf()` 缺字段时返回空串，那颗 `<span>` 整个不渲染（老后端行为不变）。
+      -->
+      <div
         v-for="(movie, index) in rows"
         :key="cardKey(movie, index)"
-        :movie="movie"
-        :plugin-id="pluginId"
-        mode="library"
-        @select="openCard(movie)"
-        @hover="hoverCard(movie)"
-      />
+        class="avh-library__cell"
+      >
+        <NumCard
+          :movie="movie"
+          :plugin-id="pluginId"
+          mode="library"
+          @select="openCard(movie)"
+          @hover="hoverCard(movie)"
+        />
+        <span v-if="versionBadgeOf(movie)" class="avh-vbadge">{{ versionBadgeOf(movie) }}</span>
+      </div>
     </div>
   </div>
 </template>
@@ -293,5 +348,33 @@ void load(false, false)
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+}
+
+/* 卡片定位盒子（版本角标要贴在卡片右上角）：`flex` 列让卡片撑满同一行的高度，观感与原来一致 */
+.avh-library__cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.avh-library__cell :deep(.avh-card) {
+  flex: 1 1 auto;
+}
+
+/* 版本角标（v4.1 §9.2-6）：右上角、小而不抢眼；没有 version_tags / badge 时整个不渲染 */
+.avh-vbadge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.6;
+  border-radius: 4px;
+  color: #fff;
+  background: rgba(var(--v-theme-secondary), 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  pointer-events: none;
 }
 </style>

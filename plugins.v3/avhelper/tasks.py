@@ -68,9 +68,125 @@ QUEUE_REFRESH_DONE = 300       # 只有已完成条目时：多久回下载器�
 QUEUE_MISS_LIMIT = 2
 # 「下完了」的判据用宿主归一后的状态（`DownloadTaskState`：downloading / paused / completed），
 # **不是**进度数字 —— 同一个字段各家下载器给的口径不一样，见 `_percent()` 的说明。
+# ⚠️ 但宿主这一步归一**是有损的**（2026-10-14 在容器里逐行核对 MP v3.1.5 的源码）：
+# `app/modules/qbittorrent/__init__.py:370-379` 的 `__normalize_torrent_state()` 只认
+# 「下载中」与「暂停」两组原始状态，其余**一律 `return DownloadTaskState.COMPLETED`** ——
+# qB 的 `error` / `missingFiles` / `unknown` 三个失败态到插件这里已经变成 `'completed'`，
+# 而 `DownloaderTorrent`（`app/schemas/transfer.py:14-43`）上**没有原始状态的透传字段**。
+# 所以 `state == 'completed'` 只有在进度同时到 100% 时才算「真下完」，见 `_failure_reason()`。
 QUEUE_DONE_STATE = "completed"
 # 进度数字只作兜底：原生读数就是百分比口径时 ≥ 99.5 也算下完（状态万一没归一到 completed）。
 QUEUE_DONE_RAW = 99.5
+
+# 「这颗种子是失败的」（v4.1 §9.2 第 1 条）。qBittorrent 的原始状态里这三类是明确的失败态：
+#   error        —— 种子出错（tracker / 磁盘 / 权限）
+#   missingFiles —— 文件已经不在磁盘上了
+#   unknown      —— qB 自己也认不出的状态
+# 别名一并收着：qB 各版本与别的下载器写法不完全一样；判据只比字符串，多收几个不会误伤。
+QUEUE_FAIL_STATES = frozenset({
+    "error", "errored", "missingfiles", "missing_files", "unknown",
+})
+# 台账里「这个番号已经被占住」的两种状态（订阅查重用，见 `duplicate_reason()`）：
+# `failed` **不算**占住 —— 失败了本来就该允许重下。
+DOWNLOAD_TAKEN_STATES = ("downloading", "downloaded")
+# 种子对象上可能挂着状态串的地方：`state` 是宿主归一后的那一份，其余是给别的宿主版本、
+# 直接透传原始状态的下载器模块、以及单测替身留的口子（见 `_torrent_states()`）。
+_TORRENT_STATE_ATTRS = ("state", "raw_state", "rawState", "torrent_state", "qbit_state", "qb_state")
+_TORRENT_STATE_CONTAINERS = ("raw", "data", "info", "torrent_data", "source_data")
+
+# 定时重刮每档一次取几条待办（Tier 1 到点重试 / Tier 2 冷数据滚动，契约 §3.2 的 `meta_due`）。
+SCRAPE_TIER_LIMIT = 5
+
+
+def _torrent_states(torrent: Any) -> Set[str]:
+    """把种子对象上**所有**可能的状态串收齐（小写、去空白）。
+
+    为什么要收一网：宿主的 `DownloaderTorrent.state` 是归一后的值（见 `QUEUE_DONE_STATE`
+    上面那段），qB 的失败态在那一步就被吞掉了；但只要对象上还留着原始状态（别的宿主版本、
+    直接透传的下载器模块、单测里的替身），这里就能认出来。判据是字符串，收多了不会误伤。
+    """
+    found: Set[str] = set()
+    for name in _TORRENT_STATE_ATTRS:
+        value = getattr(torrent, name, None)
+        if isinstance(value, str) and value.strip():
+            found.add(value.strip().lower())
+    for name in _TORRENT_STATE_CONTAINERS:
+        nested = getattr(torrent, name, None)
+        if isinstance(nested, dict):
+            value = nested.get("state")
+            if isinstance(value, str) and value.strip():
+                found.add(value.strip().lower())
+    return found
+
+
+def _failure_reason(torrent: Any, progress: float) -> str:
+    """种子是不是失败态：失败给一句原因，不失败给空串。
+
+    两条判据**都只看种子状态**，绝不看「队列里还在不在」或「完成时间有没有值」：
+
+    1. 状态串本身落在 `QUEUE_FAIL_STATES`（宿主把 qB 原始状态透传过来时走这条）；
+    2. 宿主归一成了 `completed` **而进度不到 100%** —— 真做完的种子（qB 的 uploading /
+       stalledUP / queuedUP / checkingUP / moving）进度必然是 100，反过来说「说完成了却
+       没到 100」只可能是被吞掉的 `error` / `missingFiles` / `unknown`。
+
+    ⚠️ 已知的边界：`missingFiles` 且进度正好 100%（下完了才把文件挪走/删掉）在本判据下
+    **仍算完成** —— 那一颗种子的事实是"文件不在了"，但这次下载确实下完过。这条边界在
+    本机无从观测（没有处于该状态的种子），见交付报告的未验证项。
+    """
+    for state in sorted(_torrent_states(torrent)):
+        if state in QUEUE_FAIL_STATES:
+            return f"下载器报种子状态 {state}"
+    if (str(getattr(torrent, "state", "") or "").strip().lower() == QUEUE_DONE_STATE
+            and progress < QUEUE_DONE_RAW):
+        return (f"下载器报已完成但进度只有 {progress:.0f}%"
+                f"（宿主把 error/missingFiles/unknown 归一成了 completed）")
+    return ""
+
+
+def _canon(text: Any) -> str:
+    """跨层匹配用的**规范号**（契约 D1：`emby.canon_key()` —— parse 优先，认不出退回旧口径）。
+
+    S2 的 `canon_key()` 已落地（2026-10-14，`emby.py:358`），本层仍包着是为了两个兜底：
+
+    ① 并行施工期 `emby.py` 还在被改（万一又没了这个函数）：`getattr` 探一下，退回
+       `parse_av_number().norm_key`，再退旧口径 `norm_key()` —— 本文件的去重判定不能
+       因为别的模块没就位就整条挂掉；
+    ② `canon_key()` 内部抛异常时也不能把订阅检查带崩。
+    """
+    fn = getattr(emby, "canon_key", None)
+    if callable(fn):
+        try:
+            key = str(fn(text) or "")
+            if key:
+                return key
+        except Exception as error:      # 归一失败绝不能把调用方带崩
+            logger.error(f"AVHelper canon_key({text!r}) 失败：{error}")
+    parser = getattr(emby, "parse_av_number", None)
+    if callable(parser):
+        try:
+            key = str(getattr(parser(text), "norm_key", "") or "")
+            if key:
+                return key
+        except Exception as error:
+            logger.error(f"AVHelper parse_av_number({text!r}) 失败：{error}")
+    return emby.norm_key(text)
+
+
+def _same_number(candidate: Any, keys: List[str], canon: str) -> bool:
+    """候选番号是不是目标那一个：先按归一化键直查，再把候选过一遍 `canon_key()` 比一次。
+
+    为什么要第二步（2026-10-14 实测）：台账与 Emby 索引里存的可能是**旧口径**键
+    （保留后缀：`IPZZ912UC` / `CAWD9894K` / `IPZZ58624K`），而订阅拿到的是干净番号
+    （`IPZZ-912`）—— 两边各过一遍 `canon_key()` 才能对上（`IPZZ912UC` → `IPZZ912` ✓）。
+    也不能用「前缀匹配」凑：`IPZZ912` 是 `IPZZ912UC` 的前缀没错，但 `ABP123` 同样是
+    `ABP1234` 的前缀 —— 那是两部不同的片，按前缀比会互相误判。
+    """
+    text = str(candidate or "").strip()
+    if not text:
+        return False
+    if text in keys:
+        return True
+    return bool(canon) and _canon(text) == canon
 
 
 def merge_rule(rule: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -237,6 +353,8 @@ class TaskEngine:
         self._scales: Dict[str, bool] = {}
         self._queue_lock = threading.Lock()
         self._queue_busy = False
+        # 最近一次「下载器失联」的原因（空串 = 上次是通的），见 `downloader_state()`
+        self._downloader_error = ""
 
     # ---------- 站点 ----------
 
@@ -365,10 +483,24 @@ class TaskEngine:
                    source: str = "manual") -> Dict[str, Any]:
         """搜种并落库一条任务（含打分明细），返回任务体。
 
-        :param source: 任务来源标记，manual=界面手动搜索，sub=订阅检查产生。
+        :param source: 任务来源标记，manual=界面手动搜索 /「下载该影片」，sub=订阅检查产生。
             actor 只是元数据（番号对应的演员），不能拿它推断来源。
+            **来源决定要不要查重**（v4.1 §9.2 第 2 条）：`sub` 先查三处（Emby 库 / 下载台账 /
+            待确认任务），命中任一就**不建这条任务**（返回一条 `state='skipped'` 的空任务，
+            并补写 known）；`manual` 是用户手动洗版的明确意图，一律放行 —— 详情抽屉
+            「下载该影片」与站点搜索这两个入口落库写的就是 `manual`。
         """
         rule = merge_rule(rule)
+        duplicate = self.duplicate_reason(number, source)
+        if duplicate:
+            # 只在订阅那条路上会走到（manual 恒放行）：补写 known 让下一轮作品史差集不再把它
+            # 当新片，然后回一条空任务 —— 调用方按 `state == 'skipped'` 给提示（见 `_after_task`）。
+            self.store.known_add(number, actor)
+            logger.info(f"AVHelper 订阅下单跳过：{number} 已经存在（{duplicate}），只补写 known")
+            return {"id": "", "number": number, "actor": actor or "", "cands": [],
+                    "state": "skipped", "reason": duplicate, "thumb": "", "auto": False,
+                    "rule": rule, "source": str(source or "manual"), "pending": "",
+                    "duplicate": duplicate}
         # 封面：调用方没给（番号订阅、站点搜索）时用本地索引 / 详情缓存补，补不到就留空
         thumb = str(thumb or "") or self.plugin.thumbs_of([number]).get(number, "")
         if thumb:
@@ -665,6 +797,151 @@ class TaskEngine:
         logger.info(f"AVHelper 取消待确认任务：{task.get('number')}（{tid}）")
         return {"ok": True, "message": f"已取消 {task.get('number') or ''} 的待确认任务"}
 
+    def cancel_all(self, number_or_key: str, cancel_sub: bool = True) -> Dict[str, Any]:
+        """「不要了」的三个出口一次做干净（v4.1 §9.2 第 4 条）。
+
+        **返回形状定死了，S8 按这个接**::
+
+            {
+              'ok': bool,            # 四步全成功才 True
+              'steps': {
+                  'torrent': {'ok': bool, 'detail': str},   # 让下载器删种（不动磁盘文件）
+                  'ledger':  {'ok': bool, 'detail': str},   # 台账打墓碑 hidden=1
+                  'sub':     {'ok': bool, 'detail': str},   # 删对应的番号/演员订阅
+                  'known':   {'ok': bool, 'detail': str},   # 写 known 忽略表
+              },
+              'error': str,          # 失败步骤的原因摘要（都成功时是空串）
+            }
+
+        每一步都**独立成败**：删种子失败不该拦住台账与订阅的清理（用户点了「不要了」，
+        最要紧的是"它别再回来"）。`ok=False` 时 `error` 里会写清是哪一步没做成。
+
+        :param cancel_sub: 默认 True = 连订阅一起删（界面上默认勾选）；False = 只清前三步。
+
+        关于删文件：`remove_torrents(delete_file=False)` —— **只摘下载器里的任务，不删磁盘文件**。
+        这条路径的语义是「我不要这个下载了」，而不是「删掉这个视频」；已经下好的正片在媒体库里，
+        顺手删文件是破坏性动作，不该由一个取消按钮代劳（要清理由用户自己去下载器/文件管理里做）。
+        """
+        steps: Dict[str, Dict[str, Any]] = {
+            "torrent": {"ok": True, "detail": ""},
+            "ledger": {"ok": True, "detail": ""},
+            "sub": {"ok": True, "detail": ""},
+            "known": {"ok": True, "detail": ""},
+        }
+        raw = str(number_or_key or "").strip()
+        if not raw:
+            return {"ok": False, "steps": steps, "error": "缺少番号或归一化键"}
+        keys = self._match_keys(raw)
+        canon = _canon(raw)
+
+        # 1) 下载器种子：队列里（正在下）与台账里（已完成/失败）两处的 hash 都要算上
+        hashes: List[str] = []
+        for entry in (self.store.kv_get(QUEUE_KEY, []) or []):
+            if isinstance(entry, dict) and _same_number(entry.get("number"), keys, canon):
+                digest = str(entry.get("hash") or "").strip()
+                if digest:
+                    hashes.append(digest)
+        actor = ""
+        try:
+            for row in (self.store.download_list() or []):
+                if not isinstance(row, dict) or not _same_number(row.get("key"), keys, canon):
+                    continue
+                actor = actor or str(row.get("actor") or "")
+                digest = str(row.get("hash") or "").strip()
+                if digest:
+                    hashes.append(digest)
+        except Exception as error:
+            logger.error(f"AVHelper 取消时读台账失败（{raw}）：{error}")
+        hashes = list(dict.fromkeys(h.lower() for h in hashes if h))
+        if not hashes:
+            steps["torrent"] = {"ok": True, "detail": "下载器里没有这个番号的种子（跳过）"}
+        else:
+            ok, detail = self._remove_torrents(hashes)
+            steps["torrent"] = {"ok": ok, "detail": detail}
+
+        # 2) 台账打墓碑（`download_delete` 是幂等的）
+        try:
+            done = bool(self.store.download_delete(raw))
+            steps["ledger"] = {"ok": done,
+                               "detail": "已从下载历史移除（hidden=1）" if done
+                                         else "归一不出番号键，无法移除记录"}
+        except Exception as error:
+            logger.error(f"AVHelper 取消时写台账墓碑失败（{raw}）：{error}")
+            steps["ledger"] = {"ok": False, "detail": f"移除下载记录失败：{str(error)[:120]}"}
+
+        # 3) 订阅：番号订阅按番号对，演员订阅按台账里记的演员对
+        if not cancel_sub:
+            steps["sub"] = {"ok": True, "detail": "按参数跳过（cancel_sub=false）"}
+        else:
+            steps["sub"] = self._drop_subs(keys, canon, actor)
+
+        # 4) known 忽略表：写进去，下次检查/下单就当它已经存在
+        try:
+            self.store.known_add(raw, actor)
+            steps["known"] = {"ok": True, "detail": "已写入忽略表（known）"}
+        except Exception as error:
+            logger.error(f"AVHelper 取消时写 known 失败（{raw}）：{error}")
+            steps["known"] = {"ok": False, "detail": f"写入忽略表失败：{str(error)[:120]}"}
+
+        failed = [f"{name}：{step['detail']}" for name, step in steps.items() if not step["ok"]]
+        logger.info(f"AVHelper「不要了」{raw}："
+                    + "；".join(f"{name}={step['detail'] or 'ok'}" for name, step in steps.items()))
+        return {"ok": not failed, "steps": steps, "error": "；".join(failed)}
+
+    def _remove_torrents(self, hashes: List[str]) -> Tuple[bool, str]:
+        """让下载器删掉这些种子（不删文件），返回 `(成功?, 说明)`。"""
+        chain = getattr(self.plugin, "chain", None)
+        if chain is None:
+            return False, "宿主没有可用的下载链，删不了种子"
+        try:
+            try:
+                result = chain.remove_torrents(hashs=list(hashes), delete_file=False)
+            except TypeError:               # 老宿主的形参表不同
+                result = chain.remove_torrents(hashs=list(hashes))
+        except Exception as error:
+            logger.error(f"AVHelper 删除下载器种子失败：{error}")
+            return False, f"删除下载器种子失败：{str(error)[:120]}"
+        if result:
+            return True, f"已从下载器删除 {len(hashes)} 个种子（不动磁盘文件）"
+        # 删返回 False 也可能是「这些 hash 本来就不在下载器里」（qB 对不存在的 id 就回 False）：
+        # 复查一遍再下结论 —— 目标状态是"下载器里没有它"，已经达到就算成功。
+        try:
+            left, reliable = self._query_torrents(list(hashes))
+        except Exception as error:
+            left, reliable = {}, False
+            logger.error(f"AVHelper 删除种子后复查失败：{error}")
+        if reliable and not left:
+            return True, "下载器里已经没有这些种子（无需删除）"
+        return False, "下载器没有接受删除请求"
+
+    def _drop_subs(self, keys: List[str], canon: str, actor: str) -> Dict[str, Any]:
+        """删掉与这个番号相关的订阅（番号订阅按番号，演员订阅按台账里的演员）。"""
+        try:
+            subs = self.store.sub_list() or []
+        except Exception as error:
+            logger.error(f"AVHelper 取消时读订阅失败：{error}")
+            return {"ok": False, "detail": f"读订阅失败：{str(error)[:120]}"}
+        removed: List[str] = []
+        for sub in subs:
+            kind = str(sub.get("type") or "")
+            name = str(sub.get("name") or "")
+            hit = (kind == "number" and _same_number(name, keys, canon)) \
+                or (kind == "actor" and actor and name == actor)
+            if not hit:
+                continue
+            try:
+                self.store.sub_del(int(sub.get("id") or 0))
+                removed.append(f"{'番号' if kind == 'number' else '演员'}{name}")
+            except Exception as error:
+                logger.error(f"AVHelper 删除订阅失败（{name}）：{error}")
+                return {"ok": False, "detail": f"删订阅失败：{str(error)[:120]}"}
+        if not removed:
+            return {"ok": True, "detail": "没有对应的订阅（跳过）"}
+        if not actor:
+            # 演员那半没得对：台账里没有演员字段时只能按番号删，说清楚免得看着像漏了
+            return {"ok": True, "detail": "已删除订阅：" + "、".join(removed) + "（无演员信息，演员订阅未动）"}
+        return {"ok": True, "detail": "已删除订阅：" + "、".join(removed)}
+
     def _percent(self, raw: float, downloader: str) -> float:
         """把下载器给的 `progress` 换算成百分比（0-100）。
 
@@ -718,9 +995,31 @@ class TaskEngine:
                 raw = float(getattr(torrent, "progress", 0) or 0)
             except (TypeError, ValueError):
                 raw = 0.0
-            entry["progress"] = int(round(self._percent(raw, name)))
+            percent = self._percent(raw, name)
+            entry["progress"] = int(round(percent))
             state = str(getattr(torrent, "state", "") or "").lower()
-            # 状态是主判据；`upload`/`做种` 与进度数字都是给「宿主没把状态归一好」留的兜底
+            reason = _failure_reason(torrent, percent)
+            if reason:
+                # 失败态优先：既不能算「下完了」，也不许被后面的轮次翻回来。台账那一笔交给
+                # `_flush_failed()` 在本次 `kv_update` 之外写 —— 与 `_flush_done` / `_flush_gone`
+                # 同一套分工：`_merge_queue` 只改快照（它跑在 `kv_update` 的锁里），
+                # 「登记成功才打标记、失败留队列下轮重试」这条只能等锁放掉才做得了。
+                if str(entry.get("state") or "") != "failed":
+                    entry["failed_ledger"] = False      # 这一轮才判失败 → 等 `_flush_failed` 登记
+                entry["state"] = "failed"
+                entry["failed_reason"] = reason
+                continue
+            if str(entry.get("state") or "") == "failed":
+                # 判过失败的条目只能被「下载器真的报完成」翻回来：进度到 100 才算
+                # （`completed` + 进度不足 100 正是宿主吞掉 error/missingFiles/unknown 的样子）。
+                if percent < QUEUE_DONE_RAW:
+                    continue
+                entry.pop("failed_reason", None)
+                entry.pop("failed_ledger", None)
+            # 状态是主判据；`upload`/`做种` 与进度数字都是给「宿主没把状态归一好」留的兜底。
+            # 数字兜底仍然用**原始读数** `raw` 而不是换算后的 `percent`：`_percent()` 在
+            # 「这台下载器还没有过 >1 的读数」时会按小数口径 ×100，于是 qB 上真实的 1%
+            # （原生 1.0）会被算成 100% —— 拿它当完成判据就会把刚下 1% 的片子标成已下载。
             if (state == QUEUE_DONE_STATE or "upload" in state or "做种" in state
                     or raw >= QUEUE_DONE_RAW):
                 entry["state"] = "done"
@@ -781,7 +1080,65 @@ class TaskEngine:
             queue = self.store.kv_update(
                 QUEUE_KEY,
                 lambda cur: self._merge_queue(cur or [], by_hash, thumbs, missing))
-        return self._flush_gone(self._flush_done(queue))
+        # 收尾顺序：完成 → 失败 → 消失。失败排在「消失」前面，是因为它的证据更硬
+        # （种子自己报的失败态），不能被「查不到它了 + Emby 库里恰好有这个番号」改写成已完成。
+        return self._flush_gone(self._flush_failed(self._flush_done(queue)))
+
+    def _flush_failed(self, queue: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """把这一轮新判为失败的条目登记进台账（`state='failed'` + `failed_reason`），返回原队列。
+
+        **不摘队列**（与 `_flush_done` 的差别）：失败要留在「下载中」列表里让用户看见 ——
+        一条挂着假进度的记录比一条写着"失败：种子状态 error"的记录糟得多。它也不会卡死：
+        ① 下载器里真做完（进度到 100）时 `_merge_queue` 把它翻回 `done`，交给 `_flush_done`；
+        ② 用户在下载器里把种子删了 → 连续 `QUEUE_MISS_LIMIT` 轮查不到 → `_flush_gone` 摘掉；
+        ③ 用户点「不要了」→ `cancel_all()` 直接清三处。
+
+        台账只在**首次判失败**那一轮写一次（标记 `failed_ledger`），不是每 12 秒重写一遍。
+        写台账放在这里、不写在 `_merge_queue` 里：那个函数跑在 `Store.kv_update` 的锁与事务里
+        （v4 的 `Store._lock` 是 `RLock`，嵌套写不会锁死 —— 这一点 2026-10-14 用探针实测过；
+        但那样会把第二个事务塞进同一把锁、同一个线程连接里），而且「这一笔登记成功了没有」
+        要写回队列快照才能只登记一次，那条写只能等 `kv_update` 放掉锁再做。
+        """
+        rows = [e for e in (queue or [])
+                if isinstance(e, dict) and str(e.get("state") or "") == "failed"
+                and not e.get("failed_ledger")]
+        if not rows:
+            return queue
+        stamped = set()
+        for entry in rows:
+            number = str(entry.get("number") or "")
+            if not number:              # 没番号归一不出 key：留队列里下轮重试，别悄悄丢掉
+                continue
+            reason = str(entry.get("failed_reason") or "下载器报种子失败")
+            if self._ledger_upsert(
+                number,
+                title=str(entry.get("title") or ""),
+                thumb=self._ledger_thumb(entry.get("thumb")),
+                size=_size_bytes(entry.get("size")),
+                hash=str(entry.get("hash") or ""),
+                path=str(entry.get("savePath") or ""),
+                downloader=str(entry.get("downloader") or ""),
+                state="failed",
+                failed_reason=reason,
+            ):
+                stamped.add(_queue_fingerprint(entry))
+                logger.info(f"AVHelper 下载失败登记：{number} —— {reason}")
+                self.notifier.info("下载失败", f"{number}：{reason}")
+        if not stamped:
+            return queue
+
+        def mark(cur: Any) -> List[Dict[str, Any]]:
+            """就地打上「已登记」标记；其余条目与顺序原样保留（期间新插入的不能丢）。"""
+            return [dict(item, failed_ledger=True)
+                    if isinstance(item, dict) and _queue_fingerprint(item) in stamped
+                    else item
+                    for item in (cur or [])]
+
+        try:
+            return self.store.kv_update(QUEUE_KEY, mark)
+        except Exception as error:
+            logger.error(f"AVHelper 标记失败条目已登记失败：{error}")
+            return queue
 
     def _flush_done(self, queue: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """把已完成的条目登记进台账并从队列摘掉，返回摘完的队列（设计文档 §3）。
@@ -861,11 +1218,17 @@ class TaskEngine:
             number = str(entry.get("number") or "")
             digest = str(entry.get("hash") or "")
             key = emby.norm_key(number) if number else ""
-            if not key or key not in library:
-                logger.info(f"AVHelper 下载已不在下载器，从队列摘掉：{number or digest}")
+            failed = str(entry.get("state") or "") == "failed"
+            # 判过失败的条目**不许**走「Emby 库里已经有这个番号 → 按已完成补记」那条路：
+            # 库里那个番号可能是上一次下的另一份，而失败是这一颗种子自己报出来的硬证据。
+            # 证据强弱：种子状态 > 「下载器里查不到它了」+「库里有同号」。
+            if not key or key not in library or failed:
+                logger.info(f"AVHelper 下载已不在下载器，从队列摘掉：{number or digest}"
+                            f"{'（该条目判过下载失败）' if failed else ''}")
                 self.notifier.info(
                     "下载已从下载器移除",
-                    f"{number or digest} 在下载器里已经找不到了，已从「下载中」移除",
+                    f"{number or digest} 在下载器里已经找不到了，已从「下载中」移除"
+                    + ("（这一条判过下载失败，台账里那条保持失败，不会被记成已下载）" if failed else ""),
                 )
                 continue
             if self._ledger_upsert(
@@ -1007,6 +1370,58 @@ class TaskEngine:
                 by_hash[h] = item
         return by_hash, True
 
+    def downloader_state(self) -> Dict[str, Any]:
+        """下载器是不是在线（给 `/downloads` 顶层的 `downloader_offline` 用）。
+
+        **返回形状定死了，S8 按这个接**（v4.1 §9.2 第 3 条）::
+
+            {'online': bool, 'error': str, 'checked_at': str}
+            # online=True  → error 是空串
+            # online=False → error 是给人看的一句原因（界面顶部告警条直接用）
+            # checked_at   → 'YYYY-MM-DD HH:MM:SS'（本地时间，与库里其它时间戳同格式）
+            #                = **这一次真的去问下载器**的时刻；不是快照时间
+
+        每次调用都真问一次下载器（代价同 `queue(fresh=True)`），所以别挂到 `/bootstrap`
+        那条 15 秒轮询上；`/downloads` 这种用户主动打开的读接口正合适。
+
+        失联时把进度快照的两个时间戳清零（= **上一轮快照作废**）：下一轮 `queue()` 会重新问
+        下载器，绝不沿用上一轮读到的进度 —— 下载器都连不上了，页面上还挂着「下载中 42%」
+        是假话，而且真把种子删了也看不出来。
+        """
+        checked_at = time.strftime("%Y-%m-%d %H:%M:%S")
+        online, why = self._probe_downloader()
+        if online:
+            self._downloader_error = ""
+            return {"online": True, "error": "", "checked_at": checked_at}
+        self._queue_at["active"] = 0.0
+        self._queue_at["done"] = 0.0
+        self._downloader_error = why or "下载器连接失败"
+        logger.error(f"AVHelper 下载器失联：{self._downloader_error}")
+        return {"online": False, "error": self._downloader_error, "checked_at": checked_at}
+
+    def _probe_downloader(self) -> Tuple[bool, str]:
+        """真问一次下载器（空 hash 列表 = 「把种子列表给我看看」），返回 `(在线?, 原因)`。
+
+        判据只看「宿主回没回一个列表」：
+
+        - **抛异常**（超时、认证失败、下载器没起来）→ 离线；
+        - **回 `None`** → 宿主没找到可用的下载器模块（或模块没处理这次调用）→ 同样算离线；
+        - **回空列表** → 在线。「下载器活着但一个种子都没有」是正常状态，不能当离线。
+
+        ⚠️ 这是**问全部下载器**：装了第二台但没配好时，它也会把整体判成离线。本机只有
+        qBittorrent（`AGENTS.md` §3），暂不为此加按下载器探测的分支。
+        """
+        chain = getattr(self.plugin, "chain", None)
+        if chain is None:
+            return False, "宿主没有可用的下载链（下载器未配置）"
+        try:
+            torrents = self._list_torrents([])
+        except Exception as error:
+            return False, f"下载器连接失败：{str(error)[:160]}"
+        if torrents is None:
+            return False, "下载器没有返回种子列表（未配置下载器或下载器模块不可用）"
+        return True, ""
+
     def _kick_refresh(self, active: List[str], done: List[str]) -> None:
         """到点了就在后台补一次进度（守护线程 + 单飞），请求本身不等它。"""
         now = time.time()
@@ -1029,11 +1444,15 @@ class TaskEngine:
                     self._queue_at["done"] = time.time()
                 # 同步那条路（`queue(fresh=True)`）也是同样的算法，两边不能各算一套
                 missing = ({h.lower() for h in hashes} - set(by_hash)) if ok else None
+                merged = None
                 if by_hash or missing:
                     # 只并进度，不动封面：封面那条线上一次请求已经写过了
-                    self.store.kv_update(
+                    merged = self.store.kv_update(
                         QUEUE_KEY,
                         lambda cur: self._merge_queue(cur or [], by_hash, {}, missing))
+                if merged:
+                    # 失败态的台账登记这一路也要做（上面那次 kv_update 已经返回、锁已放掉）
+                    self._flush_failed(merged)
             except Exception as error:         # 后台线程里的异常绝不能漏出去
                 logger.error(f"AVHelper 后台刷新下载进度失败：{error}")
             finally:
@@ -1044,8 +1463,78 @@ class TaskEngine:
 
     # ---------- 订阅检查 ----------
 
+    def _match_keys(self, number: Any) -> List[str]:
+        """一个番号在「归一化键」上的**全部**写法（规范号在前，旧口径在后）。
+
+        为什么要两种：Emby 索引与 `downloads` / `known` 的主键都是**旧口径**
+        `emby.norm_key()`（保留后缀：`IPZZ-912-UC` → `IPZZ912UC`），而 v4.1 §9.2 要求用
+        规范号（`IPZZ912`）去查三处。只查规范号会漏掉「库里存的是带后缀那条键」的情况
+        （线上库快照里就有 `IPZZ58624K` / `MIRD277C` 这种残留，见契约 §0.2）。
+        """
+        keys: List[str] = []
+        for key in (_canon(number), emby.norm_key(number)):
+            if key and key not in keys:
+                keys.append(key)
+        return keys
+
+    def duplicate_reason(self, number: str, source: str = "sub") -> str:
+        """下单前查重：`''` = 放行；非空 = 拦下来的原因（中文，直接进日志/通知）。
+
+        三处任一命中就不再下单（v4.1 §9.2 第 2 条），并把命中原因定位到具体那一处：
+
+        1. **Emby 库**：已经入库的片子不必再下（`EmbyLibrary.index()`，内存索引，不发请求）；
+        2. **下载台账**：`downloading`（正在下）或 `downloaded`（下过）都算占住 ——
+           后者正是用户报的「订阅重复下单」；`failed` **不算**（失败了本来就该允许重下）；
+        3. **待确认任务**：任务页还挂着 `state='await'` 的同号任务，再下一单就是两条一样的卡。
+
+        `source` 是这台机器上**「用户手动洗版」的唯一标识**：任务的 `source` 列由调用方传入
+        （`__init__.py` 的两条手动入口 —— `api_task_search` 与 `api_task_acquire`/`acquire()` ——
+        落的都是 `'manual'`，订阅那条路落的都是 `'sub'`，见 `build_task()` 的 `:param source:`）。
+        **非 `'sub'` 的来源一律放行**：手动点「下载该影片」洗版是用户的明确意图，不许拦。
+        判据只认这一个字段，没有另外发明参数。
+        """
+        if str(source or "") != "sub":
+            return ""
+        keys = self._match_keys(number)
+        canon = _canon(number)
+        if not keys:
+            return ""
+        try:
+            library = self.plugin.emby().index() or {}
+        except Exception as error:      # 索引不通不能把下单也带崩，宁可漏判这一处
+            logger.error(f"AVHelper 查重读 Emby 索引失败：{error}")
+            library = {}
+        for key in (library or {}):
+            if _same_number(key, keys, canon):
+                return f"番号已在 Emby 库中（{key}）"
+        try:
+            ledger = self.store.download_map() or {}
+        except Exception as error:
+            logger.error(f"AVHelper 查重读下载台账失败：{error}")
+            ledger = {}
+        for key, row in (ledger or {}).items():
+            if not _same_number(key, keys, canon):
+                continue
+            if isinstance(row, dict) and str(row.get("state") or "") in DOWNLOAD_TAKEN_STATES:
+                return f"下载台账里已有这个番号（{row.get('state')}）"
+        try:
+            tasks = self.store.task_list() or []
+        except Exception as error:
+            logger.error(f"AVHelper 查重读任务列表失败：{error}")
+            tasks = []
+        for task in tasks:
+            if not isinstance(task, dict) or str(task.get("state") or "") != "await":
+                continue
+            if _same_number(task.get("number"), keys, canon):
+                return "任务页已有这个番号的待确认任务"
+        return ""
+
     def check(self, name: Optional[str] = None) -> Dict[str, Any]:
         """手动或有计划地检查订阅；受 §8.2 限流约束。"""
+        # 定时重刮队列的挂点（v4.1 §9.2-5 / 契约 §3.2）：本方法就是本插件的**定时任务入口**
+        # （`__init__.py:job_subcheck` 挂着 09:30/14:30/21:30 的 cron），所以挂在这里。
+        # 放在限流判断之前：它只读本地 meta 表，不碰站点，不受订阅限流约束。
+        self._scrape_tick()
         subs = self.store.sub_list()
         if name:
             subs = [s for s in subs if s.get("name") == name]
@@ -1108,6 +1597,12 @@ class TaskEngine:
     def _after_task(self, task: Dict[str, Any], sub: Dict[str, Any],
                     rule: Dict[str, Any]) -> List[Dict[str, Any]]:
         """任务建好后：自动订阅命中即下载，否则发“等你确认”。"""
+        if str(task.get("state") or "") == "skipped":
+            # 查重命中，这一单根本没建（见 `build_task()`）：说清为什么没下，别让用户以为
+            # 订阅检查白跑了。`known` 已经补写，下一轮作品史差集不会再把它当新片。
+            return [self.notifier.info(
+                "订阅命中但已跳过",
+                f"{task.get('number') or ''}：{task.get('duplicate') or '已存在'}，未重复下单")]
         best = next((c for c in (task.get("cands") or []) if c.get("pass")), None)
         if rule.get("trigger") == "auto" and best:
             result = self.download(task["id"])
@@ -1115,3 +1610,101 @@ class TaskEngine:
                 return [result["notice"]] if result.get("notice") else []
             return [self.notifier.info("自动下载失败", str(result.get("message") or ""))]
         return [self.notifier.candidate_ready(task["number"], len(task.get("cands") or []))]
+
+    # ---------- 定时重刮（Tier 1 / Tier 2 队列挂点） ----------
+
+    def _meta_due(self, tier: int, limit: int = SCRAPE_TIER_LIMIT) -> List[Dict[str, Any]]:
+        """`store.meta_due()` 的防御包装：取不到就回空列表，绝不让定时任务炸掉。
+
+        S1 的 `meta_due()` 已经在主干上（契约 §3.2），但本插件的其它文件也在并行改，
+        所以这里仍用 `getattr` 探一下：方法不在时记一条 info，而不是抛 AttributeError
+        把整个订阅检查带停摆。
+        """
+        fn = getattr(self.store, "meta_due", None)
+        if not callable(fn):
+            logger.info("AVHelper 重刮队列：store.meta_due() 尚未落地，本轮跳过")
+            return []
+        try:
+            return list(fn(now=time.strftime("%Y-%m-%d %H:%M:%S"), tier=tier, limit=limit) or [])
+        except Exception as error:
+            logger.error(f"AVHelper 取重刮待办失败（tier={tier}）：{error}")
+            return []
+
+    def _scrape_tick(self) -> Dict[str, Any]:
+        """跑一轮 Tier 1 / Tier 2 定时重刮（S8 接线，契约 §3.6 / v4.1 §5.3）。
+
+        见 v4.1 §9.2 与契约 §3.2 的 `meta_due(now, tier, limit)`：
+
+        - tier=1：`next_retry_at` 到点的条目（上次失败/缺简介，按 +6h/24h/72h/7d/14d 退避），
+          一批最多 **5** 条；
+        - tier=2：全表按 `last_scraped_at` 最久的 **3** 条（治「新片饥饿」的滚动档）。
+
+        配置从 `plugin.scrape_conf()` 读（11 项存在 kv 的 `global_rule` 里，不是宿主配置）：
+        `scrapeMode == 'off'` 直接跳过，`autoScrapeTier1` / `autoScrapeTier2` 各自管一档。
+
+        执行交 S7 的 `scraper.scrape_batch()`（依赖包走 `plugin.scrape_deps()`）——
+        **逐条 try/except**，失败只往 `scrape_log` 记一条：本方法挂在 `check()` 的第一行，
+        绝不能把订阅检查主流程带停摆（`scraper.py` 缺位、站点超时、Emby 抽风都算）。
+        返回形状（`{'tier1','tier2','scraper','error'}`）与只记日志那版保持不变。
+        """
+        out: Dict[str, Any] = {"tier1": 0, "tier2": 0, "scraper": False, "error": ""}
+        plugin = self.plugin
+        conf: Dict[str, Any] = {}
+        getter = getattr(plugin, "scrape_conf", None)
+        if callable(getter):
+            try:
+                conf = dict(getter() or {})
+            except Exception as error:
+                logger.error(f"AVHelper 读刮削配置失败（按默认值跑）：{error}")
+                conf = {}
+        if str(conf.get("scrapeMode") or "fill").strip().lower() == "off":
+            logger.info("AVHelper 重刮队列：scrapeMode=off，本轮跳过")
+            return out
+        due1 = self._meta_due(1, limit=5) if bool(conf.get("autoScrapeTier1", True)) else []
+        due2 = self._meta_due(2, limit=3) if bool(conf.get("autoScrapeTier2", True)) else []
+        out["tier1"], out["tier2"] = len(due1), len(due2)
+        keys: List[str] = []
+        for row in list(due1) + list(due2):
+            key = str((row or {}).get("key") or "").strip()
+            if key and key not in keys:
+                keys.append(key)
+        if not keys:
+            return out
+        loader = getattr(plugin, "scrape_module", None)
+        scraper = None
+        if callable(loader):
+            try:
+                scraper = loader()
+            except Exception as error:      # 加载失败也算"没就绪"，不许往外抛
+                logger.error(f"AVHelper 加载刮削模块失败：{error}")
+        if scraper is None or not callable(getattr(scraper, "scrape_batch", None)):
+            logger.info(f"AVHelper 重刮队列：待办 Tier1 {len(due1)} 条 / Tier2 {len(due2)} 条，"
+                        f"scraper.py 尚未就绪，本轮只取不刮")
+            out["error"] = "scraper 未落地"
+            return out
+        out["scraper"] = True
+        deps: Dict[str, Any] = {}
+        deps_loader = getattr(plugin, "scrape_deps", None)
+        if callable(deps_loader):
+            try:
+                deps = dict(deps_loader() or {})
+            except Exception as error:
+                logger.error(f"AVHelper 组装刮削依赖失败（本轮按空依赖跑）：{error}")
+                deps = {}
+        done, failed = 0, 0
+        for key in keys:
+            try:
+                scraper.scrape_batch([key], **deps)
+                done += 1
+            except Exception as error:      # 单条失败只记账，订阅检查还得往下跑
+                failed += 1
+                logger.error(f"AVHelper 定时重刮失败（{key}）：{error}")
+                try:
+                    self.store.scrape_log_add("scrape_tick", "error", key, 0, str(error)[:200])
+                except Exception:
+                    pass
+        if failed:
+            out["error"] = f"{failed} 条失败"
+        logger.info(f"AVHelper 定时重刮：Tier1 {len(due1)} 条 / Tier2 {len(due2)} 条，"
+                    f"成功 {done} 条，失败 {failed} 条")
+        return out
