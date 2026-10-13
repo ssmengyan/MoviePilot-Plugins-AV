@@ -846,7 +846,11 @@ class AVHelper(_PluginBase):
         for raw in movies[:WARM_IMAGE_LIMIT]:
             if stop.is_set():
                 return True      # 停机不算失败，别再往下抓图
-            url = str(raw.get("thumb_url") or raw.get("cover_url") or "")
+            # 预热哪一档必须与卡片实际显示的那一档一致（方案 B 起卡片用 `cover` 大图档）：
+            # 这里还抓 `thumb` 就等于白抓一遍 —— 首屏照样要现拉 60 张大图，一张都省不下。
+            # 代价：单档预热流量从约 0.7 MB 涨到约 9 MB（三档去重后约 20 MB），
+            # 只付一次，之后 NAS 图片缓存与浏览器 30 天缓存都命中。
+            url = str(raw.get("cover_url") or raw.get("thumb_url") or "")
             if not url or imgproxy.cached(url):
                 continue
             imgproxy.fetch(url, proxy=self._proxy)

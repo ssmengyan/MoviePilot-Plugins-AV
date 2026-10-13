@@ -98,6 +98,25 @@ const emit = defineEmits<{
 const number = () => String(props.movie.number || '')
 const id = () => String(props.movie.id || '')
 
+/**
+ * 卡片封面图源：优先 javdb 的大图档 `cover`，没有才退回小竖图 `thumb`（方案 B，2026-10-13）。
+ *
+ * 为什么换：卡片盒子是 3:4、列宽约 188px，而 `thumb` 实测只有 147×200 / 约 11 KB ——
+ * 1× 屏就已经放大 1.28×，125%/150%/200% 缩放的屏上要放大 1.6–2.6 倍，糊是必然的。
+ * `cover` 是 800×538 / 约 150 KB 的**封套展开图**（封底 | 书脊 | 封面），配盒子上的
+ * `object-fit: cover` + `object-position: 100%`（贴右，见 `Thumb.vue`）取回的是最右边那段封面，
+ * 约 377×538，2× 屏下几乎 1:1，清晰度约是原来的 2.7 倍 —— 画面与老实现那张竖图同源，只是更清楚。
+ * 盒子比例同时要收到 377/538，否则窗口比封面宽、左边会啃到折痕，见下面的样式注释。
+ *
+ * 代价（用户 2026-10-13 明确选定此方案，知道并接受）：单图流量从约 11 KB 涨到约 150 KB
+ * （60 张首屏约 9 MB，之后走浏览器 30 天缓存 + NAS 图片缓存，只付一次）。
+ * 横向只看得到右侧那半幅（封底那半幅不显示）—— 这正是要的效果。
+ *
+ * 退回分支不是摆设：「已入库的番号」栏的行来自 Emby（`emby.library_rows()` 只有 `thumb`），
+ * 演员作品史的卡片走 `variant="film"` 的 `contain` 版式也不吃这条路。后端 `_movie()` 两个字段都给。
+ */
+const cardCover = () => String(props.movie.cover || props.movie.thumb || '')
+
 /** 是不是库模式（「已入库的番号」栏）。 */
 const library = () => props.mode === 'library'
 
@@ -127,8 +146,8 @@ const watchUrl = () => String(props.movie.lib?.url || '')
     @click="emit('select', { number: number(), id: id() })"
     @mouseenter="emit('hover', { number: number(), id: id() })"
   >
-    <div class="avh-card__thumb">
-      <Thumb variant="thumb" :src="movie.thumb" :alt="number()" :plugin-id="pluginId" />
+    <div class="avh-card__thumb" :class="{ 'avh-card__thumb--spread': !!movie.cover }">
+      <Thumb variant="thumb" :src="cardCover()" :alt="number()" :plugin-id="pluginId" />
       <div class="avh-card__badges">
         <span v-if="movie.cnsub" class="avh-badge avh-badge--cn">中字</span>
         <span v-if="movie.uncensored" class="avh-badge avh-badge--uc">破解</span>
@@ -203,13 +222,39 @@ const watchUrl = () => String(props.movie.lib?.url || '')
 }
 
 /*
- * 让内层 `Thumb` 撑满这 3:4 的盒子。
+ * 图源是 javdb 的「封套展开图」时，盒子比例必须是 **377 / 538**（≈0.7007），不是 3:4、也不是 5:7。
+ *
+ * 展开图的真实结构是 **封底 | 书脊 | 封面** 三段（2026-10-13 用"整列竖直边缘"检测 61 张量出来的）：
+ *   封底 [0, 419]　折痕 [419, 422]　封面 [423, 800]　（800 宽那档；840×568 那档同比例：
+ *   折痕 [438, 441]、封面 [442, 840]）
+ * 折痕是图像高度上的一条整竖线、宽度稳定 **4px**（61 张里绝大多数都是 [419,422]），
+ * 印刷上它是书脊与封面的折边——所以它会显示成卡片左边的一条亮/彩色竖条。
+ *
+ * 裁切窗口宽由盒子比例决定（窗口宽 = 图高 × 盒子比例），窗口又贴右，所以窗口左缘 = 800 - 窗口宽：
+ *   - 3:4   → 左缘 397 → 露出 22px 封底（用户第一次反馈）
+ *   - 5:7   → 左缘 416 → 啃进折痕 6px（用户第二次反馈"还是有一点点"）
+ *   - 380/538 → 左缘 420 → 还剩 2px 折痕
+ *   - 377/538 → 左缘 423 → **正好在折痕右侧**，封面完整、左边干净
+ *
+ * 为什么不能只靠"和竖图比对"定这个数：那条 MAE 曲线很平（无偏匹配下 ±5px 只差 4–8），
+ * argmin 落在 416（封面宽 385），但折痕本身有 4px 宽，416 仍在折痕里。
+ * 竖直线检测 + 折痕宽度才是能定到 423 的证据；代价是左侧少显示封面最外缘的 7–8px（约 2%）。
+ *
+ * 只在真有 `cover` 时才收窄：「已入库的番号」栏的行只有 147×200 竖图（比例 0.735，
+ * 比 0.7007 宽），照这个盒子会被横向裁掉左边约 9px，没必要为一个不存在的书脊付这个代价。
+ */
+.avh-card__thumb.avh-card__thumb--spread {
+  aspect-ratio: 377 / 538;
+}
+
+/*
+ * 让内层 `Thumb` 撑满这个盒子（3:4 或 `--spread` 的 5:7）。
  *
  * 老实现的 `.thumb img{width:100%;height:100%;object-fit:cover}` 与
- * `.thumb .noimg{position:absolute;inset:0;...}` 都挂在**同一个** 3:4 容器上；
+ * `.thumb .noimg{position:absolute;inset:0;...}` 都挂在**同一个**封面容器上；
  * 通用件 `Thumb` 自己不带高度（形态由使用方决定），不补这一条就会出现两个偏差：
  *   1. 封面按自身比例渲染（竖图 2:3 比盒子高、横图 3:2 比盒子矮），
- *      `object-fit:cover` 形同虚设 —— 老实现是"永远铺满 3:4 并裁切"；
+ *      `object-fit:cover` 形同虚设 —— 老实现是"永远铺满盒子并裁切"；
  *   2. 缺图时 `.noimg` 是 `inset:0` 的绝对定位盒，父级零高 → 番号占位**看不见**
  *      （老实现会把番号画在封面位置上）。
  */
