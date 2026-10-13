@@ -14,6 +14,7 @@ import {
   sameHost,
   sameRule,
   str,
+  toCacheGbText,
   toCheckInfo,
   toRuleState,
   type BootstrapLike,
@@ -30,8 +31,8 @@ import { DIRTY_GROUPS } from '../components/settings/panels'
  *
  * 插件有两类可变状态，一个「保存修改」按钮要按顺序都提交：
  *   1. 插件自管数据（默认规则、站点范围）→ `await api.post('plugin/rule', {rule})`；
- *   2. 宿主插件配置（`enabled` / `proxy` / `emby_host` / `emby_apikey`）→ `emit('save', cfg)`，
- *      宿主负责 `PUT`。
+ *   2. 宿主插件配置（`enabled` / `proxy` / `emby_host` / `emby_apikey` / `cache_max_gb`）→
+ *      `emit('save', cfg)`，宿主负责 `PUT`。
  * 顺序固定「先 1 后 2」；第 1 步失败 → toast 报错 + **不**提交第 2 步 + 弹窗不关。
  *
  * 这里只管草稿与脏标记，不碰 DOM、不自己画 Toast：宿主能力（toast）由调用方注入。
@@ -52,6 +53,7 @@ export {
   formatBytes,
   formatCheckTime,
   formatMoment,
+  toCacheGbText,
   toCheckInfo,
   toRuleState,
 } from './settingsModel'
@@ -136,6 +138,7 @@ export function useSettingsDraft(options: UseSettingsDraftOptions): UseSettingsD
     data_root: str(options.initialConfig?.data_root),
     emby_host: str(options.initialConfig?.emby_host),
     emby_apikey: str(options.initialConfig?.emby_apikey),
+    cache_max_gb: toCacheGbText(options.initialConfig?.cache_max_gb),
   })
 
   const sites = ref<SiteOption[]>([])
@@ -185,6 +188,7 @@ export function useSettingsDraft(options: UseSettingsDraftOptions): UseSettingsD
       data_root: str(options.initialConfig?.data_root),
       emby_host: str(options.initialConfig?.emby_host),
       emby_apikey: str(options.initialConfig?.emby_apikey),
+      cache_max_gb: toCacheGbText(options.initialConfig?.cache_max_gb),
     }
   }
 
@@ -215,6 +219,7 @@ export function useSettingsDraft(options: UseSettingsDraftOptions): UseSettingsD
       data_root: str(conf.data_root),
       emby_host: str(conf.emby_host),
       emby_apikey: str(conf.emby_apikey),
+      cache_max_gb: toCacheGbText(conf.cache_max_gb),
     }
     hostHydrated = true
     Object.assign(hostConfig, next)
@@ -363,6 +368,10 @@ export function useSettingsDraft(options: UseSettingsDraftOptions): UseSettingsD
         data_root: str(hostConfig.data_root).trim(),
         emby_host: str(hostConfig.emby_host).trim(),
         emby_apikey: str(hostConfig.emby_apikey).trim(),
+        // 空/乱码/0 在**保存时**就归一成兜底值（1G）再提交：后端还会夹一道，
+        // 但存进去的应当是「真正生效的那个数」——否则整份 GET 回来是个空串，
+        // 用户下次打开只看到一个空输入框，根本不知道现在按几 G 淘汰。
+        cache_max_gb: toCacheGbText(str(hostConfig.cache_max_gb).trim()),
       }
       await options.onSaveHost({ ...host })
       Object.assign(hostConfig, host)

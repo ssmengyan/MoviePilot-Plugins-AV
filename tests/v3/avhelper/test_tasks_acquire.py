@@ -328,6 +328,46 @@ class TestResolutionStrategy:
         scoring_mod.score_candidate(four_k, rule(res="only4k"))
         assert four_k["pass"] is True
 
+
+# ---------- 6. 候选带齐「这一行是哪一条」的字段（0.6.3） ----------
+
+
+class TestCollectCarriesRowFacts:
+    """`_collect()` 要把发布页、副标题与发布时间带进候选 —— 任务页的原帖链接与副行全靠它们。
+
+    用户报的是「同一部片在一个站有十几条记录，只有大小/做种能看，没法判断哪条特殊」：
+    种名大多一字不差，真正区分它们的是站点副标题（馒头 `smallDescr`）与发布时间，
+    而「下载」按钮前面还要一个能点进发布页看发布者的「原帖」链接。
+    """
+
+    def _collect_one(self, tasks_mod, store_mod, tmp_path, torrent):
+        engine, _store, _chain = make_engine(tasks_mod, store_mod, tmp_path)
+        cands = []
+        engine._collect(cands, [torrent], [], rule())
+        assert len(cands) == 1
+        return cands[0]
+
+    def test_page_url_and_station_metadata_survive(self, tasks_mod, store_mod, tmp_path):
+        cand_row = self._collect_one(tasks_mod, store_mod, tmp_path, {
+            "title": "SONE-565 エスワン20周年記念 AV業界史に残る最強タッグ作品",
+            "description": "S1美女20周年纪念版 4k x265 简体中文软字幕",
+            "site_name": "馒头", "adapter": "mteam", "page_url": "https://kp.m-team.cc/detail/897325",
+            "enclosure": "http://site/download/1", "size": 8991212125, "seeders": 44,
+            "pubdate": "2025-06-21 20:02:12",
+        })
+        assert cand_row["_page_url"] == "https://kp.m-team.cc/detail/897325"
+        assert cand_row["sub"] == "S1美女20周年纪念版 4k x265 简体中文软字幕"
+        assert cand_row["pubdate"] == "2025-06-21 20:02:12"
+
+    def test_station_without_page_url_keeps_empty(self, tasks_mod, store_mod, tmp_path):
+        """站点没给发布页（旧适配器 / 站点没配域名）时留空：界面据此不画「原帖」。"""
+        cand_row = self._collect_one(tasks_mod, store_mod, tmp_path, {
+            "title": "XXX-001 1080p", "site_name": "站", "enclosure": "http://site/1",
+            "size": 1024, "seeders": 5,
+        })
+        assert cand_row["_page_url"] == ""
+        assert cand_row["sub"] == ""
+
     def test_default_strategy_unchanged(self, scoring_mod):
         """回归：默认「1080P 优先」的打分与老口径一字不差（+30 / 4K 择优 +16）。"""
         hd = {"src": "PT", "site": "站", "res": "1080p", "cnsub": True, "pref": False,

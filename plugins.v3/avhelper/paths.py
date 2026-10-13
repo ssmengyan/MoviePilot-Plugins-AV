@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import platform
 import shutil
@@ -25,7 +26,15 @@ import tempfile
 import urllib.request
 import zipfile
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
+
+# 缓存容量预算（GB）：**默认 1G**（2026-10-14 用户要求，从写死的 60G 改成可配置）。
+# 依据是实测：线上数据根长期占用 180 MB 左右（图片 + JSON 缓存 + SQLite 一起），
+# 60G 的旧上限对 NAS 用户无所谓，对小硬盘用户却是一句「随时可能吃掉 60G」的恐吓。
+# 留 0.1G 下限是硬保护：上限归零会让每晚的淘汰把缓存目录整个清空。
+DEFAULT_CACHE_MAX_GB = 1.0
+CACHE_MAX_GB_MIN = 0.1
+CACHE_MAX_GB_MAX = 4096.0
 
 # 老部署的固定坐标：数据卷挂到容器 `/avhelper`，插件数据与 javdb 二进制共用这个前缀
 LEGACY_ROOT = Path("/avhelper")
@@ -108,6 +117,33 @@ def images_dir() -> Path:
 def bin_dir() -> Path:
     """外部二进制目录（自动下载的 javdb 落在这里）。"""
     return data_root() / "bin"
+
+
+def cache_limit_gb(value: Any = None) -> float:
+    """把「缓存上限（GB）」配置归一成一个安全值（默认 `DEFAULT_CACHE_MAX_GB`）。
+
+    插件配置里这一个键来自用户输入（设置台「运行与缓存」的输入框，或宿主 JSON 表单），
+    所以四种脏数据都要接住：空串 / 缺键 / 非数字 / 负数或 0。
+
+    **0 与负数一律回落默认值，不是「不限制」**：淘汰逻辑拿它当字节上限用，
+    归零等于每晚 4 点把缓存目录整个清空（`is_keep_file()` 只保得住 SQLite）。
+    真要「不限制」就填一个大数，上限被夹在 `CACHE_MAX_GB_MAX`。
+
+    :param value: 配置里的原始值（可能是 `"1"` / `2.5` / `None` / 乱码）
+    :return: 夹在 [`CACHE_MAX_GB_MIN`, `CACHE_MAX_GB_MAX`] 里的 GB 数
+    """
+    try:
+        parsed = float(str(value).strip())
+    except (TypeError, ValueError):
+        return DEFAULT_CACHE_MAX_GB
+    if not math.isfinite(parsed) or parsed <= 0:
+        return DEFAULT_CACHE_MAX_GB
+    return min(max(parsed, CACHE_MAX_GB_MIN), CACHE_MAX_GB_MAX)
+
+
+def cache_limit_bytes(value: Any = None) -> int:
+    """缓存上限的字节数形式（`cache_limit_gb()` 的口径，给淘汰与界面共用）。"""
+    return int(cache_limit_gb(value) * 1024 ** 3)
 
 
 def javdb_bin() -> str:

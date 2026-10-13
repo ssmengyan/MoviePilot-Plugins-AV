@@ -102,6 +102,21 @@ export interface Candidate {
   free?: boolean
   pref?: boolean
   title?: string
+  /**
+   * 副标题（0.6.3 加）：站点发布者自己填的那一行（馒头 `smallDescr` / 肉丝 `subtitle`），
+   * **任务页候选行下面显示的就是它**。同一部片在同一站的多条记录种名往往一字不差
+   * （实测 SONE-565 在馒头 10 条里 6 条同名），副标题才是区分它们的那一行。
+   * BT 兜底与 0.6.3 之前的旧任务没有这个字段，此时界面回落显示 `title`（种子原名）。
+   */
+  sub?: string
+  /** 发布时间（站点原始格式，界面只取到日期）；BT 兜底没有。 */
+  pubdate?: string
+  /**
+   * 发布页地址（PT 站点的种子详情页，如 `https://kp.m-team.cc/detail/897325`）。
+   * 键名带下划线是后端 `tasks._collect()` 的既有存法（任务整份落库，老任务里也有它）；
+   * BT 兜底没有发布页，该字段为空串。
+   */
+  _page_url?: string
   score?: number | string | null
   pass?: boolean
   breakdown?: string

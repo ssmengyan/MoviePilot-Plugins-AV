@@ -25,7 +25,23 @@
  * </div>
  * ```
  * 行样式语义（`app.css`）：`tr.best` = 被规则选中的最佳候选、`tr.dead` = 被淘汰、
- * `tr.bt` = BT 兜底行；每行下面还有一条 `tr.candsub` 显示种子原名（`title`）。
+ * `tr.bt` = BT 兜底行；每行下面还有一条 `tr.candsub`。
+ *
+ * **副标题行（0.6.3 改，用户要求）**：老实现这条副行画的是**种子原名**（`cand.title`），
+ * 而同一部片在同一站的多条记录种名往往一字不差（实测 SONE-565 在馒头 10 条里 6 条同名，
+ * 用户原话「大多数资源都一样」），于是它等于把已经知道的片名又抄了一遍。
+ * 现在改成：
+ * - 主文本 = **站点副标题** `cand.sub`（馒头 `smallDescr` / 肉丝 `subtitle`），
+ *   例如「S1美女20周年纪念版 4k x265 简体中文软字幕 + 演员清单」——真正区分这一条的那行；
+ * - 右侧 = **发布时间**（只到日期，`cand.pubdate`）：老片的重发/新种靠它分先后；
+ * - 副标题缺失时（BT 兜底、0.6.3 之前的旧任务）回落显示种子原名，与老行为一致；
+ * - 种名与副标题都进 `title` 提示（鼠标悬停看全），信息一条不丢。
+ * **不是**「再抄一遍主标题」：主标题由卡片头的番号/片名负责，这一行只放站点侧信息。
+ *
+ * **「原帖」链接（0.6.3 加，用户要求）**：每行「下载」按钮前多一个 `原帖` 链接，
+ * 打开该条种子在 PT 站点的发布页（发布者、简介、截图、做种明细都在那边）。
+ * 只认 `http(s)` 绝对地址：馒头站点的 `page_url` 由「站点 url + /detail/{id}」拼成，
+ * 站点没配 url 时会拼出 `/detail/123` 这种相对地址 —— 那种不画链接（点了只会落到 MP 的 404）。
  *
  * 与老实现的两处**有意为之**的排版差异（老实现的 9 列在真实数据下横向过宽，
  * 被卡片 `.avh-cand{overflow:hidden}` 裁掉右侧，「下载」按钮整个看不见）：
@@ -146,18 +162,57 @@ function marks(cand: Candidate): Array<{ text: string; cls: string }> {
   return out
 }
 
-/** 行 class：`best`/`dead`/`bt` + 有原名时加 `has-sub`（老实现 `rowOf` 的同一套拼法）。 */
+/** 行 class：`best`/`dead`/`bt` + 有副行时加 `has-sub`（老实现按 `title`，现在按副行的实际内容）。 */
 function rowClass(cand: Candidate): string[] {
   return [
     cand.picked ? 'best' : '',
     isPass(cand) ? '' : 'dead',
     cand.src === 'BT' ? 'bt' : '',
-    titleOf(cand) ? 'has-sub' : '',
+    subText(cand) ? 'has-sub' : '',
   ].filter(Boolean)
 }
 
 function titleOf(cand: Candidate): string {
   return String(cand.title || '').trim()
+}
+
+/**
+ * 副行主文本：**站点副标题**优先，没有才回落种子原名（0.6.3 起；老实现只有后者）。
+ * 两者都没有时返回空串，模板据此不画这一行（与老实现「`title` 缺了就不画」同一口径）。
+ */
+function subText(cand: Candidate): string {
+  return String(cand.sub || '').trim() || titleOf(cand)
+}
+
+/**
+ * 发布时间只取日期：站点给的是 `2025-06-21 20:02:12`（馒头）/ `2025-06-21T20:02:12`（肉丝），
+ * 时间部分对「这条是哪一版、比另一条新还是旧」没有帮助，挤在行尾只是噪音。
+ */
+function dateText(cand: Candidate): string {
+  const match = /(\d{4}-\d{2}-\d{2})/.exec(String(cand.pubdate || ''))
+  return match ? match[1] : ''
+}
+
+/**
+ * 副行的悬停提示：副标题 + 种子原名 + 发布时间，逐行换行。
+ * 副行本身是单行省略号（`table-layout: fixed` 下只能这样），全量信息靠这里兜住。
+ */
+function metaTip(cand: Candidate): string {
+  const parts = [subText(cand)]
+  const title = titleOf(cand)
+  if (title && title !== subText(cand)) parts.push(title)
+  const date = dateText(cand)
+  if (date) parts.push(date)
+  return parts.filter(Boolean).join('\n')
+}
+
+/**
+ * 「原帖」地址：只认 http(s) 绝对地址，其余（空串、`/detail/123` 这类相对地址）返回空串。
+ * BT 兜底候选没有发布页，自然也不画。
+ */
+function postUrl(cand: Candidate): string {
+  const url = String(cand._page_url || '').trim()
+  return /^https?:\/\//i.test(url) ? url : ''
 }
 
 /** 做种数：BT 兜底行显示「未知」，PT 行 null/undefined 显示 `—`（老实现逐字）。 */
@@ -429,6 +484,16 @@ const poster = computed(() => {
                 >{{ scoreText(row.cand) }}</span>
               </td>
               <td class="avh-cand__act">
+                <!-- 「原帖」：打开发布页看发布者/简介/截图（0.6.3 加，用户要求）。
+                     没有绝对地址（BT 兜底、站点没配域名）就不画，别给一个点了 404 的链接。 -->
+                <a
+                  v-if="postUrl(row.cand)"
+                  class="avh-cand__post"
+                  :href="postUrl(row.cand)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="打开发布页：发布者、简介、截图等"
+                >原帖</a>
                 <v-btn
                   v-if="isPass(row.cand)"
                   class="avh-cand__dl"
@@ -448,9 +513,14 @@ const poster = computed(() => {
                 >仍要下载</v-btn>
               </td>
             </tr>
-            <tr v-if="titleOf(row.cand)" :class="['avh-cand__sub', ...rowClass(row.cand)]">
+            <tr v-if="subText(row.cand)" :class="['avh-cand__sub', ...rowClass(row.cand)]">
               <td colspan="7">
-                <div class="avh-cand__ttl" :title="titleOf(row.cand)">{{ titleOf(row.cand) }}</div>
+                <div class="avh-cand__meta">
+                  <span class="avh-cand__ttl" :title="metaTip(row.cand)">{{ subText(row.cand) }}</span>
+                  <span v-if="dateText(row.cand)" class="avh-cand__date">{{
+                    dateText(row.cand)
+                  }}</span>
+                </div>
               </td>
             </tr>
           </template>
@@ -556,7 +626,7 @@ const poster = computed(() => {
 }
 
 .avh-cand__col-act {
-  width: 92px;
+  width: 156px;
 }
 
 /* 单元格截断：fixed 布局下不给省略号就会溢到邻列 */
@@ -622,16 +692,47 @@ const poster = computed(() => {
 }
 
 .avh-cand__sub td {
-  /* 种子原名整行横跨 7 列：左右内边距与数据单元格统一取 8px（本次从 10px 收紧） */
+  /* 种子原名/副标题整行横跨 7 列：左右内边距与数据单元格统一取 8px（本次从 10px 收紧） */
   padding: 0 8px 9px;
 }
 
+/* 副行布局（0.6.3 起是「副标题 + 发布时间」两段，不再是单独一行种子原名）：
+   副标题吃满剩余宽度、单行省略号；日期固定宽度贴右，不跟着省略号一起被截掉。 */
+.avh-cand__meta {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
 .avh-cand__ttl {
+  flex: 1 1 auto;
+  /* `min-width: 0` 不能省：flex 子项默认 `min-width: auto`，长串会把日期挤出容器 */
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 11.5px;
   color: rgba(var(--v-theme-on-surface), 0.5);
+}
+
+.avh-cand__date {
+  flex: none;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(var(--v-theme-on-surface), 0.38);
+}
+
+/* 「原帖」：文字链接，比按钮弱一档（它只是去看一眼，不是动作） */
+.avh-cand__post {
+  margin-right: 10px;
+  font-size: 12px;
+  color: rgb(var(--v-theme-primary));
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.avh-cand__post:hover {
+  text-decoration: underline;
 }
 
 .avh-cand__btnote {

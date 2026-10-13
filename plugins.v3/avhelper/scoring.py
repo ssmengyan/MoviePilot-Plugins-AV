@@ -126,6 +126,13 @@ def candidate_from_torrent(torrent: Any, pref_sites: Optional[List[str]] = None)
         "pref": bool(pref_sites) and site in (pref_sites or []),
         "group": detect_group(title),
         "title": title,
+        # 副标题（0.6.3 加）：馒头 `smallDescr` / 肉丝 `subtitle` / MP 索引器的 `description`
+        # 都是站点发布者自己填的那一行。**任务页候选行下面显示的就是它**（原来是种子原名）：
+        # 同一部片在同一站的多条记录，种名往往一字不差（实测 SONE-565 在馒头 10 条里 6 条同名），
+        # 真正区分它们的是副标题（「S1美女20周年纪念版 4k x265 简体中文软字幕 + 演员清单」）。
+        "sub": str(description or "").strip(),
+        # 发布时间（原始格式，界面只截到日期）：老片的重发/新种靠它区分先后
+        "pubdate": str(_get(torrent, "pubdate")).strip(),
         "score": 0,
         "pass": True,
         "breakdown": "",
@@ -169,6 +176,10 @@ def candidate_from_magnet(magnet: Dict[str, Any], pref_sites: Optional[List[str]
         "pref": False,
         "group": "BT 匿名发布",
         "title": title,
+        # BT 兜底没有「发布页」，也没有站点填的副标题/发布时间：两个字段留空，
+        # 界面据此不画原帖链接与副标题行（不要编造）
+        "sub": "",
+        "pubdate": "",
         "hash": str(magnet.get("hash") or ""),
         "score": 0,
         "pass": True,

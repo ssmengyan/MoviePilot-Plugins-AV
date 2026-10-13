@@ -330,6 +330,7 @@ const {
   sitesLoaded,
   notices,
   cacheText,
+  cacheBytes,
   checkInfo,
   dirty,
   enabledKnown,
@@ -567,7 +568,8 @@ function closeSettings(): void {
 }
 
 /**
- * 保存宿主配置（`enabled` / `proxy` / `javdb_bin` / `data_root` / `emby_host` / `emby_apikey`）：按入口分两条路。
+ * 保存宿主配置（`enabled` / `proxy` / `javdb_bin` / `data_root` / `emby_host` / `emby_apikey`
+ * / `cache_max_gb`）：按入口分两条路。
  *
  * - **配置弹窗侧**（`mode === 'settings'`，用户从插件卡片的「设置」菜单进来）：
  *   交给宿主 —— 宿主的 `PluginConfigDialog` 接了 `save`，它自己 `PUT plugin/<id>`，
@@ -579,7 +581,7 @@ function closeSettings(): void {
  *   而我们这里写的就是实例 id，普通安装与分身都对得上（详见 `api/pluginInstance.ts`）。
  *
  * **前置条件**：必须已经读到过宿主配置（`hostLoaded`）。`PUT plugin/<id>` 是整份覆盖，
- * 草稿里那六个字段就是配置的全部内容；基准没读到就提交等于把配置清空 —— 直接抛错，
+ * 草稿里那七个字段就是配置的全部内容；基准没读到就提交等于把配置清空 —— 直接抛错，
  * 让草稿层的 catch 提示「保存失败」，脏标记留着，用户重开设置窗口再试。
  */
 async function saveHostConfig(config: PluginConfig): Promise<void> {
@@ -993,10 +995,13 @@ onBeforeUnmount(() => {
 
             <RuntimePanel
               v-else-if="settingsSection === 'runtime'"
+              :config="hostConfig"
               :cache-text="cacheText"
+              :cache-bytes="cacheBytes"
               :check="checkInfo"
               :cleaning="cacheCleaning"
               :loading="runtimeLoading"
+              @patch="(patch: any) => Object.assign(hostConfig, patch)"
               @clean="cleanCache"
               @refresh="refreshRuntime(true)"
             />

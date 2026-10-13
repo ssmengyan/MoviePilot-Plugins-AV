@@ -100,6 +100,35 @@ class TestCandidateConversion:
         assert cand["src"] == "BT"
         assert cand["hash"] == "a" * 40
 
+    def test_torrent_carries_subtitle_and_pubdate(self):
+        """副标题与发布时间要进候选（0.6.3）：任务页靠它们区分同名的多条记录。
+
+        实测 `SONE-565` 在馒头成人区有 10 条，其中 6 条种名一字不差；
+        站点副标题（馒头 `smallDescr` → `description`）才是「这一条特殊在哪」。
+        """
+        torrent = SimpleNamespace(
+            title="SONE-565 エスワン20周年記念 AV業界史に残る最強タッグ作品",
+            description="  S1美女20周年纪念版 4k x265 简体中文软字幕  ",
+            site_name="馒头", seeders=44, size=8991212125, downloadvolumefactor=1.0,
+            pubdate="2025-06-21 20:02:12",
+        )
+        cand = scoring.candidate_from_torrent(torrent, [])
+        assert cand["sub"] == "S1美女20周年纪念版 4k x265 简体中文软字幕"
+        assert cand["pubdate"] == "2025-06-21 20:02:12"
+
+    def test_torrent_without_station_metadata_keeps_fields_empty(self):
+        """站点没给副标题/发布时间时留空（界面据此回落显示种子原名，不编造）。"""
+        torrent = SimpleNamespace(title=REAL_1080P, site_name="观众", seeders=31, size=0)
+        cand = scoring.candidate_from_torrent(torrent, [])
+        assert cand["sub"] == ""
+        assert cand["pubdate"] == ""
+
+    def test_magnet_has_no_subtitle_and_no_page(self):
+        """BT 兜底没有发布页、也没有站点填的副标题：字段留空，别从种名里编一个。"""
+        cand = scoring.candidate_from_magnet({"hash": "b" * 40, "name": "IPZZ-961-C", "size": 7895})
+        assert cand["sub"] == ""
+        assert cand["pubdate"] == ""
+
 
 class TestPublisherLabel:
     """「发布源」文案：站点与发布组不能重复（旧版会拼出「馒头 / 馒头 发布 发布」）。"""

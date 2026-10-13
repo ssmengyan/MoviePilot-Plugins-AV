@@ -58,6 +58,12 @@ export interface HostConfigDraft {
   data_root: string
   emby_host: string
   emby_apikey: string
+  /**
+   * 缓存上限（GB，0.6.3 加）。**草稿里存字符串**：它是输入框的直接形态
+   * （用户会把整格删空、会打到「1.」这种中间态），转成数字再回填会让光标乱跳；
+   * 归一与夹取由 `toCacheGbText()` 负责，后端 `paths.cache_limit_gb()` 还会再夹一道。
+   */
+  cache_max_gb: string
 }
 
 /** `/bootstrap` 里用得到的字段（`cacheSize*` 与 `check` 是后端正在补的，取不到就 `—`）。 */
@@ -111,6 +117,31 @@ export const RULE_FALLBACK: RuleState = {
 
 export function str(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : value === null || value === undefined ? fallback : String(value)
+}
+
+/**
+ * 缓存上限（GB）的取值口径**必须与后端 `paths.cache_limit_gb()` 一模一样**，
+ * 否则界面显示 1G、后端实际按别的数淘汰（0.6.3 加）：
+ * 默认 1G；空/非数字/≤0 一律回落 1G（**不是「不限制」**：后端拿它当字节上限，
+ * 归零会把缓存目录清空）；上下夹到 [0.1, 4096]。
+ */
+export const CACHE_MAX_GB_FALLBACK = 1
+export const CACHE_MAX_GB_MIN = 0.1
+export const CACHE_MAX_GB_MAX = 4096
+
+/** 归一成输入框里的文本（`1` / `2.5`；非法值给出兜底 1）。 */
+export function toCacheGbText(value: unknown): string {
+  if (typeof value === 'string' && !value.trim()) return String(CACHE_MAX_GB_FALLBACK)
+  const parsed = typeof value === 'number' ? value : Number.parseFloat(str(value))
+  if (!Number.isFinite(parsed) || parsed <= 0) return String(CACHE_MAX_GB_FALLBACK)
+  const clamped = Math.min(Math.max(parsed, CACHE_MAX_GB_MIN), CACHE_MAX_GB_MAX)
+  // 去掉浮点尾巴（0.30000000000000004 这种），最多留三位小数
+  return String(Number(clamped.toFixed(3)))
+}
+
+/** 归一后的数值形态（界面算「已用 / 上限」占比时用）。 */
+export function toCacheGb(value: unknown): number {
+  return Number.parseFloat(toCacheGbText(value))
 }
 
 function strList(value: unknown): string[] {
@@ -269,7 +300,8 @@ export function sameHost(a: HostConfigDraft | null, b: HostConfigDraft | null): 
     a.javdb_bin === b.javdb_bin &&
     a.data_root === b.data_root &&
     a.emby_host === b.emby_host &&
-    a.emby_apikey === b.emby_apikey
+    a.emby_apikey === b.emby_apikey &&
+    a.cache_max_gb === b.cache_max_gb
   )
 }
 

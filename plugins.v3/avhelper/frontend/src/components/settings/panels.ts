@@ -23,7 +23,8 @@ export const SETTINGS_SECTIONS: SectionItem[] = [
 
 /**
  * 各栏目「算不算脏」看的是自己那部分草稿，避免在某栏改了东西、
- * 切到别的栏看不到未保存标记。通知/运行缓存/关于三栏没有草稿字段。
+ * 切到别的栏看不到未保存标记。通知/关于两栏没有草稿字段。
+ * （「运行与缓存」0.6.3 起有宿主配置字段 `cache_max_gb`，所以归 host 组。）
  */
 export const DIRTY_GROUPS: Record<string, 'none' | 'rule' | 'host' | 'both'> = {
   general: 'host',
@@ -31,6 +32,6 @@ export const DIRTY_GROUPS: Record<string, 'none' | 'rule' | 'host' | 'both'> = {
   rule: 'rule',
   notify: 'none',
   library: 'host',
-  runtime: 'none',
+  runtime: 'host',
   about: 'none',
 }

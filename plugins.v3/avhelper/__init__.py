@@ -72,7 +72,8 @@ ACTOR_PAGE = 30            # 演员作品史每页条数（界面按需续拉，
 ACTOR_PAGE_MAX = 50        # 站点单页硬上限：请求更大也只回 50 条（实测）
 TTL_LONG = 7 * 86400       # 长图 URL 7 天
 FAIL_TTL = 120             # 抓取失败后的负缓存：这段时间内不再重试（避免每次打开都重付等待）
-CACHE_MAX_GB = 60          # 缓存总量上限（超出按最旧淘汰）
+# 缓存总量上限**不再是常量**（0.6.3 起）：配置键 `cache_max_gb`，默认 1G、可设范围见
+# `paths.cache_limit_gb()`（0.1G 下限是硬保护，归零会把缓存目录清空）。
 CACHE_SIZE_TTL = 60        # 缓存体积的内存缓存时长（秒）：前端 15 秒轮询一次，不能每次 rglob 整个目录
 ONCE_JOB_ID = "subcheck_now"
 # 启动预热（§8.2）：MP/插件启动时先把「发现榜单」首屏要用的数据与封面落进缓存，
@@ -154,8 +155,8 @@ class AVHelper(_PluginBase):
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
     plugin_icon = ("https://raw.githubusercontent.com/ssmengyan/"
                    "MoviePilot-Plugins-AV/main/icons/avhelper.png")
-    # 版本：0.6.1 = 演员自定义备注（`actor_alias` 表，与收藏解耦）+ 修详情抽屉滚动残留 / 长图加载期空白
-    plugin_version = "0.6.2"
+    # 版本：0.6.3 = 任务页候选行显示副标题/发布时间 + 「原帖」链接；缓存上限改配置项（默认 1G）
+    plugin_version = "0.6.3"
     plugin_label = "发现"
     plugin_author = "ssmengyan"
     plugin_config_prefix = "avhelper_"
@@ -166,6 +167,8 @@ class AVHelper(_PluginBase):
     _proxy = DEFAULT_PROXY
     _javdb_bin = ""          # 手动指定的 javdb 二进制路径；留空按 paths 的默认顺序解析
     _data_root = ""          # 手动指定的数据根；留空按 paths 的默认顺序解析
+    # 缓存总量上限（GB，超出按最旧淘汰）：配置键 `cache_max_gb`，默认 1G，见 paths.cache_limit_gb()
+    _cache_max_gb = paths.DEFAULT_CACHE_MAX_GB
     _client: Optional[JavdbClient] = None
     _store: Optional[Store] = None
     _limiter: Optional[RateLimiter] = None
@@ -190,6 +193,9 @@ class AVHelper(_PluginBase):
         self._emby_host = ""
         self._emby_apikey = ""
         self._data_root = ""
+        # 缓存上限每次都从默认值重来：老配置里没有这个键（0.6.3 之前存的），
+        # 上面那次 `if config` 又不会执行赋值，必须在这里显式回落，否则会留着上一轮的值
+        self._cache_max_gb = paths.DEFAULT_CACHE_MAX_GB
         if config:
             self._enabled = bool(config.get("enabled"))
             self._proxy = str(config.get("proxy") or "")
@@ -197,6 +203,7 @@ class AVHelper(_PluginBase):
             self._data_root = str(config.get("data_root") or "").strip()
             self._emby_host = str(config.get("emby_host") or "").strip()
             self._emby_apikey = str(config.get("emby_apikey") or "").strip()
+            self._cache_max_gb = paths.cache_limit_gb(config.get("cache_max_gb"))
         # 路径必须在建 Store 之前定型：SQLite 文件、JSON 缓存、图片缓存都按数据根落盘
         paths.configure(data_root=self._data_root, javdb_bin=self._javdb_bin,
                         fallback_root=self.get_data_path())
@@ -332,7 +339,7 @@ class AVHelper(_PluginBase):
     # ---------- 配置与页面 ----------
 
     def get_form(self) -> Tuple[Optional[List[dict]], Dict[str, Any]]:
-        """配置页：启用开关、javdb 代理、javdb 二进制路径、数据根与 Emby 覆盖项。"""
+        """配置页：启用开关、javdb 代理、javdb 二进制路径、数据根、缓存上限与 Emby 覆盖项。"""
         form = [
             {
                 "component": "VForm",
@@ -375,6 +382,24 @@ class AVHelper(_PluginBase):
                                                     "placeholder": "留空则用 MoviePilot 已配置的媒体服务器"}}]},
                         ],
                     },
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {"component": "VCol", "props": {"cols": 12, "md": 6},
+                             "content": [{"component": "VTextField",
+                                          "props": {"model": "cache_max_gb",
+                                                    "label": "缓存上限 GB（默认 1）",
+                                                    "placeholder": "留空 = 1G；实测长期占用 < 0.3G",
+                                                    "type": "number"}}]},
+                            {"component": "VCol", "props": {"cols": 12, "md": 6},
+                             "content": [{"component": "VAlert",
+                                          "props": {"type": "info", "variant": "tonal",
+                                                    "density": "compact", "class": "mt-1"},
+                                          "text": "图片与番号元数据的缓存总量上限：超过就按最旧淘汰"
+                                                  "（每天 4 点跑一次，也可随时在设置台点「清理缓存」）。"
+                                                  "默认 1G 够用；填 0.1 以下会按 0.1 处理。"}]},
+                        ],
+                    },
                     {"component": "VAlert",
                      "props": {"type": "info", "variant": "tonal", "class": "mt-2"},
                      "text": "完整界面在插件详情页内（内嵌应用）：榜单、演员、订阅、任务、通知与站点检索都在里面。"},
@@ -391,7 +416,8 @@ class AVHelper(_PluginBase):
         ]
         return form, {"enabled": self._enabled, "proxy": self._proxy,
                       "javdb_bin": self._javdb_bin, "data_root": self._data_root,
-                      "emby_host": self._emby_host, "emby_apikey": self._emby_apikey}
+                      "emby_host": self._emby_host, "emby_apikey": self._emby_apikey,
+                      "cache_max_gb": self._cache_max_gb}
 
     def get_page(self) -> Optional[List[dict]]:
         """详情页：内嵌自带应用界面（宿主 JSON 页面无法承载交互式界面）。"""
@@ -1320,6 +1346,10 @@ class AVHelper(_PluginBase):
             # 运行概况（设置台「运行与缓存」/ 右栏）：体积带 60 秒内存缓存，检查状态是只读快照
             "cacheSize": size,
             "cacheSizeText": size_text(size),
+            # 缓存上限（0.6.3 加）：设置台的占比与「已用 / 上限」都读这两个字段；
+            # 真正生效的值在 `self._cache_max_gb`（配置里存的是原始输入，这里给的是夹过的）
+            "cacheLimit": paths.cache_limit_bytes(self._cache_max_gb),
+            "cacheLimitText": f"{self._cache_max_gb:g} GB",
             "check": self.check_state(rule),
         }
 
@@ -1788,7 +1818,8 @@ class AVHelper(_PluginBase):
                         pass
 
         # 3. 容量上限：按 mtime 由旧到新淘汰（同样不碰数据库文件）
-        limit = CACHE_MAX_GB * 1024 ** 3
+        #    上限来自配置 `cache_max_gb`（默认 1G），不再写死 60G —— 见 paths.cache_limit_gb()
+        limit = int(self._cache_max_gb * 1024 ** 3)
         files = [p for p in paths.data_root().rglob("*") if p.is_file() and not is_keep_file(p)]
         total = sum(p.stat().st_size for p in files)
         if total > limit:

@@ -168,3 +168,36 @@ class TestEnsureJavdb:
         ok, detail = paths_mod.ensure_javdb()
         assert ok is False
         assert "javdb" in detail and "network down" in detail
+
+
+class TestCacheLimit:
+    """缓存上限（GB）归一（0.6.3）：默认 1G，脏数据回落默认值，上下夹取。
+
+    这一条是**用户点名的默认值**：老版本写死 60G，对小硬盘用户过于吓人；
+    实测数据根长期占用不到 0.3G，所以默认 1G。归零**不等于**「不限制」：
+    淘汰逻辑拿它当字节上限，0 会让每晚 4 点的清理把缓存目录整个清空。
+    """
+
+    def test_default_is_one_gigabyte(self, paths_mod):
+        assert paths_mod.DEFAULT_CACHE_MAX_GB == 1.0
+        assert paths_mod.cache_limit_gb(None) == 1.0
+        assert paths_mod.cache_limit_gb("") == 1.0
+        assert paths_mod.cache_limit_gb("   ") == 1.0
+        assert paths_mod.cache_limit_gb("abc") == 1.0
+
+    def test_zero_and_negative_fall_back_instead_of_unlimited(self, paths_mod):
+        assert paths_mod.cache_limit_gb(0) == 1.0
+        assert paths_mod.cache_limit_gb("0") == 1.0
+        assert paths_mod.cache_limit_gb(-5) == 1.0
+        assert paths_mod.cache_limit_gb(float("nan")) == 1.0
+        assert paths_mod.cache_limit_gb(float("inf")) == 1.0
+
+    def test_parses_and_clamps(self, paths_mod):
+        assert paths_mod.cache_limit_gb("2.5") == 2.5
+        assert paths_mod.cache_limit_gb(3) == 3.0
+        assert paths_mod.cache_limit_gb(0.01) == paths_mod.CACHE_MAX_GB_MIN
+        assert paths_mod.cache_limit_gb(999999) == paths_mod.CACHE_MAX_GB_MAX
+
+    def test_bytes_form(self, paths_mod):
+        assert paths_mod.cache_limit_bytes("2") == 2 * 1024 ** 3
+        assert paths_mod.cache_limit_bytes("") == 1024 ** 3

@@ -28,6 +28,8 @@ export interface PluginConfig {
   data_root?: string
   emby_host?: string
   emby_apikey?: string
+  /** 缓存上限（GB，0.6.3 加）：可能是数字（宿主 JSON 表单填的）也可能是字符串（本插件设置台填的）。 */
+  cache_max_gb?: string | number
   [key: string]: unknown
 }
 
