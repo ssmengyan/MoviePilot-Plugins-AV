@@ -154,8 +154,8 @@ class AVHelper(_PluginBase):
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
     plugin_icon = ("https://raw.githubusercontent.com/ssmengyan/"
                    "MoviePilot-Plugins-AV/main/icons/avhelper.png")
-    # 版本：0.5.1 是 0.5.0 的补丁（在下载器里取消下载后队列那条假记录不消失）
-    plugin_version = "0.5.1"
+    # 版本：0.6.0 = 手动「下载该影片」按规则当场下单（或转待确认）+ 待确认卡片标记与订阅该影片
+    plugin_version = "0.6.0"
     plugin_label = "发现"
     plugin_author = "ssmengyan"
     plugin_config_prefix = "avhelper_"
@@ -465,6 +465,10 @@ class AVHelper(_PluginBase):
              "summary": "任务与下载队列"},
             {"path": "/tasks/search", "endpoint": self.api_task_search, "methods": ["POST"],
              "auth": "bear", "summary": "搜种并打分"},
+            {"path": "/tasks/acquire", "endpoint": self.api_task_acquire, "methods": ["POST"],
+             "auth": "bear", "summary": "下载该影片(按规则自动下载或转待确认)",
+             "description": "详情页按钮用：搜种后按全局规则的 trigger 决定直接下单还是落一条待确认任务；"
+                            "与 /tasks/search 的检索语义分开，站点搜索页不受影响"},
             {"path": "/tasks/download", "endpoint": self.api_task_download, "methods": ["POST"],
              "auth": "bear", "summary": "提交下载"},
             {"path": "/tasks/cancel", "endpoint": self.api_task_cancel, "methods": ["POST"],
@@ -1570,6 +1574,33 @@ class AVHelper(_PluginBase):
                                        thumb, only_sites)
         return {"success": True, "task": task,
                 "message": f"搜到 {len(task.get('cands') or [])} 个候选"}
+
+    async def api_task_acquire(self, request: Request) -> Dict[str, Any]:
+        """「下载该影片」：搜种后**按规则当场决定**是直接下载还是落一条待确认任务。
+
+        与 `/tasks/search` 的分工（别把两者合并）：
+        - `/tasks/search` 是**检索**（站点搜索页用），只搜不下种，行为一字不改；
+        - 本端点是**把这部片拿到手**（详情抽屉那颗按钮），走全局规则的 `trigger`。
+
+        返回里的 `toasts` 是后端定好的提示语（级别 + 文案），前端按序弹即可；
+        `pt` / `bt` / `pending` 见 `tasks.rule_verdict()`。
+        """
+        payload = await self._json_body(request)
+        number = str(payload.get("number") or payload.get("keyword") or "").strip()
+        if not number:
+            return {"success": False, "message": "缺少番号"}
+        rule = merge_rule({**self.global_rule(), **(payload.get("rule") or {})})
+        result = await asyncio.to_thread(
+            self.engine.acquire, number, str(payload.get("actor") or ""), rule,
+            str(payload.get("thumb") or ""), str(request.base_url).rstrip("/"),
+        )
+        message = str(result.get("message") or "")
+        if result.get("outcome") == "downloaded":
+            message += self._duplicate_note((result.get("task") or {}).get("number"))
+        # `**result` 放最前：它自己带一个 `message`（不含"已下载过"提示），
+        # 写成 `..., **result` 会被它覆盖掉。
+        return {**result, "success": True, "message": message,
+                "queue": self.engine.queue(fresh=True)}
 
     async def api_task_download(self, request: Request) -> Dict[str, Any]:
         """提交下载：优先站点命中项或用户指定站点。

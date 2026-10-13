@@ -5,7 +5,7 @@ const {defineComponent:_defineComponent$q} = await importShared('vue');
 const {openBlock:_openBlock$q,createElementBlock:_createElementBlock$p} = await importShared('vue');
 
 const _hoisted_1$p = ["src"];
-const {computed: computed$k} = await importShared('vue');
+const {computed: computed$l} = await importShared('vue');
 
 const _sfc_main$q = /* @__PURE__ */ _defineComponent$q({
   __name: "AppFrame",
@@ -16,7 +16,7 @@ const _sfc_main$q = /* @__PURE__ */ _defineComponent$q({
   },
   setup(__props) {
     const props = __props;
-    const src = computed$k(() => {
+    const src = computed$l(() => {
       const params = new URLSearchParams();
       if (props.version) params.set("v", props.version);
       if (props.sectionKey) params.set("view", props.sectionKey);
@@ -80,6 +80,19 @@ function hostToast(toast) {
     error: typeof toast?.error === "function" ? toast.error.bind(toast) : noop
   };
 }
+function playToasts(toast, toasts) {
+  if (!Array.isArray(toasts)) return;
+  for (const item of toasts) {
+    const record = item || {};
+    const text = String(record.text ?? "").trim();
+    if (!text) continue;
+    const level = String(record.level ?? "info");
+    if (level === "success") toast.success(text);
+    else if (level === "warning") toast.warning(text);
+    else if (level === "error") toast.error(text);
+    else toast.info(text);
+  }
+}
 function bindPluginApi(api, pluginId) {
   const id = String(pluginId || "").trim();
   if (!id) return api;
@@ -113,6 +126,7 @@ function bindPluginApi(api, pluginId) {
 }
 
 const POLICY_MIN_INTERVAL_MIN = 240;
+const POLICY_MAX_PER_DAY = 6;
 
 const RULE_FALLBACK$1 = {
   res: "1080p",
@@ -159,9 +173,13 @@ function toRuleState(raw) {
     prefSites: strList(src.prefSites),
     btFallback: bool(src.btFallback, RULE_FALLBACK$1.btFallback),
     trigger: str(src.trigger) === "auto" ? "auto" : "notify",
-    maxPerDay: num(src.maxPerDay, RULE_FALLBACK$1.maxPerDay, true, 1),
-    // 限流参数不由界面放宽：拿不到就把政策固定值原样带回去。
-    minIntervalMin: num(src.minIntervalMin, RULE_FALLBACK$1.minIntervalMin, true, 1),
+    // 限流参数不由界面放宽：每日上限封顶政策值 6（后端 `merge_rule()` 还会再夹一道），
+    // 间隔拿不到就把政策固定值原样带回去。
+    maxPerDay: Math.min(num(src.maxPerDay, RULE_FALLBACK$1.maxPerDay, true, 1), POLICY_MAX_PER_DAY),
+    minIntervalMin: Math.max(
+      num(src.minIntervalMin, RULE_FALLBACK$1.minIntervalMin, true, 1),
+      POLICY_MIN_INTERVAL_MIN
+    ),
     savePath: str(src.savePath, RULE_FALLBACK$1.savePath),
     category: str(src.category, RULE_FALLBACK$1.category),
     downloader: str(src.downloader, RULE_FALLBACK$1.downloader)
@@ -245,7 +263,7 @@ function embyHalfFilled(config) {
   return "";
 }
 
-const {computed: computed$j,ref: ref$m} = await importShared('vue');
+const {computed: computed$k,ref: ref$m} = await importShared('vue');
 const POLL_INTERVAL_MS = 15e3;
 function len(value) {
   return Array.isArray(value) ? value.length : null;
@@ -256,7 +274,7 @@ function useRuntimeInfo(api) {
   const loading = ref$m(false);
   const updatedAt = ref$m("");
   let timer = null;
-  const overview = computed$j(() => {
+  const overview = computed$k(() => {
     const d = data.value;
     const queue = Array.isArray(d?.queue) ? d?.queue : null;
     const tasks = Array.isArray(d?.tasks) ? d?.tasks : null;
@@ -276,7 +294,7 @@ function useRuntimeInfo(api) {
       check
     };
   });
-  const recovery = computed$j(() => ({
+  const recovery = computed$k(() => ({
     subs: Array.isArray(data.value?.subs) ? data.value?.subs ?? [] : [],
     tasks: Array.isArray(data.value?.tasks) ? data.value?.tasks ?? [] : [],
     queue: Array.isArray(data.value?.queue) ? data.value?.queue ?? [] : []
@@ -341,7 +359,7 @@ const DIRTY_GROUPS = {
   about: "none"
 };
 
-const {computed: computed$i,reactive: reactive$3,ref: ref$l,shallowRef: shallowRef$1} = await importShared('vue');
+const {computed: computed$j,reactive: reactive$3,ref: ref$l,shallowRef: shallowRef$1} = await importShared('vue');
 function useSettingsDraft(options) {
   const t = hostToast(options.toast);
   const rulePlain = ref$l(null);
@@ -474,14 +492,14 @@ function useSettingsDraft(options) {
     }
     await loadNotices();
   }
-  const ruleDirty = computed$i(() => !sameRule(rule.value, ruleBase.value));
-  const hostDirty = computed$i(() => !sameHost(hostConfig, hostBase.value));
-  const dirty = computed$i(() => ruleDirty.value || hostDirty.value);
-  const saveButtonLabel = computed$i(() => dirty.value ? "保存修改 ● 未保存" : "保存修改");
-  const enabledKnown = computed$i(
+  const ruleDirty = computed$j(() => !sameRule(rule.value, ruleBase.value));
+  const hostDirty = computed$j(() => !sameHost(hostConfig, hostBase.value));
+  const dirty = computed$j(() => ruleDirty.value || hostDirty.value);
+  const saveButtonLabel = computed$j(() => dirty.value ? "保存修改 ● 未保存" : "保存修改");
+  const enabledKnown = computed$j(
     () => hostLoaded.value || typeof options.initialConfig?.enabled === "boolean" || bootstrapEnabled.value !== null
   );
-  const validation = computed$i(() => embyHalfFilled(hostConfig));
+  const validation = computed$j(() => embyHalfFilled(hostConfig));
   function sectionDirty(key) {
     const group = DIRTY_GROUPS[key] || "none";
     if (group === "rule") return ruleDirty.value;
@@ -743,7 +761,7 @@ const {defineComponent:_defineComponent$o} = await importShared('vue');
 const {resolveComponent:_resolveComponent$k,createVNode:_createVNode$k,createTextVNode:_createTextVNode$j,withCtx:_withCtx$k,createElementVNode:_createElementVNode$m,toDisplayString:_toDisplayString$o,openBlock:_openBlock$o,createBlock:_createBlock$j,createCommentVNode:_createCommentVNode$i,renderList:_renderList$e,Fragment:_Fragment$g,createElementBlock:_createElementBlock$n} = await importShared('vue');
 
 const _hoisted_1$n = { class: "avh-row" };
-const _hoisted_2$l = { class: "avh-row-main" };
+const _hoisted_2$m = { class: "avh-row-main" };
 const _hoisted_3$j = { class: "avh-scope text-body-1" };
 const _hoisted_4$g = { class: "avh-scope text-body-2" };
 const _hoisted_5$f = { class: "avh-row-actions" };
@@ -762,7 +780,7 @@ const _hoisted_14$9 = {
   key: 0,
   class: "text-caption text-medium-emphasis"
 };
-const {computed: computed$h,ref: ref$k} = await importShared('vue');
+const {computed: computed$i,ref: ref$k} = await importShared('vue');
 
 const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
   __name: "SitesPanel",
@@ -776,16 +794,16 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
   setup(__props, { emit: __emit }) {
     const props = __props;
     const emit = __emit;
-    const scopeText = computed$h(
+    const scopeText = computed$i(
       () => props.sites.length ? props.sites.join("、") : "全部站点"
     );
-    const prefText = computed$h(
+    const prefText = computed$i(
       () => props.prefSites.length ? props.prefSites.join(" › ") : "未设置（按站点清单顺序）"
     );
     const pickOpen = ref$k(false);
     const pickQuery = ref$k("");
     const pickDraft = ref$k([]);
-    const filteredOptions = computed$h(() => {
+    const filteredOptions = computed$i(() => {
       const keyword = pickQuery.value.trim().toLowerCase();
       const list = props.options.filter((item) => item.name);
       if (!keyword) return list;
@@ -818,7 +836,7 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
     }
     const prefOpen = ref$k(false);
     const prefDraft = ref$k([]);
-    const prefCandidates = computed$h(
+    const prefCandidates = computed$i(
       () => props.options.filter((item) => item.name && !prefDraft.value.includes(item.name))
     );
     function openPref() {
@@ -894,7 +912,7 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
             _createVNode$k(_component_v_card_text, null, {
               default: _withCtx$k(() => [
                 _createElementVNode$m("div", _hoisted_1$n, [
-                  _createElementVNode$m("div", _hoisted_2$l, [
+                  _createElementVNode$m("div", _hoisted_2$m, [
                     _cache[7] || (_cache[7] = _createElementVNode$m("div", { class: "text-caption text-medium-emphasis mb-1" }, "当前搜索范围", -1)),
                     _createElementVNode$m("div", _hoisted_3$j, _toDisplayString$o(scopeText.value), 1),
                     _cache[8] || (_cache[8] = _createElementVNode$m("div", { class: "text-caption text-medium-emphasis mt-3 mb-1" }, "优先站点（命中即停，顺序有意义）", -1)),
@@ -1216,7 +1234,9 @@ const {defineComponent:_defineComponent$n} = await importShared('vue');
 
 const {resolveComponent:_resolveComponent$j,createVNode:_createVNode$j,createTextVNode:_createTextVNode$i,withCtx:_withCtx$j,createElementVNode:_createElementVNode$l,renderList:_renderList$d,Fragment:_Fragment$f,openBlock:_openBlock$n,createElementBlock:_createElementBlock$m,toDisplayString:_toDisplayString$n,unref:_unref$4,createBlock:_createBlock$i} = await importShared('vue');
 
-const _hoisted_1$m = { class: "avh-grid mb-2" };
+const _hoisted_1$m = { class: "text-caption text-medium-emphasis mb-3" };
+const _hoisted_2$l = { class: "avh-grid mb-2" };
+const {computed: computed$h} = await importShared('vue');
 const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
   __name: "RulePanel",
   props: {
@@ -1233,12 +1253,21 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
       { value: "2160p", label: "4K 优先" },
       { value: "only4k", label: "仅 4K" }
     ];
+    const allow4kMatters = computed$h(() => props.rule.res === "1080p");
     function patch(key, value) {
       emit("patch", { [key]: value });
     }
     function patchNumber(key, raw) {
       const parsed = Number.parseInt(raw, 10);
       patch(key, Number.isFinite(parsed) ? parsed : 0);
+    }
+    function patchMaxPerDay(raw) {
+      const parsed = Number.parseInt(raw, 10);
+      if (!Number.isFinite(parsed)) {
+        patch("maxPerDay", POLICY_MAX_PER_DAY);
+        return;
+      }
+      patch("maxPerDay", Math.min(Math.max(parsed, 1), POLICY_MAX_PER_DAY));
     }
     return (_ctx, _cache) => {
       const _component_v_icon = _resolveComponent$j("v-icon");
@@ -1307,6 +1336,7 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
                 ]),
                 _: 1
               }, 8, ["model-value"]),
+              _cache[13] || (_cache[13] = _createElementVNode$l("p", { class: "text-caption text-medium-emphasis mb-4" }, " 这一项会真正参与打分与淘汰：「仅 4K」把非 4K 的种子直接淘汰。 ", -1)),
               _createVNode$j(_component_v_switch, {
                 "model-value": props.rule.mustCnsub,
                 color: "primary",
@@ -1316,7 +1346,7 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
                 class: "mb-1",
                 "onUpdate:modelValue": _cache[1] || (_cache[1] = (value) => patch("mustCnsub", value === true))
               }, null, 8, ["model-value"]),
-              _cache[13] || (_cache[13] = _createElementVNode$l("p", { class: "text-caption text-medium-emphasis mb-3" }, " 打开则没有中字的种直接淘汰；默认关（AV 站中字少，关掉时中字仍加 32 分优先选）。 ", -1)),
+              _cache[14] || (_cache[14] = _createElementVNode$l("p", { class: "text-caption text-medium-emphasis mb-3" }, " 打开则没有中字的种直接淘汰；默认关（AV 站中字少，关掉时中字仍加 32 分优先选）。 ", -1)),
               _createVNode$j(_component_v_switch, {
                 "model-value": props.rule.preferUncensored,
                 color: "primary",
@@ -1331,12 +1361,19 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
                 color: "primary",
                 "hide-details": "",
                 inset: "",
+                disabled: !allow4kMatters.value,
                 label: "允许 4K 择优",
                 class: "mb-1",
                 "onUpdate:modelValue": _cache[3] || (_cache[3] = (value) => patch("allow4k", value === true))
-              }, null, 8, ["model-value"]),
-              _cache[14] || (_cache[14] = _createElementVNode$l("p", { class: "text-caption text-medium-emphasis mb-3" }, "1080P 没有好种时升级 4K。", -1)),
-              _createElementVNode$l("div", _hoisted_1$m, [
+              }, null, 8, ["model-value", "disabled"]),
+              _createElementVNode$l("p", _hoisted_1$m, [
+                allow4kMatters.value ? (_openBlock$n(), _createElementBlock$m(_Fragment$f, { key: 0 }, [
+                  _createTextVNode$i("1080P 没有好种时升级 4K。")
+                ], 64)) : (_openBlock$n(), _createElementBlock$m(_Fragment$f, { key: 1 }, [
+                  _createTextVNode$i("已选「4K 优先 / 仅 4K」，这一项不再起作用。")
+                ], 64))
+              ]),
+              _createElementVNode$l("div", _hoisted_2$l, [
                 _createVNode$j(_component_v_text_field, {
                   "model-value": String(props.rule.minSeeders),
                   type: "number",
@@ -1352,13 +1389,14 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
                   "model-value": String(props.rule.maxPerDay),
                   type: "number",
                   min: "1",
+                  max: _unref$4(POLICY_MAX_PER_DAY),
                   label: "每日检查上限",
-                  hint: "每天最多检查订阅几次",
+                  hint: `每天最多检查订阅几次（政策上限 ${_unref$4(POLICY_MAX_PER_DAY)}）`,
                   "persistent-hint": "",
                   variant: "outlined",
                   density: "comfortable",
-                  "onUpdate:modelValue": _cache[5] || (_cache[5] = (value) => patchNumber("maxPerDay", String(value ?? "")))
-                }, null, 8, ["model-value"]),
+                  "onUpdate:modelValue": _cache[5] || (_cache[5] = (value) => patchMaxPerDay(String(value ?? "")))
+                }, null, 8, ["model-value", "max", "hint"]),
                 _createVNode$j(_component_v_text_field, {
                   "model-value": String(props.policyMinInterval || _unref$4(POLICY_MIN_INTERVAL_MIN)),
                   label: "检查间隔下限（分钟，只读）",
@@ -1375,11 +1413,16 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
                 color: "primary",
                 "hide-details": "",
                 inset: "",
-                label: "PT 搜不到时允许 BT 磁力兜底",
-                class: "mb-3",
+                label: "PT 搜不到时用 BT 兜底",
+                class: "mb-1",
                 "onUpdate:modelValue": _cache[6] || (_cache[6] = (value) => patch("btFallback", value === true))
               }, null, 8, ["model-value"]),
-              _cache[15] || (_cache[15] = _createElementVNode$l("div", { class: "text-caption text-medium-emphasis mb-1" }, "命中之后", -1)),
+              _cache[15] || (_cache[15] = _createElementVNode$l("p", { class: "text-caption text-medium-emphasis mb-3" }, [
+                _createTextVNode$i(" 关：PT 没搜到就直接进「任务」页待确认（标记「PT/BT 待确认」），不试 BT。"),
+                _createElementVNode$l("br"),
+                _createTextVNode$i(" 开：自动再去 javdb 搜磁力；BT 也没有则进「任务」页并提示「该资源在所有源中均未找到」。 ")
+              ], -1)),
+              _cache[16] || (_cache[16] = _createElementVNode$l("div", { class: "text-caption text-medium-emphasis mb-1" }, "命中之后", -1)),
               _createVNode$j(_component_v_btn_toggle, {
                 "model-value": props.rule.trigger,
                 mandatory: "",
@@ -1405,7 +1448,7 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
                 ]),
                 _: 1
               }, 8, ["model-value"]),
-              _cache[16] || (_cache[16] = _createElementVNode$l("p", { class: "text-caption text-medium-emphasis mb-4" }, " 「仅通知」时命中的片进「任务」页等你手动下载。 ", -1)),
+              _cache[17] || (_cache[17] = _createElementVNode$l("p", { class: "text-caption text-medium-emphasis mb-4" }, " 「自动下载」＝ 详情页「⬇ 下载该影片」与订阅检查命中时都直接提交下载（挑打分最高的合格候选）； 「仅通知」时命中的片进「任务」页等你手动下载。 ", -1)),
               _createVNode$j(_component_v_alert, {
                 type: "info",
                 variant: "tonal",
@@ -1427,7 +1470,7 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
   }
 });
 
-const RulePanel = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-32a4e634"]]);
+const RulePanel = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-aeba1be9"]]);
 
 const {ref: ref$j} = await importShared('vue');
 
@@ -2301,7 +2344,7 @@ async function pumpThumbFill(api) {
 
 const {defineComponent:_defineComponent$h} = await importShared('vue');
 
-const {createVNode:_createVNode$e,toDisplayString:_toDisplayString$h,createElementVNode:_createElementVNode$h,openBlock:_openBlock$h,createElementBlock:_createElementBlock$h,createCommentVNode:_createCommentVNode$e,createTextVNode:_createTextVNode$d,resolveComponent:_resolveComponent$e,withCtx:_withCtx$e,createBlock:_createBlock$d,renderList:_renderList$b,Fragment:_Fragment$c,normalizeClass:_normalizeClass$8,unref:_unref$2} = await importShared('vue');
+const {createVNode:_createVNode$e,toDisplayString:_toDisplayString$h,createElementVNode:_createElementVNode$h,openBlock:_openBlock$h,createElementBlock:_createElementBlock$h,createCommentVNode:_createCommentVNode$e,createTextVNode:_createTextVNode$d,resolveComponent:_resolveComponent$e,withCtx:_withCtx$e,Fragment:_Fragment$c,createBlock:_createBlock$d,renderList:_renderList$b,normalizeClass:_normalizeClass$8,unref:_unref$2} = await importShared('vue');
 
 const _hoisted_1$h = { class: "avh-cand" };
 const _hoisted_2$h = { class: "avh-cand__head" };
@@ -2311,32 +2354,34 @@ const _hoisted_5$d = {
   key: 0,
   class: "avh-cand__hint"
 };
-const _hoisted_6$b = { class: "avh-cand__table" };
-const _hoisted_7$a = { key: 0 };
-const _hoisted_8$9 = {
+const _hoisted_6$b = { class: "avh-cand__hint" };
+const _hoisted_7$a = { class: "avh-cand__table" };
+const _hoisted_8$9 = { key: 0 };
+const _hoisted_9$9 = {
   key: 0,
   class: "avh-tag"
 };
-const _hoisted_9$9 = { class: "avh-cand__marks" };
-const _hoisted_10$9 = {
+const _hoisted_10$9 = { class: "avh-cand__marks" };
+const _hoisted_11$8 = {
   key: 1,
   class: "avh-cand__hint"
 };
-const _hoisted_11$8 = ["title"];
 const _hoisted_12$8 = ["title"];
-const _hoisted_13$8 = { class: "avh-cand__act" };
-const _hoisted_14$8 = { colspan: "7" };
-const _hoisted_15$7 = ["title"];
-const _hoisted_16$5 = { key: 0 };
+const _hoisted_13$8 = ["title"];
+const _hoisted_14$8 = { class: "avh-cand__act" };
+const _hoisted_15$7 = { colspan: "7" };
+const _hoisted_16$5 = ["title"];
+const _hoisted_17$4 = { key: 0 };
 const {computed: computed$d,ref: ref$f} = await importShared('vue');
 const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
   __name: "CandTable",
   props: {
     task: {},
     pluginId: { default: "" },
-    cancelable: { type: Boolean, default: false }
+    cancelable: { type: Boolean, default: false },
+    subscribeState: { default: "hidden" }
   },
-  emits: ["download", "cancel"],
+  emits: ["download", "cancel", "subscribe"],
   setup(__props, { expose: __expose, emit: __emit }) {
     const props = __props;
     const emit = __emit;
@@ -2407,6 +2452,25 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
     function clearCanceling() {
       canceling.value = false;
     }
+    const pendingMark = computed$d(() => {
+      const kind = String(props.task.pending || "");
+      if (kind === "pt-only") {
+        return { text: "PT/BT 待确认", color: "info", hint: "PT 没搜到，BT 兜底已关闭" };
+      }
+      if (kind === "none") {
+        return { text: "所有源均未找到", color: "warning", hint: "PT 与 BT 都没有可用资源" };
+      }
+      return null;
+    });
+    const subscribing = ref$f(false);
+    function onSubscribe() {
+      if (subscribing.value || !taskId.value) return;
+      subscribing.value = true;
+      emit("subscribe", { taskId: taskId.value });
+    }
+    function clearSubscribing() {
+      subscribing.value = false;
+    }
     function clearPending(site) {
       const next = { ...pending.value };
       if (site === void 0) {
@@ -2418,13 +2482,14 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
       }
       pending.value = next;
     }
-    __expose({ clearPending, clearCanceling });
+    __expose({ clearPending, clearCanceling, clearSubscribing });
     const poster = computed$d(() => {
       const own = String(props.task?.thumb || "");
       if (own) return own;
       return String(filledThumbs.value[String(props.task?.number || "")] || "");
     });
     return (_ctx, _cache) => {
+      const _component_v_chip = _resolveComponent$e("v-chip");
       const _component_v_btn = _resolveComponent$e("v-btn");
       return _openBlock$h(), _createElementBlock$h("div", _hoisted_1$h, [
         _createElementVNode$h("div", _hoisted_2$h, [
@@ -2441,8 +2506,38 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
           ]),
           _cache[1] || (_cache[1] = _createElementVNode$h("div", { class: "avh-cand__spacer" }, null, -1)),
           _ctx.task.auto && _ctx.task.source === "sub" ? (_openBlock$h(), _createElementBlock$h("span", _hoisted_5$d, " 订阅为自动下载，但无候选合格 ")) : _createCommentVNode$e("", true),
+          pendingMark.value ? (_openBlock$h(), _createElementBlock$h(_Fragment$c, { key: 1 }, [
+            _createVNode$e(_component_v_chip, {
+              class: "avh-cand__mark",
+              color: pendingMark.value.color,
+              variant: "tonal",
+              size: "small",
+              label: ""
+            }, {
+              default: _withCtx$e(() => [
+                _createTextVNode$d(_toDisplayString$h(pendingMark.value.text), 1)
+              ]),
+              _: 1
+            }, 8, ["color"]),
+            _createElementVNode$h("span", _hoisted_6$b, _toDisplayString$h(pendingMark.value.hint), 1)
+          ], 64)) : _createCommentVNode$e("", true),
+          _ctx.subscribeState !== "hidden" ? (_openBlock$h(), _createBlock$d(_component_v_btn, {
+            key: 2,
+            class: "avh-cand__subscribe",
+            variant: "outlined",
+            size: "small",
+            disabled: _ctx.subscribeState === "done",
+            loading: subscribing.value,
+            title: "等这部片有资源时自动下载（订阅检查会盯它）",
+            onClick: onSubscribe
+          }, {
+            default: _withCtx$e(() => [
+              _createTextVNode$d(_toDisplayString$h(_ctx.subscribeState === "done" ? "已订阅" : "📌 订阅该影片"), 1)
+            ]),
+            _: 1
+          }, 8, ["disabled", "loading"])) : _createCommentVNode$e("", true),
           _ctx.cancelable ? (_openBlock$h(), _createBlock$d(_component_v_btn, {
-            key: 1,
+            key: 3,
             class: "avh-cand__cancel",
             variant: "outlined",
             size: "small",
@@ -2457,7 +2552,7 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
             _: 1
           }, 8, ["loading"])) : _createCommentVNode$e("", true)
         ]),
-        _createElementVNode$h("table", _hoisted_6$b, [
+        _createElementVNode$h("table", _hoisted_7$a, [
           _cache[6] || (_cache[6] = _createElementVNode$h("colgroup", null, [
             _createElementVNode$h("col", { class: "avh-cand__col-site" }),
             _createElementVNode$h("col", { class: "avh-cand__col-mark" }),
@@ -2483,7 +2578,7 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
               return _openBlock$h(), _createElementBlock$h(_Fragment$c, {
                 key: row.key
               }, [
-                row.kind === "btnote" ? (_openBlock$h(), _createElementBlock$h("tr", _hoisted_7$a, _cache[2] || (_cache[2] = [
+                row.kind === "btnote" ? (_openBlock$h(), _createElementBlock$h("tr", _hoisted_8$9, _cache[2] || (_cache[2] = [
                   _createElementVNode$h("td", {
                     colspan: "7",
                     class: "avh-cand__hint avh-cand__btnote"
@@ -2493,21 +2588,21 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
                     class: _normalizeClass$8(rowClass(row.cand))
                   }, [
                     _createElementVNode$h("td", null, [
-                      row.cand.src === "BT" ? (_openBlock$h(), _createElementBlock$h("span", _hoisted_8$9, "BT")) : _createCommentVNode$e("", true),
+                      row.cand.src === "BT" ? (_openBlock$h(), _createElementBlock$h("span", _hoisted_9$9, "BT")) : _createCommentVNode$e("", true),
                       _createTextVNode$d(" " + _toDisplayString$h(row.cand.site || ""), 1)
                     ]),
-                    _createElementVNode$h("td", _hoisted_9$9, [
+                    _createElementVNode$h("td", _hoisted_10$9, [
                       marks(row.cand).length ? (_openBlock$h(true), _createElementBlock$h(_Fragment$c, { key: 0 }, _renderList$b(marks(row.cand), (mark) => {
                         return _openBlock$h(), _createElementBlock$h("span", {
                           key: mark.text,
                           class: _normalizeClass$8(["avh-tag", mark.cls])
                         }, _toDisplayString$h(mark.text), 3);
-                      }), 128)) : (_openBlock$h(), _createElementBlock$h("span", _hoisted_10$9, "—"))
+                      }), 128)) : (_openBlock$h(), _createElementBlock$h("span", _hoisted_11$8, "—"))
                     ]),
                     _createElementVNode$h("td", {
                       class: "avh-cand__spec",
                       title: row.cand.spec || ""
-                    }, _toDisplayString$h(row.cand.spec || ""), 9, _hoisted_11$8),
+                    }, _toDisplayString$h(row.cand.spec || ""), 9, _hoisted_12$8),
                     _createElementVNode$h("td", null, _toDisplayString$h(row.cand.size || ""), 1),
                     _createElementVNode$h("td", null, _toDisplayString$h(seedersText(row.cand)), 1),
                     _createElementVNode$h("td", {
@@ -2516,8 +2611,8 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
                       _createElementVNode$h("span", {
                         class: _normalizeClass$8(["avh-score", `avh-score--${_unref$2(scoreLevel)(row.cand.score, isPass(row.cand))}`])
                       }, _toDisplayString$h(scoreText(row.cand)), 3)
-                    ], 8, _hoisted_12$8),
-                    _createElementVNode$h("td", _hoisted_13$8, [
+                    ], 8, _hoisted_13$8),
+                    _createElementVNode$h("td", _hoisted_14$8, [
                       isPass(row.cand) ? (_openBlock$h(), _createBlock$d(_component_v_btn, {
                         key: 0,
                         class: "avh-cand__dl",
@@ -2550,17 +2645,17 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
                     key: 0,
                     class: _normalizeClass$8(["avh-cand__sub", ...rowClass(row.cand)])
                   }, [
-                    _createElementVNode$h("td", _hoisted_14$8, [
+                    _createElementVNode$h("td", _hoisted_15$7, [
                       _createElementVNode$h("div", {
                         class: "avh-cand__ttl",
                         title: titleOf(row.cand)
-                      }, _toDisplayString$h(titleOf(row.cand)), 9, _hoisted_15$7)
+                      }, _toDisplayString$h(titleOf(row.cand)), 9, _hoisted_16$5)
                     ])
                   ], 2)) : _createCommentVNode$e("", true)
                 ], 64))
               ], 64);
             }), 128)),
-            !cands.value.length ? (_openBlock$h(), _createElementBlock$h("tr", _hoisted_16$5, _cache[5] || (_cache[5] = [
+            !cands.value.length ? (_openBlock$h(), _createElementBlock$h("tr", _hoisted_17$4, _cache[5] || (_cache[5] = [
               _createElementVNode$h("td", {
                 colspan: "7",
                 class: "avh-cand__hint avh-cand__empty"
@@ -2573,7 +2668,7 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
   }
 });
 
-const CandTable = /* @__PURE__ */ _export_sfc(_sfc_main$h, [["__scopeId", "data-v-4c3555d9"]]);
+const CandTable = /* @__PURE__ */ _export_sfc(_sfc_main$h, [["__scopeId", "data-v-bb4356f9"]]);
 
 const {defineComponent:_defineComponent$g} = await importShared('vue');
 
@@ -4060,6 +4155,23 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
     function rowKey(task, index) {
       return String(task.id ?? `${task.number || ""}#${index}`);
     }
+    const subscribedKeys = computed$8(() => {
+      const out = /* @__PURE__ */ new Set();
+      const subs = Array.isArray(props.store.subs.value) ? props.store.subs.value : [];
+      for (const sub of subs) {
+        if (String(sub.type || "") !== "number") continue;
+        const key = normKey(sub.name);
+        if (key) out.add(key);
+      }
+      return out;
+    });
+    function subscribeStateOf(task) {
+      const cands = Array.isArray(task.cands) ? task.cands : [];
+      if (cands.some((item) => item.pass !== false)) return "hidden";
+      const key = normKey(task.number);
+      if (!key) return "hidden";
+      return subscribedKeys.value.has(key) ? "done" : "ready";
+    }
     function clearAllPending() {
       tables.value.forEach((table) => table?.clearPending());
     }
@@ -4097,6 +4209,24 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
         void props.store.refreshTasks(false);
       }
       tables.value.forEach((table) => table?.clearCanceling());
+    }
+    async function onSubscribe(payload) {
+      const task = pending.value.filter((item) => String(item.id ?? "") === payload.taskId)[0];
+      const number = String(task?.number || "");
+      if (!number) {
+        t.warning("订阅失败");
+        t.info("这条任务缺少番号");
+      } else {
+        const res = await props.store.subscribeNumber(number, "number", String(task?.actor || ""));
+        if (!res.ok) {
+          t.warning("订阅失败");
+          t.info(res.message || "请稍后重试");
+        } else {
+          t.success("订阅已创建");
+          t.info(`${number} · 有资源时自动下载`);
+        }
+      }
+      tables.value.forEach((table) => table?.clearSubscribing());
     }
     watch$6(
       pending,
@@ -4156,10 +4286,12 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
               ref: tables,
               task,
               "plugin-id": _ctx.pluginId,
+              "subscribe-state": subscribeStateOf(task),
               cancelable: "",
               onDownload,
-              onCancel
-            }, null, 8, ["task", "plugin-id"]);
+              onCancel,
+              onSubscribe
+            }, null, 8, ["task", "plugin-id", "subscribe-state"]);
           }), 128))
         ], 64)) : (_openBlock$9(), _createBlock$8(EmptyState, {
           key: 1,
@@ -4170,7 +4302,7 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
   }
 });
 
-const TasksView = /* @__PURE__ */ _export_sfc(_sfc_main$9, [["__scopeId", "data-v-65040ab1"]]);
+const TasksView = /* @__PURE__ */ _export_sfc(_sfc_main$9, [["__scopeId", "data-v-f4403cec"]]);
 
 const {defineComponent:_defineComponent$8} = await importShared('vue');
 
@@ -5851,6 +5983,7 @@ const _sfc_main$3 = /* @__PURE__ */ _defineComponent$3({
       if (id) lastId.value = String(id);
     }
     function focusFresh() {
+      if (freshNumber && freshNumber !== activeNumber.value) acquired.value = false;
       freshNumber = activeNumber.value;
       void nextTick$1(() => scrollTopIfFresh());
     }
@@ -5884,24 +6017,24 @@ const _sfc_main$3 = /* @__PURE__ */ _defineComponent$3({
       emit("refreshSide");
     }
     const ptSearching = ref$4(false);
+    const acquired = ref$4(false);
     async function ptSearch() {
       const number = num.value;
       if (!number || ptSearching.value) return;
       ptSearching.value = true;
       try {
-        const res = await props.store.searchKeyword(number, null, {
+        const res = await props.store.acquireMovie(number, {
           actor: String(movie.value.actor || ""),
           thumb: String(movie.value.thumb || "")
         });
         if (!res.ok) {
-          t.warning("搜种失败");
+          t.warning("下载失败");
           t.info(res.message || "抓取失败，请稍后重试");
           return;
         }
-        const task = res.data || {};
-        const cands = Array.isArray(task.cands) ? task.cands : [];
-        t.success(String(task.number || number));
-        t.info(cands.length ? "已搜索完成" : "没有找到候选");
+        const payload = res.data || {};
+        playToasts(t, payload.toasts);
+        if (payload.outcome === "downloaded") acquired.value = true;
         emit("refreshSide");
       } finally {
         ptSearching.value = false;
@@ -6224,9 +6357,9 @@ const _sfc_main$3 = /* @__PURE__ */ _defineComponent$3({
                       loading: ptSearching.value,
                       onClick: ptSearch
                     }, {
-                      default: _withCtx$3(() => _cache[15] || (_cache[15] = [
-                        _createTextVNode$3(" 🔎 搜索 PT 站 ")
-                      ])),
+                      default: _withCtx$3(() => [
+                        _createTextVNode$3(_toDisplayString$3(acquired.value ? "✅ 已提交" : "⬇ 下载该影片"), 1)
+                      ]),
                       _: 1
                     }, 8, ["loading"]),
                     _createVNode$3(_component_v_btn, {
@@ -6235,7 +6368,7 @@ const _sfc_main$3 = /* @__PURE__ */ _defineComponent$3({
                       loading: subscribing.value,
                       onClick: subscribeNumber
                     }, {
-                      default: _withCtx$3(() => _cache[16] || (_cache[16] = [
+                      default: _withCtx$3(() => _cache[15] || (_cache[15] = [
                         _createTextVNode$3(" 📌 订阅这个番号 ")
                       ])),
                       _: 1
@@ -6322,7 +6455,7 @@ const _sfc_main$3 = /* @__PURE__ */ _defineComponent$3({
                       size: "small",
                       onClick: retryLong
                     }, {
-                      default: _withCtx$3(() => _cache[17] || (_cache[17] = [
+                      default: _withCtx$3(() => _cache[16] || (_cache[16] = [
                         _createTextVNode$3("重试")
                       ])),
                       _: 1
@@ -6360,15 +6493,15 @@ const _sfc_main$3 = /* @__PURE__ */ _defineComponent$3({
                 _createElementVNode$3("h2", _hoisted_47, _toDisplayString$3(activeNumber.value), 1),
                 _createElementVNode$3("div", _hoisted_48, [
                   skeletonMovie.value.date ? (_openBlock$3(), _createElementBlock$3("span", _hoisted_49, [
-                    _cache[18] || (_cache[18] = _createElementVNode$3("b", null, "发行", -1)),
+                    _cache[17] || (_cache[17] = _createElementVNode$3("b", null, "发行", -1)),
                     _createTextVNode$3(" " + _toDisplayString$3(skeletonMovie.value.date), 1)
                   ])) : _createCommentVNode$3("", true),
                   skeletonMovie.value.actor ? (_openBlock$3(), _createElementBlock$3("span", _hoisted_50, [
-                    _cache[19] || (_cache[19] = _createElementVNode$3("b", null, "演员", -1)),
+                    _cache[18] || (_cache[18] = _createElementVNode$3("b", null, "演员", -1)),
                     _createTextVNode$3(" " + _toDisplayString$3(skeletonMovie.value.actor), 1)
                   ])) : _createCommentVNode$3("", true)
                 ]),
-                _cache[20] || (_cache[20] = _createElementVNode$3("div", { class: "avh-hint avh-skeleton__tip" }, "⏳ 正在抓取影片详情（预览图与磁力随后填充）…", -1))
+                _cache[19] || (_cache[19] = _createElementVNode$3("div", { class: "avh-hint avh-skeleton__tip" }, "⏳ 正在抓取影片详情（预览图与磁力随后填充）…", -1))
               ])
             ])),
             !activeNumber.value ? (_openBlock$3(), _createBlock$3(EmptyState, {
@@ -6387,7 +6520,7 @@ const _sfc_main$3 = /* @__PURE__ */ _defineComponent$3({
   }
 });
 
-const DetailDrawer = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-c3418b85"]]);
+const DetailDrawer = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-f8f6eb24"]]);
 
 const {defineComponent:_defineComponent$2} = await importShared('vue');
 
@@ -7063,6 +7196,36 @@ function usePluginStore(api) {
       };
     });
   }
+  function acquireMovie(number, extra = {}) {
+    return guarded("acquire", async () => {
+      const target = String(number ?? "").trim();
+      if (!target) return { ok: false, kind: "error", message: "缺少番号" };
+      const body = { number: target };
+      if (extra.actor) body.actor = extra.actor;
+      if (extra.thumb) body.thumb = extra.thumb;
+      const outcome = await send("post", "tasks/acquire", body);
+      if (!outcome.ok) return { ok: false, kind: "error", message: outcome.message };
+      if (outcome.res.success !== true) {
+        return { ok: false, kind: "error", message: textOf(outcome.res) || "请稍后重试" };
+      }
+      const payload = outcome.res.data ?? outcome.res;
+      const nextQueue = listOf(outcome.res.queue);
+      if (nextQueue) queue.value = nextQueue;
+      const task = payload.task;
+      if (task && typeof task === "object" && task.id) {
+        tasks.value = [
+          task,
+          ...tasks.value.filter((item) => String(item.id ?? "") !== String(task.id))
+        ];
+      }
+      return {
+        ok: true,
+        kind: "ok",
+        message: textOf(outcome.res) || "",
+        data: payload
+      };
+    });
+  }
   function startDownload(taskId, site, force = false) {
     return guarded("download", async () => {
       const id = String(taskId ?? "").trim();
@@ -7207,6 +7370,7 @@ function usePluginStore(api) {
     delFav,
     subscribeNumber,
     searchKeyword,
+    acquireMovie,
     startDownload,
     cancelTask,
     downloadMagnet,

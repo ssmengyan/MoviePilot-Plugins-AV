@@ -16,7 +16,7 @@
  * | `magnetListHtml`：`mn` 种子名、`mh` 里 `中字/无中字`＋`高清`＋`大小` 三个 tag、`magnet:?xt=urn:btih:<hash>` 直链、右侧「⬇ 下载」 | 同（按钮文案 `⬇ 下载`，提交中 `⏳ 提交中…`，成功 `✅ 已提交`） |
  * | `dlMagnet`：`POST plugin/magnet-download {number,hash,name}`；失败 `toast('下载失败', msg \|\| '请检查下载器配置','warn')` 并把按钮复原；成功 `toast('已提交下载', msg \|\| '进度见「下载」页','ok')` | 同一对文案；失败复原按钮、成功停在 `✅ 已提交`（老实现同样不复位）；成功后请壳刷新右栏概况（老实现 `renderPills()`） |
  * | `bindDetail` 的演员行点击：`closeAll(); openActor(name)` | `emit('openActor', name)` —— 抽屉自己关，再由壳切到「我的演员」栏并打开该演员 |
- * | `#btnPtSearch`：`ptSearch(number, mv.actor, mv.thumb, btn)`（老 `views/tasks.js`：后台搜种、不跳页、底部一条 hint） | `store.searchKeyword(number, null, {actor, thumb})`；宿主合同里没有「底部浮动提示」通道，结果改成 `t.success/t.info`（见差异清单） |
+ * | `#btnPtSearch`：老 `ptSearch(number, mv.actor, mv.thumb, btn)`（老 `views/tasks.js`：**只搜种**、后台落进任务列表、底部一条 hint） | **0.6.0 改了语义**：按钮文案「⬇ 下载该影片」，走 `store.acquireMovie()` → `POST /tasks/acquire`，由后端按规则当场决定直接下单还是落待确认；提示语由后端 `toasts` 给（见下面"与老实现的行为差异"第 2 条） |
  * | `#btnSubNum`：`subscribeNumber(number)` | `store.subscribeNumber(number)`，成功 `t.success('订阅已创建')` + `t.info(number)` |
  * | `#btnFavInDetail`：`toggleFav(mv.actor, mv.actor_avatar)` | `store.addFav/delFav` + 同一对文案 |
  * | `loadLong(number, knownUrl, force)`：`knownUrl`（详情里的 `longimage`）直接画；否则 `⏳ 正在获取长缩略图…` ＋ `GET plugin/longimage?number=`；`force` 走 `&force=1` | 同一条链，状态机在 `composables/detailCache.ts` 的 `longState` 里 |
@@ -33,8 +33,8 @@
  *
  * 与老实现的行为差异（都在下面各自位置有注释）：
  * 1. **Esc**：抽屉由 `v-navigation-drawer` 自己关（先关灯箱、再关抽屉，与老实现同先后）；
- * 2. 「搜索 PT 站」的成功提示：老实现是底部浮动 hint（`ui/views/tasks.js` 的 `hint()`），
- *    宿主合同（`moviepilot:toast`）里没有那个通道，改成 toast —— 文案仍按老实现的两句；
+ * 2. 「下载该影片」的提示：老实现是底部浮动 hint（`ui/views/tasks.js` 的 `hint()`），
+ *    宿主合同（`moviepilot:toast`）里没有那个通道，改成按后端 `toasts` 依次弹（0.6.0）；
  * 3. 骨架里 `Thumb` 在封面缺失时给 `.noimg` 占位，而老 `skeletonHtml` 是一句
  *    「正在获取封面…」的文字提示；文案保留在同一位置（缺封面时才出现）；
  * 4. 老实现 `renderPills()` 之后还要等整应用重绘；这里 `emit('refreshSide')` 请壳去刷右栏概况。
@@ -44,7 +44,7 @@ import EmptyState from '../common/EmptyState.vue'
 import ErrorState from '../common/ErrorState.vue'
 import Thumb from '../common/Thumb.vue'
 import Lightbox from './Lightbox.vue'
-import { hostToast, type PluginApi } from '../../composables/usePluginApi'
+import { hostToast, playToasts, type PluginApi } from '../../composables/usePluginApi'
 import { cssUrl } from '../../composables/cssUrl'
 import {
   cachedDetail,
@@ -333,6 +333,8 @@ function syncCursor(number: string, id = ''): void {
  * 重新抓取）则不许动用户的滚动位置。
  */
 function focusFresh(): void {
+  // 换了另一部片：按钮从「✅ 已提交」回到「⬇ 下载该影片」（同一部重开则保持已提交态）
+  if (freshNumber && freshNumber !== activeNumber.value) acquired.value = false
   freshNumber = activeNumber.value
   void nextTick(() => scrollTopIfFresh())
 }
@@ -381,27 +383,34 @@ async function downloadMagnet(magnet: any): Promise<void> {
 
 // ---------- 详情里的三个动作（老 `bindDetail`） ----------
 
-/** 「🔎 搜索 PT 站」：老 `ptSearch(number, actor, thumb, btn)`。 */
+/**
+ * 「⬇ 下载该影片」：一次请求把「搜种 → 判定 → 兜底 → 下载/待确认」走完。
+ *
+ * 0.6.0 起这颗按钮不再只是"搜一下"（老 `ptSearch(number, actor, thumb, btn)` 只把候选丢进
+ * 「任务」页）：后端 `POST /tasks/acquire` 会按全局规则的「命中之后」当场决定 ——
+ * 自动下载就直接下单，仅通知或没找到就落一条待确认任务。**提示语与顺序由后端给**
+ * （`toasts`：先「PT 站未找到资源」，再按 BT 兜底的结果补一句），前端只负责弹。
+ */
 const ptSearching = ref(false)
+/** 已提交下载：按钮停在「✅ 已提交」，与磁力那颗同一套写法（不复位）。 */
+const acquired = ref(false)
 async function ptSearch(): Promise<void> {
   const number = num.value
   if (!number || ptSearching.value) return
   ptSearching.value = true
   try {
-    const res = await props.store.searchKeyword(number, null, {
+    const res = await props.store.acquireMovie(number, {
       actor: String(movie.value.actor || ''),
       thumb: String(movie.value.thumb || ''),
     })
     if (!res.ok) {
-      t.warning('搜种失败')
+      t.warning('下载失败')
       t.info(res.message || '抓取失败，请稍后重试')
       return
     }
-    const task: any = res.data || {}
-    const cands = Array.isArray(task.cands) ? task.cands : []
-    // 老实现落到任务列表 + 底部一条 hint（`hint(number, n ? '已搜索完成' : '没有找到候选')`）。
-    t.success(String(task.number || number))
-    t.info(cands.length ? '已搜索完成' : '没有找到候选')
+    const payload: any = res.data || {}
+    playToasts(t, payload.toasts)
+    if (payload.outcome === 'downloaded') acquired.value = true
     emit('refreshSide')
   } finally {
     ptSearching.value = false
@@ -773,7 +782,7 @@ defineExpose({ syncCursor, focusFresh, reloadDetail, retryDetail })
 
             <div class="avh-acts">
               <v-btn color="primary" variant="flat" size="small" :loading="ptSearching" @click="ptSearch">
-                🔎 搜索 PT 站
+                {{ acquired ? '✅ 已提交' : '⬇ 下载该影片' }}
               </v-btn>
               <v-btn variant="outlined" size="small" :loading="subscribing" @click="subscribeNumber">
                 📌 订阅这个番号

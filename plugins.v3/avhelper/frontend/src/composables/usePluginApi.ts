@@ -97,6 +97,27 @@ export function hostToast(toast: HostToast | null | undefined): Required<HostToa
 }
 
 /**
+ * 把后端给的 `toasts`（`[{level, text}]`）按顺序弹出来。
+ *
+ * **文案与顺序都由后端定**（`tasks.acquire_feedback()`）：前端不判"该说哪一句"，
+ * 所以「PT 站未找到资源」「该资源在所有源中均未找到」这两句只有一处实现。
+ * 认不出的级别按 `info` 处理，空文案跳过。
+ */
+export function playToasts(toast: Required<HostToast>, toasts: unknown): void {
+  if (!Array.isArray(toasts)) return
+  for (const item of toasts) {
+    const record = (item || {}) as { level?: unknown; text?: unknown }
+    const text = String(record.text ?? '').trim()
+    if (!text) continue
+    const level = String(record.level ?? 'info')
+    if (level === 'success') toast.success(text)
+    else if (level === 'warning') toast.warning(text)
+    else if (level === 'error') toast.error(text)
+    else toast.info(text)
+  }
+}
+
+/**
  * 把宿主注入的 `api` 绑到**当前插件实例**上：`plugin/<端点>` → `plugin/<pluginId>/<端点>`。
  *
  * 为什么必须自己补 id（2026-10-10 真机实测根因）：宿主只在分身场景才重写路径

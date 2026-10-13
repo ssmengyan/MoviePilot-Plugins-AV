@@ -20,7 +20,22 @@ SITE_GAP_MAX = 8.0        # 站点之间最大间隔
 SITE_HOURLY_MAX = 10      # 单站每小时上限
 SITE_COOLDOWN_HOURS = 24  # 403/429 冷却时长
 
+# 订阅检查的政策固定值（用户明确要求定的）：每天 ≤ 6 次、两次间隔 ≥ 240 分钟。
+# 前端 `settingsPolicy.ts` 是同一对值的镜像；本模块是**唯一的执行点** —— 规则里的这两个
+# 字段用户可写，`check_allowed()` 每次都再夹一遍（2026-10-13 修：早先界面能填 100，
+# 写进规则后就真的按 100 放行）。
+POLICY_MAX_PER_DAY = 6
+POLICY_MIN_INTERVAL_MIN = 240
+
 _last_request = 0.0
+
+
+def _int_or(value: Any, default: int) -> int:
+    """把规则里的数字字段转成整数，认不出来就用政策默认值（不抛异常）。"""
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
 
 
 class RateLimiter:
@@ -47,16 +62,22 @@ class RateLimiter:
     # ---------- 订阅检查 ----------
 
     def check_allowed(self, max_per_day: int, min_interval_min: int) -> Tuple[bool, str]:
-        """判断此刻能否执行订阅检查，返回（是否允许, 原因）。"""
+        """判断此刻能否执行订阅检查，返回（是否允许, 原因）。
+
+        两个入参都来自规则（用户可写），所以**先夹到政策值再判**：每天 ≤ 6 次、
+        间隔 ≥ 240 分钟。界面上限也做了同样的事，这里是最后一道闸。
+        """
+        max_per_day = min(max(_int_or(max_per_day, POLICY_MAX_PER_DAY), 1), POLICY_MAX_PER_DAY)
+        min_interval_min = max(_int_or(min_interval_min, POLICY_MIN_INTERVAL_MIN), POLICY_MIN_INTERVAL_MIN)
         today = time.strftime("%Y-%m-%d")
         count = int(self.store.kv_get(f"subcheck:count:{today}", 0) or 0)
-        if count >= int(max_per_day or 6):
+        if count >= max_per_day:
             return False, f"今天已检查 {count} 次，达到上限 {max_per_day} 次/天"
         last = float(self.store.kv_get("subcheck:last", 0) or 0)
         if last:
             passed_min = (time.time() - last) / 60.0
-            if passed_min < float(min_interval_min or 240):
-                remain = int(float(min_interval_min or 240) - passed_min)
+            if passed_min < float(min_interval_min):
+                remain = int(float(min_interval_min) - passed_min)
                 return False, f"距上次检查仅 {int(passed_min)} 分钟，需间隔 ≥{min_interval_min} 分钟（还需 {remain} 分钟）"
         return True, ""
 

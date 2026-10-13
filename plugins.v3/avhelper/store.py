@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS task(
   id TEXT PRIMARY KEY, number TEXT, actor TEXT,
   cands TEXT, reason TEXT, state TEXT,
   thumb TEXT, auto INTEGER DEFAULT 0, created_at TEXT, rule TEXT,
-  source TEXT DEFAULT 'manual');
+  source TEXT DEFAULT 'manual',
+  pending TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS notice(
   id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, title TEXT, type TEXT,
   body TEXT, meta TEXT, image TEXT, created_at TEXT);
@@ -208,6 +209,15 @@ class Store:
                 conn.execute("ALTER TABLE task ADD COLUMN source TEXT DEFAULT 'manual'")
             except sqlite3.OperationalError:
                 pass
+            # 兼容旧库：pending 是 0.6.0 后加的列（任务卡上的
+            # 「PT/BT 待确认」/「所有源均未找到」标记，口径见 tasks.rule_verdict）。
+            # 老任务读出来是空串 = 普通待确认，界面不画标记。
+            task_cols = {r[1] for r in conn.execute("PRAGMA table_info(task)").fetchall()}
+            if "pending" not in task_cols:
+                try:
+                    conn.execute("ALTER TABLE task ADD COLUMN pending TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass
             # 兼容旧库：hidden 是后加的墓碑列（0.3.4 的「移除记录」要挡得住补种）。
             # 先看列在不在再 ALTER，绝不 DROP 重建——用户的台账不能丢。
             cols = {r[1] for r in conn.execute("PRAGMA table_info(downloads)").fetchall()}
@@ -304,7 +314,7 @@ class Store:
     def task_list(self, limit: int = 50) -> List[Dict[str, Any]]:
         """返回最近的任务（含候选与打分）。"""
         rows = self._exec(
-            "SELECT id, number, actor, cands, reason, state, thumb, auto, created_at, rule, source "
+            "SELECT id, number, actor, cands, reason, state, thumb, auto, created_at, rule, source, pending "
             "FROM task ORDER BY created_at DESC LIMIT ?", (limit,), fetch=True,
         ) or []
         out = []
@@ -321,7 +331,7 @@ class Store:
                 "id": r[0], "number": r[1], "actor": r[2] or "", "cands": cands,
                 "reason": r[4] or "", "state": r[5] or "await", "thumb": r[6] or "",
                 "auto": bool(r[7]), "created": r[8] or "", "rule": rule,
-                "source": r[10] or "manual",
+                "source": r[10] or "manual", "pending": r[11] or "",
             })
         return out
 
@@ -335,14 +345,15 @@ class Store:
     def task_add(self, task: Dict[str, Any]) -> None:
         """写入一条搜索任务（含生成它的订阅规则与任务来源，供后续下载沿用）。"""
         self._exec(
-            "INSERT OR REPLACE INTO task(id, number, actor, cands, reason, state, thumb, auto, created_at, rule, source) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO task(id, number, actor, cands, reason, state, thumb, auto, created_at, rule, source, pending) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             (task["id"], task["number"], task.get("actor", ""),
              json.dumps(task.get("cands", []), ensure_ascii=False),
              task.get("reason", ""), task.get("state", "await"),
              task.get("thumb", ""), 1 if task.get("auto") else 0, _now(),
              json.dumps(task.get("rule") or {}, ensure_ascii=False),
-             str(task.get("source") or "manual")),
+             str(task.get("source") or "manual"),
+             str(task.get("pending") or "")),
         )
 
     def task_set_state(self, tid: str, state: str) -> None:

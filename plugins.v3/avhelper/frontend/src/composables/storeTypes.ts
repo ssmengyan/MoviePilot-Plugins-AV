@@ -125,6 +125,12 @@ export interface SearchTask {
   rule?: RuleValue
   /** `manual` = 手动搜索，`sub` = 订阅检查。 */
   source?: string
+  /**
+   * 任务卡上的标记（0.6.0 加，口径见后端 `tasks.rule_verdict()`）：
+   * `''` = 普通待确认（有候选可挑）、`pt-only` = 「PT/BT 待确认」（PT 没中且兜底关着）、
+   * `none` = 「所有源均未找到」（PT 与 BT 都没有可用资源）。老任务没有这个字段。
+   */
+  pending?: string
 }
 
 /** 下载队列项（`store.kv_get(QUEUE_KEY)` + 下载器进度回填）。 */
