@@ -1,13 +1,13 @@
 import { importShared } from './__federation_fn_import-JrT3xvdd.js';
 
-const {defineComponent:_defineComponent$q} = await importShared('vue');
+const {defineComponent:_defineComponent$r} = await importShared('vue');
 
-const {openBlock:_openBlock$q,createElementBlock:_createElementBlock$p} = await importShared('vue');
+const {openBlock:_openBlock$r,createElementBlock:_createElementBlock$q} = await importShared('vue');
 
 const _hoisted_1$p = ["src"];
 const {computed: computed$k} = await importShared('vue');
 
-const _sfc_main$q = /* @__PURE__ */ _defineComponent$q({
+const _sfc_main$r = /* @__PURE__ */ _defineComponent$r({
   __name: "AppFrame",
   props: {
     pluginId: {},
@@ -24,7 +24,7 @@ const _sfc_main$q = /* @__PURE__ */ _defineComponent$q({
       return `/api/v1/plugin/${props.pluginId}/ui/${query ? `?${query}` : ""}`;
     });
     return (_ctx, _cache) => {
-      return _openBlock$q(), _createElementBlock$p("iframe", {
+      return _openBlock$r(), _createElementBlock$q("iframe", {
         key: `${_ctx.pluginId}:${_ctx.sectionKey}`,
         src: src.value,
         class: "avh-app-frame",
@@ -44,7 +44,7 @@ const _export_sfc = (sfc, props) => {
   return target;
 };
 
-const AppFrame = /* @__PURE__ */ _export_sfc(_sfc_main$q, [["__scopeId", "data-v-d2cb29e5"]]);
+const AppFrame = /* @__PURE__ */ _export_sfc(_sfc_main$r, [["__scopeId", "data-v-d2cb29e5"]]);
 
 const DEFAULT_MAX_WIDTH = "90rem";
 
@@ -245,16 +245,16 @@ function embyHalfFilled(config) {
   return "";
 }
 
-const {computed: computed$j,ref: ref$m} = await importShared('vue');
+const {computed: computed$j,ref: ref$n} = await importShared('vue');
 const POLL_INTERVAL_MS = 15e3;
 function len(value) {
   return Array.isArray(value) ? value.length : null;
 }
 function useRuntimeInfo(api) {
-  const data = ref$m(null);
-  const error = ref$m("");
-  const loading = ref$m(false);
-  const updatedAt = ref$m("");
+  const data = ref$n(null);
+  const error = ref$n("");
+  const loading = ref$n(false);
+  const updatedAt = ref$n("");
   let timer = null;
   const overview = computed$j(() => {
     const d = data.value;
@@ -341,10 +341,10 @@ const DIRTY_GROUPS = {
   about: "none"
 };
 
-const {computed: computed$i,reactive: reactive$3,ref: ref$l,shallowRef: shallowRef$1} = await importShared('vue');
+const {computed: computed$i,reactive: reactive$3,ref: ref$m,shallowRef: shallowRef$1} = await importShared('vue');
 function useSettingsDraft(options) {
   const t = hostToast(options.toast);
-  const rulePlain = ref$l(null);
+  const rulePlain = ref$m(null);
   const rule = rulePlain;
   const hostConfig = reactive$3({
     enabled: options.initialConfig?.enabled === true,
@@ -354,21 +354,21 @@ function useSettingsDraft(options) {
     emby_host: str(options.initialConfig?.emby_host),
     emby_apikey: str(options.initialConfig?.emby_apikey)
   });
-  const sites = ref$l([]);
-  const sitesLoaded = ref$l(false);
-  const notices = ref$l([]);
-  const cacheText = ref$l("");
-  const cacheBytes = ref$l(null);
-  const checkInfo = ref$l(null);
-  const bootstrapEnabled = ref$l(null);
-  const hostLoaded = ref$l(
+  const sites = ref$m([]);
+  const sitesLoaded = ref$m(false);
+  const notices = ref$m([]);
+  const cacheText = ref$m("");
+  const cacheBytes = ref$m(null);
+  const checkInfo = ref$m(null);
+  const bootstrapEnabled = ref$m(null);
+  const hostLoaded = ref$m(
     Boolean(options.initialConfig && Object.keys(options.initialConfig).length > 0)
   );
-  const loading = ref$l(false);
-  const saving = ref$l(false);
-  const noticeLoading = ref$l(false);
-  const cacheCleaning = ref$l(false);
-  const error = ref$l("");
+  const loading = ref$m(false);
+  const saving = ref$m(false);
+  const noticeLoading = ref$m(false);
+  const cacheCleaning = ref$m(false);
+  const error = ref$m("");
   const ruleBase = shallowRef$1(null);
   const hostBase = shallowRef$1(null);
   let hostHydrated = false;
@@ -614,15 +614,15 @@ function useHostConfirm() {
   };
 }
 
-const {defineComponent:_defineComponent$p} = await importShared('vue');
+const {defineComponent:_defineComponent$q} = await importShared('vue');
 
-const {resolveComponent:_resolveComponent$l,createVNode:_createVNode$l,createTextVNode:_createTextVNode$k,withCtx:_withCtx$l,createElementVNode:_createElementVNode$n,openBlock:_openBlock$p,createElementBlock:_createElementBlock$o,createCommentVNode:_createCommentVNode$j,createBlock:_createBlock$k} = await importShared('vue');
+const {resolveComponent:_resolveComponent$l,createVNode:_createVNode$m,createTextVNode:_createTextVNode$k,withCtx:_withCtx$l,createElementVNode:_createElementVNode$o,openBlock:_openBlock$q,createElementBlock:_createElementBlock$p,createCommentVNode:_createCommentVNode$j,createBlock:_createBlock$k} = await importShared('vue');
 
 const _hoisted_1$o = {
   key: 0,
   class: "text-caption text-medium-emphasis mb-4"
 };
-const _sfc_main$p = /* @__PURE__ */ _defineComponent$p({
+const _sfc_main$q = /* @__PURE__ */ _defineComponent$q({
   __name: "GeneralPanel",
   props: {
     config: {},
@@ -644,26 +644,26 @@ const _sfc_main$p = /* @__PURE__ */ _defineComponent$p({
       const _component_v_text_field = _resolveComponent$l("v-text-field");
       const _component_v_card_text = _resolveComponent$l("v-card-text");
       const _component_v_card = _resolveComponent$l("v-card");
-      return _openBlock$p(), _createBlock$k(_component_v_card, {
+      return _openBlock$q(), _createBlock$k(_component_v_card, {
         variant: "tonal",
         class: "avh-panel"
       }, {
         default: _withCtx$l(() => [
-          _createVNode$l(_component_v_card_item, null, {
+          _createVNode$m(_component_v_card_item, null, {
             prepend: _withCtx$l(() => [
-              _createVNode$l(_component_v_icon, {
+              _createVNode$m(_component_v_icon, {
                 icon: "mdi-cog-outline",
                 color: "primary"
               })
             ]),
             default: _withCtx$l(() => [
-              _createVNode$l(_component_v_card_title, null, {
+              _createVNode$m(_component_v_card_title, null, {
                 default: _withCtx$l(() => _cache[4] || (_cache[4] = [
                   _createTextVNode$k("常规")
                 ])),
                 _: 1
               }),
-              _createVNode$l(_component_v_card_subtitle, null, {
+              _createVNode$m(_component_v_card_subtitle, null, {
                 default: _withCtx$l(() => _cache[5] || (_cache[5] = [
                   _createTextVNode$k("插件开关、代理与路径 · 属于宿主插件配置")
                 ])),
@@ -672,9 +672,9 @@ const _sfc_main$p = /* @__PURE__ */ _defineComponent$p({
             ]),
             _: 1
           }),
-          _createVNode$l(_component_v_card_text, null, {
+          _createVNode$m(_component_v_card_text, null, {
             default: _withCtx$l(() => [
-              _createVNode$l(_component_v_switch, {
+              _createVNode$m(_component_v_switch, {
                 "model-value": props.config.enabled,
                 color: "primary",
                 "hide-details": "",
@@ -683,15 +683,15 @@ const _sfc_main$p = /* @__PURE__ */ _defineComponent$p({
                 class: "mb-2",
                 "onUpdate:modelValue": _cache[0] || (_cache[0] = (value) => patch("enabled", value === true))
               }, null, 8, ["model-value"]),
-              !props.enabledKnown ? (_openBlock$p(), _createElementBlock$o("p", _hoisted_1$o, _cache[6] || (_cache[6] = [
+              !props.enabledKnown ? (_openBlock$q(), _createElementBlock$p("p", _hoisted_1$o, _cache[6] || (_cache[6] = [
                 _createTextVNode$k(" 拿不到当前开关状态（"),
-                _createElementVNode$n("code", null, "/bootstrap", -1),
+                _createElementVNode$o("code", null, "/bootstrap", -1),
                 _createTextVNode$k(" 未返回 "),
-                _createElementVNode$n("code", null, "enabled", -1),
+                _createElementVNode$o("code", null, "enabled", -1),
                 _createTextVNode$k("），保存前请确认。 ")
               ]))) : _createCommentVNode$j("", true),
-              _cache[7] || (_cache[7] = _createElementVNode$n("p", { class: "text-caption text-medium-emphasis mb-4" }, " 关闭后定时订阅检查与「运行一次」都不执行，界面仍可浏览。 ", -1)),
-              _createVNode$l(_component_v_text_field, {
+              _cache[7] || (_cache[7] = _createElementVNode$o("p", { class: "text-caption text-medium-emphasis mb-4" }, " 关闭后定时订阅检查与「运行一次」都不执行，界面仍可浏览。 ", -1)),
+              _createVNode$m(_component_v_text_field, {
                 "model-value": props.config.proxy,
                 label: "javdb 代理地址",
                 placeholder: "http://host:port",
@@ -703,7 +703,7 @@ const _sfc_main$p = /* @__PURE__ */ _defineComponent$p({
                 class: "mb-4",
                 "onUpdate:modelValue": _cache[1] || (_cache[1] = (value) => patch("proxy", value ?? ""))
               }, null, 8, ["model-value"]),
-              _createVNode$l(_component_v_text_field, {
+              _createVNode$m(_component_v_text_field, {
                 "model-value": props.config.javdb_bin,
                 label: "javdb 路径",
                 placeholder: "留空 = 自动下载 / 自动查找",
@@ -715,7 +715,7 @@ const _sfc_main$p = /* @__PURE__ */ _defineComponent$p({
                 class: "mb-4",
                 "onUpdate:modelValue": _cache[2] || (_cache[2] = (value) => patch("javdb_bin", value ?? ""))
               }, null, 8, ["model-value"]),
-              _createVNode$l(_component_v_text_field, {
+              _createVNode$m(_component_v_text_field, {
                 "model-value": props.config.data_root,
                 label: "数据目录",
                 placeholder: "留空 = MP 插件数据目录（/config/plugins/AVHelper）",
@@ -736,11 +736,11 @@ const _sfc_main$p = /* @__PURE__ */ _defineComponent$p({
   }
 });
 
-const GeneralPanel = /* @__PURE__ */ _export_sfc(_sfc_main$p, [["__scopeId", "data-v-0c3f0ccd"]]);
+const GeneralPanel = /* @__PURE__ */ _export_sfc(_sfc_main$q, [["__scopeId", "data-v-0c3f0ccd"]]);
 
-const {defineComponent:_defineComponent$o} = await importShared('vue');
+const {defineComponent:_defineComponent$p} = await importShared('vue');
 
-const {resolveComponent:_resolveComponent$k,createVNode:_createVNode$k,createTextVNode:_createTextVNode$j,withCtx:_withCtx$k,createElementVNode:_createElementVNode$m,toDisplayString:_toDisplayString$o,openBlock:_openBlock$o,createBlock:_createBlock$j,createCommentVNode:_createCommentVNode$i,renderList:_renderList$e,Fragment:_Fragment$g,createElementBlock:_createElementBlock$n} = await importShared('vue');
+const {resolveComponent:_resolveComponent$k,createVNode:_createVNode$l,createTextVNode:_createTextVNode$j,withCtx:_withCtx$k,createElementVNode:_createElementVNode$n,toDisplayString:_toDisplayString$o,openBlock:_openBlock$p,createBlock:_createBlock$j,createCommentVNode:_createCommentVNode$i,renderList:_renderList$e,Fragment:_Fragment$g,createElementBlock:_createElementBlock$o} = await importShared('vue');
 
 const _hoisted_1$n = { class: "avh-row" };
 const _hoisted_2$l = { class: "avh-row-main" };
@@ -762,9 +762,9 @@ const _hoisted_14$9 = {
   key: 0,
   class: "text-caption text-medium-emphasis"
 };
-const {computed: computed$h,ref: ref$k} = await importShared('vue');
+const {computed: computed$h,ref: ref$l} = await importShared('vue');
 
-const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
+const _sfc_main$p = /* @__PURE__ */ _defineComponent$p({
   __name: "SitesPanel",
   props: {
     sites: {},
@@ -782,9 +782,9 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
     const prefText = computed$h(
       () => props.prefSites.length ? props.prefSites.join(" › ") : "未设置（按站点清单顺序）"
     );
-    const pickOpen = ref$k(false);
-    const pickQuery = ref$k("");
-    const pickDraft = ref$k([]);
+    const pickOpen = ref$l(false);
+    const pickQuery = ref$l("");
+    const pickDraft = ref$l([]);
     const filteredOptions = computed$h(() => {
       const keyword = pickQuery.value.trim().toLowerCase();
       const list = props.options.filter((item) => item.name);
@@ -816,8 +816,8 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
       emit("update:sites", [...pickDraft.value].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0)));
       pickOpen.value = false;
     }
-    const prefOpen = ref$k(false);
-    const prefDraft = ref$k([]);
+    const prefOpen = ref$l(false);
+    const prefDraft = ref$l([]);
     const prefCandidates = computed$h(
       () => props.options.filter((item) => item.name && !prefDraft.value.includes(item.name))
     );
@@ -862,27 +862,27 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
       const _component_v_list_item = _resolveComponent$k("v-list-item");
       const _component_v_list = _resolveComponent$k("v-list");
       const _component_v_chip = _resolveComponent$k("v-chip");
-      return _openBlock$o(), _createElementBlock$n(_Fragment$g, null, [
-        _createVNode$k(_component_v_card, {
+      return _openBlock$p(), _createElementBlock$o(_Fragment$g, null, [
+        _createVNode$l(_component_v_card, {
           variant: "tonal",
           class: "avh-panel"
         }, {
           default: _withCtx$k(() => [
-            _createVNode$k(_component_v_card_item, null, {
+            _createVNode$l(_component_v_card_item, null, {
               prepend: _withCtx$k(() => [
-                _createVNode$k(_component_v_icon, {
+                _createVNode$l(_component_v_icon, {
                   icon: "mdi-web",
                   color: "primary"
                 })
               ]),
               default: _withCtx$k(() => [
-                _createVNode$k(_component_v_card_title, null, {
+                _createVNode$l(_component_v_card_title, null, {
                   default: _withCtx$k(() => _cache[5] || (_cache[5] = [
                     _createTextVNode$j("搜索站点")
                   ])),
                   _: 1
                 }),
-                _createVNode$k(_component_v_card_subtitle, null, {
+                _createVNode$l(_component_v_card_subtitle, null, {
                   default: _withCtx$k(() => _cache[6] || (_cache[6] = [
                     _createTextVNode$j("勾选与排序都在弹窗里 · 数据走 POST /rule")
                   ])),
@@ -891,17 +891,17 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
               ]),
               _: 1
             }),
-            _createVNode$k(_component_v_card_text, null, {
+            _createVNode$l(_component_v_card_text, null, {
               default: _withCtx$k(() => [
-                _createElementVNode$m("div", _hoisted_1$n, [
-                  _createElementVNode$m("div", _hoisted_2$l, [
-                    _cache[7] || (_cache[7] = _createElementVNode$m("div", { class: "text-caption text-medium-emphasis mb-1" }, "当前搜索范围", -1)),
-                    _createElementVNode$m("div", _hoisted_3$j, _toDisplayString$o(scopeText.value), 1),
-                    _cache[8] || (_cache[8] = _createElementVNode$m("div", { class: "text-caption text-medium-emphasis mt-3 mb-1" }, "优先站点（命中即停，顺序有意义）", -1)),
-                    _createElementVNode$m("div", _hoisted_4$g, _toDisplayString$o(prefText.value), 1)
+                _createElementVNode$n("div", _hoisted_1$n, [
+                  _createElementVNode$n("div", _hoisted_2$l, [
+                    _cache[7] || (_cache[7] = _createElementVNode$n("div", { class: "text-caption text-medium-emphasis mb-1" }, "当前搜索范围", -1)),
+                    _createElementVNode$n("div", _hoisted_3$j, _toDisplayString$o(scopeText.value), 1),
+                    _cache[8] || (_cache[8] = _createElementVNode$n("div", { class: "text-caption text-medium-emphasis mt-3 mb-1" }, "优先站点（命中即停，顺序有意义）", -1)),
+                    _createElementVNode$n("div", _hoisted_4$g, _toDisplayString$o(prefText.value), 1)
                   ]),
-                  _createElementVNode$m("div", _hoisted_5$f, [
-                    _createVNode$k(_component_v_btn, {
+                  _createElementVNode$n("div", _hoisted_5$f, [
+                    _createVNode$l(_component_v_btn, {
                       color: "primary",
                       variant: "tonal",
                       "prepend-icon": "mdi-checkbox-multiple-marked-outline",
@@ -913,7 +913,7 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
                       ])),
                       _: 1
                     }),
-                    _createVNode$k(_component_v_btn, {
+                    _createVNode$l(_component_v_btn, {
                       color: "primary",
                       variant: "tonal",
                       "prepend-icon": "mdi-sort",
@@ -926,7 +926,7 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
                     })
                   ])
                 ]),
-                _ctx.loaded && !_ctx.options.length ? (_openBlock$o(), _createBlock$j(_component_v_alert, {
+                _ctx.loaded && !_ctx.options.length ? (_openBlock$p(), _createBlock$j(_component_v_alert, {
                   key: 0,
                   type: "warning",
                   variant: "tonal",
@@ -938,14 +938,14 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
                   ])),
                   _: 1
                 })) : _createCommentVNode$i("", true),
-                _cache[12] || (_cache[12] = _createElementVNode$m("p", { class: "text-caption text-medium-emphasis mt-4 mb-0" }, " 「当前搜索范围」留空 = 全部已配置站点；优先站点会先搜、命中即停，所以顺序有意义。 两处都只写进默认规则，按顶条「保存修改」才生效。 ", -1))
+                _cache[12] || (_cache[12] = _createElementVNode$n("p", { class: "text-caption text-medium-emphasis mt-4 mb-0" }, " 「当前搜索范围」留空 = 全部已配置站点；优先站点会先搜、命中即停，所以顺序有意义。 两处都只写进默认规则，按顶条「保存修改」才生效。 ", -1))
               ]),
               _: 1
             })
           ]),
           _: 1
         }),
-        _createVNode$k(_component_v_dialog, {
+        _createVNode$l(_component_v_dialog, {
           modelValue: pickOpen.value,
           "onUpdate:modelValue": _cache[2] || (_cache[2] = ($event) => pickOpen.value = $event),
           "max-width": "640",
@@ -953,11 +953,11 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
           attach: "body"
         }, {
           default: _withCtx$k(() => [
-            _createVNode$k(_component_v_card, null, {
+            _createVNode$l(_component_v_card, null, {
               default: _withCtx$k(() => [
-                _createVNode$k(_component_v_card_title, { class: "d-flex align-center" }, {
+                _createVNode$l(_component_v_card_title, { class: "d-flex align-center" }, {
                   default: _withCtx$k(() => [
-                    _createVNode$k(_component_v_icon, {
+                    _createVNode$l(_component_v_icon, {
                       icon: "mdi-checkbox-multiple-marked-outline",
                       color: "primary",
                       class: "me-2"
@@ -966,15 +966,15 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
                   ]),
                   _: 1
                 }),
-                _createVNode$k(_component_v_card_subtitle, null, {
+                _createVNode$l(_component_v_card_subtitle, null, {
                   default: _withCtx$k(() => [
                     _createTextVNode$j("不勾任何站点 = 搜索全部已配置站点（" + _toDisplayString$o(props.options.length) + " 个）", 1)
                   ]),
                   _: 1
                 }),
-                _createVNode$k(_component_v_card_text, null, {
+                _createVNode$l(_component_v_card_text, null, {
                   default: _withCtx$k(() => [
-                    _createVNode$k(_component_v_text_field, {
+                    _createVNode$l(_component_v_text_field, {
                       modelValue: pickQuery.value,
                       "onUpdate:modelValue": _cache[0] || (_cache[0] = ($event) => pickQuery.value = $event),
                       label: "按名字筛选",
@@ -985,8 +985,8 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
                       "hide-details": "",
                       class: "mb-3"
                     }, null, 8, ["modelValue"]),
-                    _createElementVNode$m("div", _hoisted_6$d, [
-                      _createVNode$k(_component_v_btn, {
+                    _createElementVNode$n("div", _hoisted_6$d, [
+                      _createVNode$l(_component_v_btn, {
                         size: "small",
                         variant: "text",
                         onClick: pickAll
@@ -996,7 +996,7 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
                         ])),
                         _: 1
                       }),
-                      _createVNode$k(_component_v_btn, {
+                      _createVNode$l(_component_v_btn, {
                         size: "small",
                         variant: "text",
                         onClick: pickNone
@@ -1006,13 +1006,13 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
                         ])),
                         _: 1
                       }),
-                      _createVNode$k(_component_v_spacer),
-                      _createElementVNode$m("span", _hoisted_7$c, "已选 " + _toDisplayString$o(pickDraft.value.length), 1)
+                      _createVNode$l(_component_v_spacer),
+                      _createElementVNode$n("span", _hoisted_7$c, "已选 " + _toDisplayString$o(pickDraft.value.length), 1)
                     ]),
-                    _createVNode$k(_component_v_divider, { class: "mb-1" }),
-                    _createElementVNode$m("div", _hoisted_8$b, [
-                      (_openBlock$o(true), _createElementBlock$n(_Fragment$g, null, _renderList$e(filteredOptions.value, (item) => {
-                        return _openBlock$o(), _createBlock$j(_component_v_checkbox, {
+                    _createVNode$l(_component_v_divider, { class: "mb-1" }),
+                    _createElementVNode$n("div", _hoisted_8$b, [
+                      (_openBlock$p(true), _createElementBlock$o(_Fragment$g, null, _renderList$e(filteredOptions.value, (item) => {
+                        return _openBlock$p(), _createBlock$j(_component_v_checkbox, {
                           key: item.name,
                           "model-value": pickDraft.value.includes(item.name),
                           label: item.name,
@@ -1022,20 +1022,20 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
                           "onUpdate:modelValue": () => pickToggle(item.name)
                         }, {
                           append: _withCtx$k(() => [
-                            _createElementVNode$m("span", _hoisted_9$b, _toDisplayString$o(item.adapterLabel || item.adapter || ""), 1)
+                            _createElementVNode$n("span", _hoisted_9$b, _toDisplayString$o(item.adapterLabel || item.adapter || ""), 1)
                           ]),
                           _: 2
                         }, 1032, ["model-value", "label", "onUpdate:modelValue"]);
                       }), 128)),
-                      !filteredOptions.value.length ? (_openBlock$o(), _createElementBlock$n("div", _hoisted_10$a, " 没有匹配的站点。 ")) : _createCommentVNode$i("", true)
+                      !filteredOptions.value.length ? (_openBlock$p(), _createElementBlock$o("div", _hoisted_10$a, " 没有匹配的站点。 ")) : _createCommentVNode$i("", true)
                     ])
                   ]),
                   _: 1
                 }),
-                _createVNode$k(_component_v_card_actions, null, {
+                _createVNode$l(_component_v_card_actions, null, {
                   default: _withCtx$k(() => [
-                    _createVNode$k(_component_v_spacer),
-                    _createVNode$k(_component_v_btn, {
+                    _createVNode$l(_component_v_spacer),
+                    _createVNode$l(_component_v_btn, {
                       variant: "text",
                       onClick: _cache[1] || (_cache[1] = ($event) => pickOpen.value = false)
                     }, {
@@ -1044,7 +1044,7 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
                       ])),
                       _: 1
                     }),
-                    _createVNode$k(_component_v_btn, {
+                    _createVNode$l(_component_v_btn, {
                       color: "primary",
                       variant: "flat",
                       onClick: pickConfirm
@@ -1063,7 +1063,7 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
           ]),
           _: 1
         }, 8, ["modelValue"]),
-        _createVNode$k(_component_v_dialog, {
+        _createVNode$l(_component_v_dialog, {
           modelValue: prefOpen.value,
           "onUpdate:modelValue": _cache[4] || (_cache[4] = ($event) => prefOpen.value = $event),
           "max-width": "640",
@@ -1071,11 +1071,11 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
           attach: "body"
         }, {
           default: _withCtx$k(() => [
-            _createVNode$k(_component_v_card, null, {
+            _createVNode$l(_component_v_card, null, {
               default: _withCtx$k(() => [
-                _createVNode$k(_component_v_card_title, { class: "d-flex align-center" }, {
+                _createVNode$l(_component_v_card_title, { class: "d-flex align-center" }, {
                   default: _withCtx$k(() => [
-                    _createVNode$k(_component_v_icon, {
+                    _createVNode$l(_component_v_icon, {
                       icon: "mdi-sort",
                       color: "primary",
                       class: "me-2"
@@ -1084,43 +1084,43 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
                   ]),
                   _: 1
                 }),
-                _createVNode$k(_component_v_card_subtitle, null, {
+                _createVNode$l(_component_v_card_subtitle, null, {
                   default: _withCtx$k(() => _cache[19] || (_cache[19] = [
                     _createTextVNode$j("先搜这些站，命中即停 —— 顺序就是搜索顺序")
                   ])),
                   _: 1
                 }),
-                _createVNode$k(_component_v_card_text, null, {
+                _createVNode$l(_component_v_card_text, null, {
                   default: _withCtx$k(() => [
-                    _createElementVNode$m("div", _hoisted_11$9, "优先顺序（" + _toDisplayString$o(prefDraft.value.length) + "）", 1),
-                    _createVNode$k(_component_v_list, {
+                    _createElementVNode$n("div", _hoisted_11$9, "优先顺序（" + _toDisplayString$o(prefDraft.value.length) + "）", 1),
+                    _createVNode$l(_component_v_list, {
                       density: "compact",
                       class: "avh-list mb-3"
                     }, {
                       default: _withCtx$k(() => [
-                        (_openBlock$o(true), _createElementBlock$n(_Fragment$g, null, _renderList$e(prefDraft.value, (name, index) => {
-                          return _openBlock$o(), _createBlock$j(_component_v_list_item, {
+                        (_openBlock$p(true), _createElementBlock$o(_Fragment$g, null, _renderList$e(prefDraft.value, (name, index) => {
+                          return _openBlock$p(), _createBlock$j(_component_v_list_item, {
                             key: `${name}:${index}`
                           }, {
                             prepend: _withCtx$k(() => [
-                              _createElementVNode$m("span", _hoisted_12$9, _toDisplayString$o(index + 1), 1)
+                              _createElementVNode$n("span", _hoisted_12$9, _toDisplayString$o(index + 1), 1)
                             ]),
                             append: _withCtx$k(() => [
-                              _createVNode$k(_component_v_btn, {
+                              _createVNode$l(_component_v_btn, {
                                 icon: "mdi-arrow-up",
                                 size: "x-small",
                                 variant: "text",
                                 disabled: index === 0,
                                 onClick: ($event) => prefMove(index, -1)
                               }, null, 8, ["disabled", "onClick"]),
-                              _createVNode$k(_component_v_btn, {
+                              _createVNode$l(_component_v_btn, {
                                 icon: "mdi-arrow-down",
                                 size: "x-small",
                                 variant: "text",
                                 disabled: index === prefDraft.value.length - 1,
                                 onClick: ($event) => prefMove(index, 1)
                               }, null, 8, ["disabled", "onClick"]),
-                              _createVNode$k(_component_v_btn, {
+                              _createVNode$l(_component_v_btn, {
                                 icon: "mdi-close",
                                 size: "x-small",
                                 variant: "text",
@@ -1128,7 +1128,7 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
                               }, null, 8, ["onClick"])
                             ]),
                             default: _withCtx$k(() => [
-                              _createVNode$k(_component_v_list_item_title, null, {
+                              _createVNode$l(_component_v_list_item_title, null, {
                                 default: _withCtx$k(() => [
                                   _createTextVNode$j(_toDisplayString$o(name), 1)
                                 ]),
@@ -1138,9 +1138,9 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
                             _: 2
                           }, 1024);
                         }), 128)),
-                        !prefDraft.value.length ? (_openBlock$o(), _createBlock$j(_component_v_list_item, { key: 0 }, {
+                        !prefDraft.value.length ? (_openBlock$p(), _createBlock$j(_component_v_list_item, { key: 0 }, {
                           default: _withCtx$k(() => [
-                            _createVNode$k(_component_v_list_item_title, { class: "text-caption text-medium-emphasis" }, {
+                            _createVNode$l(_component_v_list_item_title, { class: "text-caption text-medium-emphasis" }, {
                               default: _withCtx$k(() => _cache[20] || (_cache[20] = [
                                 _createTextVNode$j(" 还没有优先站点：按下面的候选加进来。 ")
                               ])),
@@ -1152,11 +1152,11 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
                       ]),
                       _: 1
                     }),
-                    _createVNode$k(_component_v_divider, { class: "mb-2" }),
-                    _cache[21] || (_cache[21] = _createElementVNode$m("div", { class: "text-caption text-medium-emphasis mb-1" }, "候选站点（点击加入优先顺序）", -1)),
-                    _createElementVNode$m("div", _hoisted_13$9, [
-                      (_openBlock$o(true), _createElementBlock$n(_Fragment$g, null, _renderList$e(prefCandidates.value, (item) => {
-                        return _openBlock$o(), _createBlock$j(_component_v_chip, {
+                    _createVNode$l(_component_v_divider, { class: "mb-2" }),
+                    _cache[21] || (_cache[21] = _createElementVNode$n("div", { class: "text-caption text-medium-emphasis mb-1" }, "候选站点（点击加入优先顺序）", -1)),
+                    _createElementVNode$n("div", _hoisted_13$9, [
+                      (_openBlock$p(true), _createElementBlock$o(_Fragment$g, null, _renderList$e(prefCandidates.value, (item) => {
+                        return _openBlock$p(), _createBlock$j(_component_v_chip, {
                           key: item.name,
                           size: "small",
                           variant: "tonal",
@@ -1169,15 +1169,15 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
                           _: 2
                         }, 1032, ["onClick"]);
                       }), 128)),
-                      !prefCandidates.value.length ? (_openBlock$o(), _createElementBlock$n("span", _hoisted_14$9, " 全部站点都已在优先列表里。 ")) : _createCommentVNode$i("", true)
+                      !prefCandidates.value.length ? (_openBlock$p(), _createElementBlock$o("span", _hoisted_14$9, " 全部站点都已在优先列表里。 ")) : _createCommentVNode$i("", true)
                     ])
                   ]),
                   _: 1
                 }),
-                _createVNode$k(_component_v_card_actions, null, {
+                _createVNode$l(_component_v_card_actions, null, {
                   default: _withCtx$k(() => [
-                    _createVNode$k(_component_v_spacer),
-                    _createVNode$k(_component_v_btn, {
+                    _createVNode$l(_component_v_spacer),
+                    _createVNode$l(_component_v_btn, {
                       variant: "text",
                       onClick: _cache[3] || (_cache[3] = ($event) => prefOpen.value = false)
                     }, {
@@ -1186,7 +1186,7 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
                       ])),
                       _: 1
                     }),
-                    _createVNode$k(_component_v_btn, {
+                    _createVNode$l(_component_v_btn, {
                       color: "primary",
                       variant: "flat",
                       onClick: prefConfirm
@@ -1210,14 +1210,14 @@ const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
   }
 });
 
-const SitesPanel = /* @__PURE__ */ _export_sfc(_sfc_main$o, [["__scopeId", "data-v-b3e77efa"]]);
+const SitesPanel = /* @__PURE__ */ _export_sfc(_sfc_main$p, [["__scopeId", "data-v-b3e77efa"]]);
 
-const {defineComponent:_defineComponent$n} = await importShared('vue');
+const {defineComponent:_defineComponent$o} = await importShared('vue');
 
-const {resolveComponent:_resolveComponent$j,createVNode:_createVNode$j,createTextVNode:_createTextVNode$i,withCtx:_withCtx$j,createElementVNode:_createElementVNode$l,renderList:_renderList$d,Fragment:_Fragment$f,openBlock:_openBlock$n,createElementBlock:_createElementBlock$m,toDisplayString:_toDisplayString$n,unref:_unref$4,createBlock:_createBlock$i} = await importShared('vue');
+const {resolveComponent:_resolveComponent$j,createVNode:_createVNode$k,createTextVNode:_createTextVNode$i,withCtx:_withCtx$j,createElementVNode:_createElementVNode$m,renderList:_renderList$d,Fragment:_Fragment$f,openBlock:_openBlock$o,createElementBlock:_createElementBlock$n,toDisplayString:_toDisplayString$n,unref:_unref$4,createBlock:_createBlock$i} = await importShared('vue');
 
 const _hoisted_1$m = { class: "avh-grid mb-2" };
-const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
+const _sfc_main$o = /* @__PURE__ */ _defineComponent$o({
   __name: "RulePanel",
   props: {
     rule: {},
@@ -1252,26 +1252,26 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
       const _component_v_alert = _resolveComponent$j("v-alert");
       const _component_v_card_text = _resolveComponent$j("v-card-text");
       const _component_v_card = _resolveComponent$j("v-card");
-      return _openBlock$n(), _createBlock$i(_component_v_card, {
+      return _openBlock$o(), _createBlock$i(_component_v_card, {
         variant: "tonal",
         class: "avh-panel"
       }, {
         default: _withCtx$j(() => [
-          _createVNode$j(_component_v_card_item, null, {
+          _createVNode$k(_component_v_card_item, null, {
             prepend: _withCtx$j(() => [
-              _createVNode$j(_component_v_icon, {
+              _createVNode$k(_component_v_icon, {
                 icon: "mdi-filter-cog",
                 color: "primary"
               })
             ]),
             default: _withCtx$j(() => [
-              _createVNode$j(_component_v_card_title, null, {
+              _createVNode$k(_component_v_card_title, null, {
                 default: _withCtx$j(() => _cache[8] || (_cache[8] = [
                   _createTextVNode$i("下载规则")
                 ])),
                 _: 1
               }),
-              _createVNode$j(_component_v_card_subtitle, null, {
+              _createVNode$k(_component_v_card_subtitle, null, {
                 default: _withCtx$j(() => _cache[9] || (_cache[9] = [
                   _createTextVNode$i("手动搜索与新建订阅的基准 · 数据走 POST /rule")
                 ])),
@@ -1280,10 +1280,10 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
             ]),
             _: 1
           }),
-          _createVNode$j(_component_v_card_text, null, {
+          _createVNode$k(_component_v_card_text, null, {
             default: _withCtx$j(() => [
-              _cache[12] || (_cache[12] = _createElementVNode$l("div", { class: "text-caption text-medium-emphasis mb-1" }, "分辨率策略", -1)),
-              _createVNode$j(_component_v_btn_toggle, {
+              _cache[12] || (_cache[12] = _createElementVNode$m("div", { class: "text-caption text-medium-emphasis mb-1" }, "分辨率策略", -1)),
+              _createVNode$k(_component_v_btn_toggle, {
                 "model-value": props.rule.res,
                 mandatory: "",
                 density: "comfortable",
@@ -1293,8 +1293,8 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
                 "onUpdate:modelValue": _cache[0] || (_cache[0] = (value) => value && patch("res", value))
               }, {
                 default: _withCtx$j(() => [
-                  (_openBlock$n(), _createElementBlock$m(_Fragment$f, null, _renderList$d(RES_OPTIONS, (option) => {
-                    return _createVNode$j(_component_v_btn, {
+                  (_openBlock$o(), _createElementBlock$n(_Fragment$f, null, _renderList$d(RES_OPTIONS, (option) => {
+                    return _createVNode$k(_component_v_btn, {
                       key: option.value,
                       value: option.value
                     }, {
@@ -1307,7 +1307,7 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
                 ]),
                 _: 1
               }, 8, ["model-value"]),
-              _createVNode$j(_component_v_switch, {
+              _createVNode$k(_component_v_switch, {
                 "model-value": props.rule.mustCnsub,
                 color: "primary",
                 "hide-details": "",
@@ -1316,8 +1316,8 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
                 class: "mb-1",
                 "onUpdate:modelValue": _cache[1] || (_cache[1] = (value) => patch("mustCnsub", value === true))
               }, null, 8, ["model-value"]),
-              _cache[13] || (_cache[13] = _createElementVNode$l("p", { class: "text-caption text-medium-emphasis mb-3" }, " 打开则没有中字的种直接淘汰；默认关（AV 站中字少，关掉时中字仍加 32 分优先选）。 ", -1)),
-              _createVNode$j(_component_v_switch, {
+              _cache[13] || (_cache[13] = _createElementVNode$m("p", { class: "text-caption text-medium-emphasis mb-3" }, " 打开则没有中字的种直接淘汰；默认关（AV 站中字少，关掉时中字仍加 32 分优先选）。 ", -1)),
+              _createVNode$k(_component_v_switch, {
                 "model-value": props.rule.preferUncensored,
                 color: "primary",
                 "hide-details": "",
@@ -1326,7 +1326,7 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
                 class: "mb-3",
                 "onUpdate:modelValue": _cache[2] || (_cache[2] = (value) => patch("preferUncensored", value === true))
               }, null, 8, ["model-value"]),
-              _createVNode$j(_component_v_switch, {
+              _createVNode$k(_component_v_switch, {
                 "model-value": props.rule.allow4k,
                 color: "primary",
                 "hide-details": "",
@@ -1335,9 +1335,9 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
                 class: "mb-1",
                 "onUpdate:modelValue": _cache[3] || (_cache[3] = (value) => patch("allow4k", value === true))
               }, null, 8, ["model-value"]),
-              _cache[14] || (_cache[14] = _createElementVNode$l("p", { class: "text-caption text-medium-emphasis mb-3" }, "1080P 没有好种时升级 4K。", -1)),
-              _createElementVNode$l("div", _hoisted_1$m, [
-                _createVNode$j(_component_v_text_field, {
+              _cache[14] || (_cache[14] = _createElementVNode$m("p", { class: "text-caption text-medium-emphasis mb-3" }, "1080P 没有好种时升级 4K。", -1)),
+              _createElementVNode$m("div", _hoisted_1$m, [
+                _createVNode$k(_component_v_text_field, {
                   "model-value": String(props.rule.minSeeders),
                   type: "number",
                   min: "0",
@@ -1348,7 +1348,7 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
                   density: "comfortable",
                   "onUpdate:modelValue": _cache[4] || (_cache[4] = (value) => patchNumber("minSeeders", String(value ?? "")))
                 }, null, 8, ["model-value"]),
-                _createVNode$j(_component_v_text_field, {
+                _createVNode$k(_component_v_text_field, {
                   "model-value": String(props.rule.maxPerDay),
                   type: "number",
                   min: "1",
@@ -1359,7 +1359,7 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
                   density: "comfortable",
                   "onUpdate:modelValue": _cache[5] || (_cache[5] = (value) => patchNumber("maxPerDay", String(value ?? "")))
                 }, null, 8, ["model-value"]),
-                _createVNode$j(_component_v_text_field, {
+                _createVNode$k(_component_v_text_field, {
                   "model-value": String(props.policyMinInterval || _unref$4(POLICY_MIN_INTERVAL_MIN)),
                   label: "检查间隔下限（分钟，只读）",
                   hint: "政策固定值，界面不放宽",
@@ -1370,7 +1370,7 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
                   disabled: ""
                 }, null, 8, ["model-value"])
               ]),
-              _createVNode$j(_component_v_switch, {
+              _createVNode$k(_component_v_switch, {
                 "model-value": props.rule.btFallback,
                 color: "primary",
                 "hide-details": "",
@@ -1379,8 +1379,8 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
                 class: "mb-3",
                 "onUpdate:modelValue": _cache[6] || (_cache[6] = (value) => patch("btFallback", value === true))
               }, null, 8, ["model-value"]),
-              _cache[15] || (_cache[15] = _createElementVNode$l("div", { class: "text-caption text-medium-emphasis mb-1" }, "命中之后", -1)),
-              _createVNode$j(_component_v_btn_toggle, {
+              _cache[15] || (_cache[15] = _createElementVNode$m("div", { class: "text-caption text-medium-emphasis mb-1" }, "命中之后", -1)),
+              _createVNode$k(_component_v_btn_toggle, {
                 "model-value": props.rule.trigger,
                 mandatory: "",
                 density: "comfortable",
@@ -1390,13 +1390,13 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
                 "onUpdate:modelValue": _cache[7] || (_cache[7] = (value) => value && patch("trigger", value))
               }, {
                 default: _withCtx$j(() => [
-                  _createVNode$j(_component_v_btn, { value: "notify" }, {
+                  _createVNode$k(_component_v_btn, { value: "notify" }, {
                     default: _withCtx$j(() => _cache[10] || (_cache[10] = [
                       _createTextVNode$i("仅通知")
                     ])),
                     _: 1
                   }),
-                  _createVNode$j(_component_v_btn, { value: "auto" }, {
+                  _createVNode$k(_component_v_btn, { value: "auto" }, {
                     default: _withCtx$j(() => _cache[11] || (_cache[11] = [
                       _createTextVNode$i("自动下载")
                     ])),
@@ -1405,8 +1405,8 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
                 ]),
                 _: 1
               }, 8, ["model-value"]),
-              _cache[16] || (_cache[16] = _createElementVNode$l("p", { class: "text-caption text-medium-emphasis mb-4" }, " 「仅通知」时命中的片进「任务」页等你手动下载。 ", -1)),
-              _createVNode$j(_component_v_alert, {
+              _cache[16] || (_cache[16] = _createElementVNode$m("p", { class: "text-caption text-medium-emphasis mb-4" }, " 「仅通知」时命中的片进「任务」页等你手动下载。 ", -1)),
+              _createVNode$k(_component_v_alert, {
                 type: "info",
                 variant: "tonal",
                 density: "compact",
@@ -1427,12 +1427,12 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
   }
 });
 
-const RulePanel = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-32a4e634"]]);
+const RulePanel = /* @__PURE__ */ _export_sfc(_sfc_main$o, [["__scopeId", "data-v-32a4e634"]]);
 
-const {ref: ref$j} = await importShared('vue');
+const {ref: ref$k} = await importShared('vue');
 
 const NOTICES_SEEN_KEY = "avhnext.settings.noticesSeen";
-const seenAt = ref$j(readSeen());
+const seenAt = ref$k(readSeen());
 function readSeen() {
   try {
     return localStorage.getItem(NOTICES_SEEN_KEY) || "";
@@ -1462,13 +1462,13 @@ function markNoticesSeen(notices) {
   saveSeen();
 }
 
-const {defineComponent:_defineComponent$m} = await importShared('vue');
+const {defineComponent:_defineComponent$n} = await importShared('vue');
 
-const {resolveComponent:_resolveComponent$i,createVNode:_createVNode$i,createTextVNode:_createTextVNode$h,withCtx:_withCtx$i,toDisplayString:_toDisplayString$m,unref:_unref$3,openBlock:_openBlock$m,createBlock:_createBlock$h,createCommentVNode:_createCommentVNode$h,createElementVNode:_createElementVNode$k,renderList:_renderList$c,Fragment:_Fragment$e,createElementBlock:_createElementBlock$l} = await importShared('vue');
+const {resolveComponent:_resolveComponent$i,createVNode:_createVNode$j,createTextVNode:_createTextVNode$h,withCtx:_withCtx$i,toDisplayString:_toDisplayString$m,unref:_unref$3,openBlock:_openBlock$n,createBlock:_createBlock$h,createCommentVNode:_createCommentVNode$h,createElementVNode:_createElementVNode$l,renderList:_renderList$c,Fragment:_Fragment$e,createElementBlock:_createElementBlock$m} = await importShared('vue');
 
 const _hoisted_1$l = { class: "avh-counts mb-3" };
 const {computed: computed$g,watch: watch$b} = await importShared('vue');
-const _sfc_main$m = /* @__PURE__ */ _defineComponent$m({
+const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
   __name: "NotifyPanel",
   props: {
     notices: {},
@@ -1504,26 +1504,26 @@ const _sfc_main$m = /* @__PURE__ */ _defineComponent$m({
       const _component_v_spacer = _resolveComponent$i("v-spacer");
       const _component_v_card_actions = _resolveComponent$i("v-card-actions");
       const _component_v_card = _resolveComponent$i("v-card");
-      return _openBlock$m(), _createBlock$h(_component_v_card, {
+      return _openBlock$n(), _createBlock$h(_component_v_card, {
         variant: "tonal",
         class: "avh-panel"
       }, {
         default: _withCtx$i(() => [
-          _createVNode$i(_component_v_card_item, null, {
+          _createVNode$j(_component_v_card_item, null, {
             prepend: _withCtx$i(() => [
-              _createVNode$i(_component_v_icon, {
+              _createVNode$j(_component_v_icon, {
                 icon: "mdi-bell",
                 color: "primary"
               })
             ]),
             default: _withCtx$i(() => [
-              _createVNode$i(_component_v_card_title, null, {
+              _createVNode$j(_component_v_card_title, null, {
                 default: _withCtx$i(() => _cache[2] || (_cache[2] = [
                   _createTextVNode$h("通知")
                 ])),
                 _: 1
               }),
-              _createVNode$i(_component_v_card_subtitle, null, {
+              _createVNode$j(_component_v_card_subtitle, null, {
                 default: _withCtx$i(() => _cache[3] || (_cache[3] = [
                   _createTextVNode$h("渠道沿用 MoviePilot 原生通知 · 本插件不另建渠道")
                 ])),
@@ -1532,10 +1532,10 @@ const _sfc_main$m = /* @__PURE__ */ _defineComponent$m({
             ]),
             _: 1
           }),
-          _createVNode$i(_component_v_card_text, null, {
+          _createVNode$j(_component_v_card_text, null, {
             default: _withCtx$i(() => [
-              _createElementVNode$k("div", _hoisted_1$l, [
-                _createVNode$i(_component_v_chip, {
+              _createElementVNode$l("div", _hoisted_1$l, [
+                _createVNode$j(_component_v_chip, {
                   color: "primary",
                   variant: "tonal",
                   size: "small"
@@ -1545,7 +1545,7 @@ const _sfc_main$m = /* @__PURE__ */ _defineComponent$m({
                   ]),
                   _: 1
                 }),
-                _unref$3(seenAt) ? (_openBlock$m(), _createBlock$h(_component_v_chip, {
+                _unref$3(seenAt) ? (_openBlock$n(), _createBlock$h(_component_v_chip, {
                   key: 0,
                   variant: "text",
                   size: "small",
@@ -1557,30 +1557,30 @@ const _sfc_main$m = /* @__PURE__ */ _defineComponent$m({
                   _: 1
                 })) : _createCommentVNode$h("", true)
               ]),
-              _cache[5] || (_cache[5] = _createElementVNode$k("p", { class: "text-caption text-medium-emphasis mb-2" }, " 通知由 MoviePilot 原生的通知渠道发出（在「设置 → 通知」里配置），这里看到的只是插件自己的收件箱。 打开本栏即算已读；这里的「未读」与数据台顶栏铃铛上的角标是同一个位点。 ", -1)),
-              _ctx.notices.length ? (_openBlock$m(), _createBlock$h(_component_v_list, {
+              _cache[5] || (_cache[5] = _createElementVNode$l("p", { class: "text-caption text-medium-emphasis mb-2" }, " 通知由 MoviePilot 原生的通知渠道发出（在「设置 → 通知」里配置），这里看到的只是插件自己的收件箱。 打开本栏即算已读；这里的「未读」与数据台顶栏铃铛上的角标是同一个位点。 ", -1)),
+              _ctx.notices.length ? (_openBlock$n(), _createBlock$h(_component_v_list, {
                 key: 0,
                 density: "compact",
                 class: "avh-notices mb-2"
               }, {
                 default: _withCtx$i(() => [
-                  (_openBlock$m(true), _createElementBlock$l(_Fragment$e, null, _renderList$c(_ctx.notices.slice(0, 20), (item, index) => {
-                    return _openBlock$m(), _createBlock$h(_component_v_list_item, { key: index }, {
+                  (_openBlock$n(true), _createElementBlock$m(_Fragment$e, null, _renderList$c(_ctx.notices.slice(0, 20), (item, index) => {
+                    return _openBlock$n(), _createBlock$h(_component_v_list_item, { key: index }, {
                       prepend: _withCtx$i(() => [
-                        _createVNode$i(_component_v_icon, {
+                        _createVNode$j(_component_v_icon, {
                           icon: item.kind === "ok" ? "mdi-check-circle-outline" : item.kind === "warn" ? "mdi-alert-outline" : "mdi-robot-outline",
                           color: item.kind === "ok" ? "success" : item.kind === "warn" ? "warning" : "primary",
                           size: "small"
                         }, null, 8, ["icon", "color"])
                       ]),
                       default: _withCtx$i(() => [
-                        _createVNode$i(_component_v_list_item_title, { class: "text-body-2" }, {
+                        _createVNode$j(_component_v_list_item_title, { class: "text-body-2" }, {
                           default: _withCtx$i(() => [
                             _createTextVNode$h(_toDisplayString$m(item.title || item.body || "（无标题）"), 1)
                           ]),
                           _: 2
                         }, 1024),
-                        _createVNode$i(_component_v_list_item_subtitle, { class: "text-caption" }, {
+                        _createVNode$j(_component_v_list_item_subtitle, { class: "text-caption" }, {
                           default: _withCtx$i(() => [
                             _createTextVNode$h(_toDisplayString$m(item.type || "系统消息") + " · " + _toDisplayString$m(item.time || "—"), 1)
                           ]),
@@ -1590,9 +1590,9 @@ const _sfc_main$m = /* @__PURE__ */ _defineComponent$m({
                       _: 2
                     }, 1024);
                   }), 128)),
-                  _ctx.notices.length > 20 ? (_openBlock$m(), _createBlock$h(_component_v_list_item, { key: 0 }, {
+                  _ctx.notices.length > 20 ? (_openBlock$n(), _createBlock$h(_component_v_list_item, { key: 0 }, {
                     default: _withCtx$i(() => [
-                      _createVNode$i(_component_v_list_item_title, { class: "text-caption text-medium-emphasis" }, {
+                      _createVNode$j(_component_v_list_item_title, { class: "text-caption text-medium-emphasis" }, {
                         default: _withCtx$i(() => [
                           _createTextVNode$h(" 只显示最近 20 条，其余 " + _toDisplayString$m(_ctx.notices.length - 20) + " 条在数据台的铃铛里。 ", 1)
                         ]),
@@ -1603,7 +1603,7 @@ const _sfc_main$m = /* @__PURE__ */ _defineComponent$m({
                   })) : _createCommentVNode$h("", true)
                 ]),
                 _: 1
-              })) : (_openBlock$m(), _createBlock$h(_component_v_alert, {
+              })) : (_openBlock$n(), _createBlock$h(_component_v_alert, {
                 key: 1,
                 type: "info",
                 variant: "tonal",
@@ -1618,9 +1618,9 @@ const _sfc_main$m = /* @__PURE__ */ _defineComponent$m({
             ]),
             _: 1
           }),
-          _createVNode$i(_component_v_card_actions, null, {
+          _createVNode$j(_component_v_card_actions, null, {
             default: _withCtx$i(() => [
-              _createVNode$i(_component_v_btn, {
+              _createVNode$j(_component_v_btn, {
                 variant: "text",
                 "prepend-icon": "mdi-refresh",
                 loading: props.loading,
@@ -1631,8 +1631,8 @@ const _sfc_main$m = /* @__PURE__ */ _defineComponent$m({
                 ])),
                 _: 1
               }, 8, ["loading"]),
-              _createVNode$i(_component_v_spacer),
-              _createVNode$i(_component_v_btn, {
+              _createVNode$j(_component_v_spacer),
+              _createVNode$j(_component_v_btn, {
                 color: "error",
                 variant: "tonal",
                 "prepend-icon": "mdi-bell-off-outline",
@@ -1655,15 +1655,15 @@ const _sfc_main$m = /* @__PURE__ */ _defineComponent$m({
   }
 });
 
-const NotifyPanel = /* @__PURE__ */ _export_sfc(_sfc_main$m, [["__scopeId", "data-v-fe8afc34"]]);
+const NotifyPanel = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-fe8afc34"]]);
 
-const {defineComponent:_defineComponent$l} = await importShared('vue');
+const {defineComponent:_defineComponent$m} = await importShared('vue');
 
-const {resolveComponent:_resolveComponent$h,createVNode:_createVNode$h,createTextVNode:_createTextVNode$g,withCtx:_withCtx$h,Fragment:_Fragment$d,openBlock:_openBlock$l,createElementBlock:_createElementBlock$k,toDisplayString:_toDisplayString$l,createBlock:_createBlock$g} = await importShared('vue');
+const {resolveComponent:_resolveComponent$h,createVNode:_createVNode$i,createTextVNode:_createTextVNode$g,withCtx:_withCtx$h,Fragment:_Fragment$d,openBlock:_openBlock$m,createElementBlock:_createElementBlock$l,toDisplayString:_toDisplayString$l,createBlock:_createBlock$g} = await importShared('vue');
 
-const {ref: ref$i} = await importShared('vue');
+const {ref: ref$j} = await importShared('vue');
 
-const _sfc_main$l = /* @__PURE__ */ _defineComponent$l({
+const _sfc_main$m = /* @__PURE__ */ _defineComponent$m({
   __name: "LibraryPanel",
   props: {
     config: {},
@@ -1673,7 +1673,7 @@ const _sfc_main$l = /* @__PURE__ */ _defineComponent$l({
   setup(__props, { emit: __emit }) {
     const props = __props;
     const emit = __emit;
-    const showKey = ref$i(false);
+    const showKey = ref$j(false);
     function patch(key, value) {
       emit("patch", { [key]: value });
     }
@@ -1693,26 +1693,26 @@ const _sfc_main$l = /* @__PURE__ */ _defineComponent$l({
       const _component_v_text_field = _resolveComponent$h("v-text-field");
       const _component_v_card_text = _resolveComponent$h("v-card-text");
       const _component_v_card = _resolveComponent$h("v-card");
-      return _openBlock$l(), _createBlock$g(_component_v_card, {
+      return _openBlock$m(), _createBlock$g(_component_v_card, {
         variant: "tonal",
         class: "avh-panel"
       }, {
         default: _withCtx$h(() => [
-          _createVNode$h(_component_v_card_item, null, {
+          _createVNode$i(_component_v_card_item, null, {
             prepend: _withCtx$h(() => [
-              _createVNode$h(_component_v_icon, {
+              _createVNode$i(_component_v_icon, {
                 icon: "mdi-server",
                 color: "primary"
               })
             ]),
             default: _withCtx$h(() => [
-              _createVNode$h(_component_v_card_title, null, {
+              _createVNode$i(_component_v_card_title, null, {
                 default: _withCtx$h(() => _cache[3] || (_cache[3] = [
                   _createTextVNode$g("媒体库")
                 ])),
                 _: 1
               }),
-              _createVNode$h(_component_v_card_subtitle, null, {
+              _createVNode$i(_component_v_card_subtitle, null, {
                 default: _withCtx$h(() => _cache[4] || (_cache[4] = [
                   _createTextVNode$g("Emby 地址与密钥 · 两栏都空 = 复用 MoviePilot 的媒体服务器")
                 ])),
@@ -1721,26 +1721,26 @@ const _sfc_main$l = /* @__PURE__ */ _defineComponent$l({
             ]),
             _: 1
           }),
-          _createVNode$h(_component_v_card_text, null, {
+          _createVNode$i(_component_v_card_text, null, {
             default: _withCtx$h(() => [
-              _createVNode$h(_component_v_alert, {
+              _createVNode$i(_component_v_alert, {
                 type: mode() === "half" ? "warning" : mode() === "own" ? "success" : "info",
                 variant: "tonal",
                 density: "compact",
                 class: "text-caption mb-4"
               }, {
                 default: _withCtx$h(() => [
-                  mode() === "reuse" ? (_openBlock$l(), _createElementBlock$k(_Fragment$d, { key: 0 }, [
+                  mode() === "reuse" ? (_openBlock$m(), _createElementBlock$l(_Fragment$d, { key: 0 }, [
                     _createTextVNode$g(" 当前：复用 MoviePilot「设置 → 媒体服务器」里已配置的 Emby（两栏留空即是这个状态）。 ")
-                  ], 64)) : mode() === "own" ? (_openBlock$l(), _createElementBlock$k(_Fragment$d, { key: 1 }, [
+                  ], 64)) : mode() === "own" ? (_openBlock$m(), _createElementBlock$l(_Fragment$d, { key: 1 }, [
                     _createTextVNode$g(" 当前：使用下面填写的 Emby，不再走 MoviePilot 的媒体服务器配置。 ")
-                  ], 64)) : (_openBlock$l(), _createElementBlock$k(_Fragment$d, { key: 2 }, [
+                  ], 64)) : (_openBlock$m(), _createElementBlock$l(_Fragment$d, { key: 2 }, [
                     _createTextVNode$g(_toDisplayString$l(props.validation || "Emby 地址与 API 密钥要一起填，否则会回落到 MoviePilot 的媒体服务器。"), 1)
                   ], 64))
                 ]),
                 _: 1
               }, 8, ["type"]),
-              _createVNode$h(_component_v_text_field, {
+              _createVNode$i(_component_v_text_field, {
                 "model-value": props.config.emby_host,
                 label: "Emby 地址",
                 placeholder: "http://192.0.2.10:8096",
@@ -1752,7 +1752,7 @@ const _sfc_main$l = /* @__PURE__ */ _defineComponent$l({
                 class: "mb-4",
                 "onUpdate:modelValue": _cache[0] || (_cache[0] = (value) => patch("emby_host", value ?? ""))
               }, null, 8, ["model-value"]),
-              _createVNode$h(_component_v_text_field, {
+              _createVNode$i(_component_v_text_field, {
                 "model-value": props.config.emby_apikey,
                 type: showKey.value ? "text" : "password",
                 label: "Emby API 密钥",
@@ -1775,11 +1775,11 @@ const _sfc_main$l = /* @__PURE__ */ _defineComponent$l({
   }
 });
 
-const LibraryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-d05104fc"]]);
+const LibraryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$m, [["__scopeId", "data-v-d05104fc"]]);
 
-const {defineComponent:_defineComponent$k} = await importShared('vue');
+const {defineComponent:_defineComponent$l} = await importShared('vue');
 
-const {resolveComponent:_resolveComponent$g,createVNode:_createVNode$g,createTextVNode:_createTextVNode$f,withCtx:_withCtx$g,createElementVNode:_createElementVNode$j,toDisplayString:_toDisplayString$k,openBlock:_openBlock$k,createBlock:_createBlock$f,createCommentVNode:_createCommentVNode$g,createElementBlock:_createElementBlock$j} = await importShared('vue');
+const {resolveComponent:_resolveComponent$g,createVNode:_createVNode$h,createTextVNode:_createTextVNode$f,withCtx:_withCtx$g,createElementVNode:_createElementVNode$k,toDisplayString:_toDisplayString$k,openBlock:_openBlock$l,createBlock:_createBlock$f,createCommentVNode:_createCommentVNode$g,createElementBlock:_createElementBlock$k} = await importShared('vue');
 
 const _hoisted_1$k = { class: "avh-cache" };
 const _hoisted_2$k = { class: "text-h6" };
@@ -1792,7 +1792,7 @@ const _hoisted_8$a = { class: "text-caption text-medium-emphasis mt-3 mb-0" };
 const _hoisted_9$a = { key: 0 };
 const {computed: computed$f} = await importShared('vue');
 const DASH$1 = "—";
-const _sfc_main$k = /* @__PURE__ */ _defineComponent$k({
+const _sfc_main$l = /* @__PURE__ */ _defineComponent$l({
   __name: "RuntimePanel",
   props: {
     cacheText: {},
@@ -1837,26 +1837,26 @@ const _sfc_main$k = /* @__PURE__ */ _defineComponent$k({
       const _component_v_alert = _resolveComponent$g("v-alert");
       const _component_v_card_text = _resolveComponent$g("v-card-text");
       const _component_v_card = _resolveComponent$g("v-card");
-      return _openBlock$k(), _createBlock$f(_component_v_card, {
+      return _openBlock$l(), _createBlock$f(_component_v_card, {
         variant: "tonal",
         class: "avh-panel"
       }, {
         default: _withCtx$g(() => [
-          _createVNode$g(_component_v_card_item, null, {
+          _createVNode$h(_component_v_card_item, null, {
             prepend: _withCtx$g(() => [
-              _createVNode$g(_component_v_icon, {
+              _createVNode$h(_component_v_icon, {
                 icon: "mdi-database-cog",
                 color: "primary"
               })
             ]),
             default: _withCtx$g(() => [
-              _createVNode$g(_component_v_card_title, null, {
+              _createVNode$h(_component_v_card_title, null, {
                 default: _withCtx$g(() => _cache[2] || (_cache[2] = [
                   _createTextVNode$f("运行与缓存")
                 ])),
                 _: 1
               }),
-              _createVNode$g(_component_v_card_subtitle, null, {
+              _createVNode$h(_component_v_card_subtitle, null, {
                 default: _withCtx$g(() => _cache[3] || (_cache[3] = [
                   _createTextVNode$f("缓存占用与清理 · 限流参数只读")
                 ])),
@@ -1865,15 +1865,15 @@ const _sfc_main$k = /* @__PURE__ */ _defineComponent$k({
             ]),
             _: 1
           }),
-          _createVNode$g(_component_v_card_text, null, {
+          _createVNode$h(_component_v_card_text, null, {
             default: _withCtx$g(() => [
-              _createElementVNode$j("div", _hoisted_1$k, [
-                _createElementVNode$j("div", null, [
-                  _cache[4] || (_cache[4] = _createElementVNode$j("div", { class: "text-caption text-medium-emphasis" }, "缓存占用", -1)),
-                  _createElementVNode$j("div", _hoisted_2$k, _toDisplayString$k(cacheLabel.value), 1)
+              _createElementVNode$k("div", _hoisted_1$k, [
+                _createElementVNode$k("div", null, [
+                  _cache[4] || (_cache[4] = _createElementVNode$k("div", { class: "text-caption text-medium-emphasis" }, "缓存占用", -1)),
+                  _createElementVNode$k("div", _hoisted_2$k, _toDisplayString$k(cacheLabel.value), 1)
                 ]),
-                _createElementVNode$j("div", _hoisted_3$i, [
-                  _createVNode$g(_component_v_btn, {
+                _createElementVNode$k("div", _hoisted_3$i, [
+                  _createVNode$h(_component_v_btn, {
                     color: "warning",
                     variant: "tonal",
                     "prepend-icon": "mdi-broom",
@@ -1885,7 +1885,7 @@ const _sfc_main$k = /* @__PURE__ */ _defineComponent$k({
                     ])),
                     _: 1
                   }, 8, ["loading"]),
-                  _createVNode$g(_component_v_btn, {
+                  _createVNode$h(_component_v_btn, {
                     variant: "text",
                     "prepend-icon": "mdi-refresh",
                     loading: props.loading,
@@ -1899,19 +1899,19 @@ const _sfc_main$k = /* @__PURE__ */ _defineComponent$k({
                   }, 8, ["loading"])
                 ])
               ]),
-              _createVNode$g(_component_v_divider, { class: "my-4" }),
-              _cache[13] || (_cache[13] = _createElementVNode$j("div", { class: "text-subtitle-2 mb-2" }, "订阅检查限流（只读）", -1)),
-              _createVNode$g(_component_v_list, {
+              _createVNode$h(_component_v_divider, { class: "my-4" }),
+              _cache[13] || (_cache[13] = _createElementVNode$k("div", { class: "text-subtitle-2 mb-2" }, "订阅检查限流（只读）", -1)),
+              _createVNode$h(_component_v_list, {
                 density: "compact",
                 class: "pa-0"
               }, {
                 default: _withCtx$g(() => [
-                  _createVNode$g(_component_v_list_item, { class: "px-0" }, {
+                  _createVNode$h(_component_v_list_item, { class: "px-0" }, {
                     append: _withCtx$g(() => [
-                      _createElementVNode$j("span", _hoisted_4$f, _toDisplayString$k(todayLabel.value), 1)
+                      _createElementVNode$k("span", _hoisted_4$f, _toDisplayString$k(todayLabel.value), 1)
                     ]),
                     default: _withCtx$g(() => [
-                      _createVNode$g(_component_v_list_item_title, { class: "text-body-2" }, {
+                      _createVNode$h(_component_v_list_item_title, { class: "text-body-2" }, {
                         default: _withCtx$g(() => _cache[7] || (_cache[7] = [
                           _createTextVNode$f("今天已检查")
                         ])),
@@ -1920,12 +1920,12 @@ const _sfc_main$k = /* @__PURE__ */ _defineComponent$k({
                     ]),
                     _: 1
                   }),
-                  _createVNode$g(_component_v_list_item, { class: "px-0" }, {
+                  _createVNode$h(_component_v_list_item, { class: "px-0" }, {
                     append: _withCtx$g(() => [
-                      _createElementVNode$j("span", _hoisted_5$e, _toDisplayString$k(lastCheckLabel.value), 1)
+                      _createElementVNode$k("span", _hoisted_5$e, _toDisplayString$k(lastCheckLabel.value), 1)
                     ]),
                     default: _withCtx$g(() => [
-                      _createVNode$g(_component_v_list_item_title, { class: "text-body-2" }, {
+                      _createVNode$h(_component_v_list_item_title, { class: "text-body-2" }, {
                         default: _withCtx$g(() => _cache[8] || (_cache[8] = [
                           _createTextVNode$f("上次检查")
                         ])),
@@ -1934,12 +1934,12 @@ const _sfc_main$k = /* @__PURE__ */ _defineComponent$k({
                     ]),
                     _: 1
                   }),
-                  _createVNode$g(_component_v_list_item, { class: "px-0" }, {
+                  _createVNode$h(_component_v_list_item, { class: "px-0" }, {
                     append: _withCtx$g(() => [
-                      _createElementVNode$j("span", _hoisted_6$c, _toDisplayString$k(nextCheckLabel.value), 1)
+                      _createElementVNode$k("span", _hoisted_6$c, _toDisplayString$k(nextCheckLabel.value), 1)
                     ]),
                     default: _withCtx$g(() => [
-                      _createVNode$g(_component_v_list_item_title, { class: "text-body-2" }, {
+                      _createVNode$h(_component_v_list_item_title, { class: "text-body-2" }, {
                         default: _withCtx$g(() => _cache[9] || (_cache[9] = [
                           _createTextVNode$f("下次可检查")
                         ])),
@@ -1948,12 +1948,12 @@ const _sfc_main$k = /* @__PURE__ */ _defineComponent$k({
                     ]),
                     _: 1
                   }),
-                  _createVNode$g(_component_v_list_item, { class: "px-0" }, {
+                  _createVNode$h(_component_v_list_item, { class: "px-0" }, {
                     append: _withCtx$g(() => [
-                      _createElementVNode$j("span", _hoisted_7$b, _toDisplayString$k(intervalLabel.value), 1)
+                      _createElementVNode$k("span", _hoisted_7$b, _toDisplayString$k(intervalLabel.value), 1)
                     ]),
                     default: _withCtx$g(() => [
-                      _createVNode$g(_component_v_list_item_title, { class: "text-body-2" }, {
+                      _createVNode$h(_component_v_list_item_title, { class: "text-body-2" }, {
                         default: _withCtx$g(() => _cache[10] || (_cache[10] = [
                           _createTextVNode$f("间隔下限")
                         ])),
@@ -1965,7 +1965,7 @@ const _sfc_main$k = /* @__PURE__ */ _defineComponent$k({
                 ]),
                 _: 1
               }),
-              blockedLabel.value ? (_openBlock$k(), _createBlock$f(_component_v_alert, {
+              blockedLabel.value ? (_openBlock$l(), _createBlock$f(_component_v_alert, {
                 key: 0,
                 type: "warning",
                 variant: "tonal",
@@ -1977,13 +1977,13 @@ const _sfc_main$k = /* @__PURE__ */ _defineComponent$k({
                 ]),
                 _: 1
               })) : _createCommentVNode$g("", true),
-              _createElementVNode$j("p", _hoisted_8$a, [
+              _createElementVNode$k("p", _hoisted_8$a, [
                 _cache[12] || (_cache[12] = _createTextVNode$f(" 限流参数按用户明确要求固定（每天 ≤6 次、间隔 ≥240 分钟），界面不提供放宽入口。 ")),
-                checkMissing.value ? (_openBlock$k(), _createElementBlock$j("span", _hoisted_9$a, _cache[11] || (_cache[11] = [
+                checkMissing.value ? (_openBlock$l(), _createElementBlock$k("span", _hoisted_9$a, _cache[11] || (_cache[11] = [
                   _createTextVNode$f(" 当前后端还没返回 "),
-                  _createElementVNode$j("code", null, "check", -1),
+                  _createElementVNode$k("code", null, "check", -1),
                   _createTextVNode$f(" 字段（本轮正在补），所以上面几行显示 "),
-                  _createElementVNode$j("code", null, "—", -1),
+                  _createElementVNode$k("code", null, "—", -1),
                   _createTextVNode$f("；字段上线后自动显示。 ")
                 ]))) : _createCommentVNode$g("", true)
               ])
@@ -1997,11 +1997,11 @@ const _sfc_main$k = /* @__PURE__ */ _defineComponent$k({
   }
 });
 
-const RuntimePanel = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-cd2af22c"]]);
+const RuntimePanel = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-cd2af22c"]]);
 
-const {defineComponent:_defineComponent$j} = await importShared('vue');
+const {defineComponent:_defineComponent$k} = await importShared('vue');
 
-const {resolveComponent:_resolveComponent$f,createVNode:_createVNode$f,createTextVNode:_createTextVNode$e,withCtx:_withCtx$f,toDisplayString:_toDisplayString$j,createElementVNode:_createElementVNode$i,openBlock:_openBlock$j,createBlock:_createBlock$e,createCommentVNode:_createCommentVNode$f} = await importShared('vue');
+const {resolveComponent:_resolveComponent$f,createVNode:_createVNode$g,createTextVNode:_createTextVNode$e,withCtx:_withCtx$f,toDisplayString:_toDisplayString$j,createElementVNode:_createElementVNode$j,openBlock:_openBlock$k,createBlock:_createBlock$e,createCommentVNode:_createCommentVNode$f} = await importShared('vue');
 
 const _hoisted_1$j = { class: "text-body-2 font-weight-medium" };
 const _hoisted_2$j = { class: "text-body-2 font-weight-medium" };
@@ -2009,7 +2009,7 @@ const _hoisted_3$h = { class: "text-body-2" };
 const DASH = "—";
 const DATA_ROOT = "/avhelper/cache";
 const JAVDB_BIN = "/avhelper/bin/javdb";
-const _sfc_main$j = /* @__PURE__ */ _defineComponent$j({
+const _sfc_main$k = /* @__PURE__ */ _defineComponent$k({
   __name: "AboutPanel",
   props: {
     version: {},
@@ -2029,26 +2029,26 @@ const _sfc_main$j = /* @__PURE__ */ _defineComponent$j({
       const _component_v_divider = _resolveComponent$f("v-divider");
       const _component_v_card_text = _resolveComponent$f("v-card-text");
       const _component_v_card = _resolveComponent$f("v-card");
-      return _openBlock$j(), _createBlock$e(_component_v_card, {
+      return _openBlock$k(), _createBlock$e(_component_v_card, {
         variant: "tonal",
         class: "avh-panel"
       }, {
         default: _withCtx$f(() => [
-          _createVNode$f(_component_v_card_item, null, {
+          _createVNode$g(_component_v_card_item, null, {
             prepend: _withCtx$f(() => [
-              _createVNode$f(_component_v_icon, {
+              _createVNode$g(_component_v_icon, {
                 icon: "mdi-information-outline",
                 color: "primary"
               })
             ]),
             default: _withCtx$f(() => [
-              _createVNode$f(_component_v_card_title, null, {
+              _createVNode$g(_component_v_card_title, null, {
                 default: _withCtx$f(() => _cache[0] || (_cache[0] = [
                   _createTextVNode$e("关于")
                 ])),
                 _: 1
               }),
-              _createVNode$f(_component_v_card_subtitle, null, {
+              _createVNode$g(_component_v_card_subtitle, null, {
                 default: _withCtx$f(() => _cache[1] || (_cache[1] = [
                   _createTextVNode$e("AVHelper · Vue 联邦渲染模式")
                 ])),
@@ -2057,19 +2057,19 @@ const _sfc_main$j = /* @__PURE__ */ _defineComponent$j({
             ]),
             _: 1
           }),
-          _createVNode$f(_component_v_card_text, null, {
+          _createVNode$g(_component_v_card_text, null, {
             default: _withCtx$f(() => [
-              _createVNode$f(_component_v_list, {
+              _createVNode$g(_component_v_list, {
                 density: "compact",
                 class: "pa-0"
               }, {
                 default: _withCtx$f(() => [
-                  _createVNode$f(_component_v_list_item, { class: "px-0" }, {
+                  _createVNode$g(_component_v_list_item, { class: "px-0" }, {
                     append: _withCtx$f(() => [
-                      _createElementVNode$i("span", _hoisted_1$j, _toDisplayString$j(props.version || DASH), 1)
+                      _createElementVNode$j("span", _hoisted_1$j, _toDisplayString$j(props.version || DASH), 1)
                     ]),
                     default: _withCtx$f(() => [
-                      _createVNode$f(_component_v_list_item_title, { class: "text-body-2" }, {
+                      _createVNode$g(_component_v_list_item_title, { class: "text-body-2" }, {
                         default: _withCtx$f(() => _cache[2] || (_cache[2] = [
                           _createTextVNode$e("版本号")
                         ])),
@@ -2078,12 +2078,12 @@ const _sfc_main$j = /* @__PURE__ */ _defineComponent$j({
                     ]),
                     _: 1
                   }),
-                  _createVNode$f(_component_v_list_item, { class: "px-0" }, {
+                  _createVNode$g(_component_v_list_item, { class: "px-0" }, {
                     append: _withCtx$f(() => [
-                      _createElementVNode$i("span", _hoisted_2$j, _toDisplayString$j(props.pluginId || DASH), 1)
+                      _createElementVNode$j("span", _hoisted_2$j, _toDisplayString$j(props.pluginId || DASH), 1)
                     ]),
                     default: _withCtx$f(() => [
-                      _createVNode$f(_component_v_list_item_title, { class: "text-body-2" }, {
+                      _createVNode$g(_component_v_list_item_title, { class: "text-body-2" }, {
                         default: _withCtx$f(() => _cache[3] || (_cache[3] = [
                           _createTextVNode$e("插件 ID")
                         ])),
@@ -2092,15 +2092,15 @@ const _sfc_main$j = /* @__PURE__ */ _defineComponent$j({
                     ]),
                     _: 1
                   }),
-                  props.sourcePluginId ? (_openBlock$j(), _createBlock$e(_component_v_list_item, {
+                  props.sourcePluginId ? (_openBlock$k(), _createBlock$e(_component_v_list_item, {
                     key: 0,
                     class: "px-0"
                   }, {
                     append: _withCtx$f(() => [
-                      _createElementVNode$i("span", _hoisted_3$h, _toDisplayString$j(props.sourcePluginId), 1)
+                      _createElementVNode$j("span", _hoisted_3$h, _toDisplayString$j(props.sourcePluginId), 1)
                     ]),
                     default: _withCtx$f(() => [
-                      _createVNode$f(_component_v_list_item_title, { class: "text-body-2" }, {
+                      _createVNode$g(_component_v_list_item_title, { class: "text-body-2" }, {
                         default: _withCtx$f(() => _cache[4] || (_cache[4] = [
                           _createTextVNode$e("源插件 ID（分身）")
                         ])),
@@ -2109,14 +2109,14 @@ const _sfc_main$j = /* @__PURE__ */ _defineComponent$j({
                     ]),
                     _: 1
                   })) : _createCommentVNode$f("", true),
-                  _createVNode$f(_component_v_list_item, { class: "px-0" }, {
+                  _createVNode$g(_component_v_list_item, { class: "px-0" }, {
                     append: _withCtx$f(() => [
-                      _createElementVNode$i("span", { class: "text-body-2" }, [
-                        _createElementVNode$i("code", null, _toDisplayString$j(DATA_ROOT))
+                      _createElementVNode$j("span", { class: "text-body-2" }, [
+                        _createElementVNode$j("code", null, _toDisplayString$j(DATA_ROOT))
                       ])
                     ]),
                     default: _withCtx$f(() => [
-                      _createVNode$f(_component_v_list_item_title, { class: "text-body-2" }, {
+                      _createVNode$g(_component_v_list_item_title, { class: "text-body-2" }, {
                         default: _withCtx$f(() => _cache[5] || (_cache[5] = [
                           _createTextVNode$e("数据根")
                         ])),
@@ -2125,15 +2125,15 @@ const _sfc_main$j = /* @__PURE__ */ _defineComponent$j({
                     ]),
                     _: 1
                   }),
-                  _createVNode$f(_component_v_list_item, { class: "px-0" }, {
+                  _createVNode$g(_component_v_list_item, { class: "px-0" }, {
                     append: _withCtx$f(() => [
-                      _createElementVNode$i("span", { class: "text-body-2" }, [
-                        _createElementVNode$i("code", null, _toDisplayString$j(JAVDB_BIN)),
+                      _createElementVNode$j("span", { class: "text-body-2" }, [
+                        _createElementVNode$j("code", null, _toDisplayString$j(JAVDB_BIN)),
                         _cache[7] || (_cache[7] = _createTextVNode$e("（与原版共用，只读）"))
                       ])
                     ]),
                     default: _withCtx$f(() => [
-                      _createVNode$f(_component_v_list_item_title, { class: "text-body-2" }, {
+                      _createVNode$g(_component_v_list_item_title, { class: "text-body-2" }, {
                         default: _withCtx$f(() => _cache[6] || (_cache[6] = [
                           _createTextVNode$e("javdb 二进制")
                         ])),
@@ -2145,23 +2145,23 @@ const _sfc_main$j = /* @__PURE__ */ _defineComponent$j({
                 ]),
                 _: 1
               }),
-              _createVNode$f(_component_v_divider, { class: "my-3" }),
-              _createElementVNode$i("p", { class: "text-caption text-medium-emphasis mb-2" }, [
+              _createVNode$g(_component_v_divider, { class: "my-3" }),
+              _createElementVNode$j("p", { class: "text-caption text-medium-emphasis mb-2" }, [
                 _cache[8] || (_cache[8] = _createTextVNode$e(" 数据根在插件数据卷上：SQLite 落在 ")),
-                _createElementVNode$i("code", null, _toDisplayString$j(DATA_ROOT) + "/meta/avhelper.db"),
+                _createElementVNode$j("code", null, _toDisplayString$j(DATA_ROOT) + "/meta/avhelper.db"),
                 _cache[9] || (_cache[9] = _createTextVNode$e("，图片与 JSON 缓存同根。 SQLite、图片与 JSON 缓存同根，全在插件数据卷上。 "))
               ]),
-              _cache[10] || (_cache[10] = _createElementVNode$i("p", { class: "text-caption text-medium-emphasis mb-0" }, [
+              _cache[10] || (_cache[10] = _createElementVNode$j("p", { class: "text-caption text-medium-emphasis mb-0" }, [
                 _createTextVNode$e(" 界面上方是宿主的统一弹窗：标题栏、关闭按钮与 Toast 都由宿主提供，本插件复用 "),
-                _createElementVNode$i("code", null, "moviepilot:toast"),
+                _createElementVNode$j("code", null, "moviepilot:toast"),
                 _createTextVNode$e(" / "),
-                _createElementVNode$i("code", null, "moviepilot:confirm"),
+                _createElementVNode$j("code", null, "moviepilot:confirm"),
                 _createTextVNode$e("，不自建。 版本号来自 "),
-                _createElementVNode$i("code", null, "plugin/page/<id>"),
+                _createElementVNode$j("code", null, "plugin/page/<id>"),
                 _createTextVNode$e(" 的 "),
-                _createElementVNode$i("code", null, "plugin_version"),
+                _createElementVNode$j("code", null, "plugin_version"),
                 _createTextVNode$e("，取不到显示 "),
-                _createElementVNode$i("code", null, "—"),
+                _createElementVNode$j("code", null, "—"),
                 _createTextVNode$e("。 ")
               ], -1))
             ]),
@@ -2174,21 +2174,21 @@ const _sfc_main$j = /* @__PURE__ */ _defineComponent$j({
   }
 });
 
-const AboutPanel = /* @__PURE__ */ _export_sfc(_sfc_main$j, [["__scopeId", "data-v-02ead8f0"]]);
+const AboutPanel = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-02ead8f0"]]);
 
-const {defineComponent:_defineComponent$i} = await importShared('vue');
+const {defineComponent:_defineComponent$j} = await importShared('vue');
 
-const {openBlock:_openBlock$i,createElementBlock:_createElementBlock$i,toDisplayString:_toDisplayString$i,normalizeClass:_normalizeClass$9} = await importShared('vue');
+const {openBlock:_openBlock$j,createElementBlock:_createElementBlock$j,toDisplayString:_toDisplayString$i,normalizeClass:_normalizeClass$a} = await importShared('vue');
 
 const _hoisted_1$i = ["src", "alt", "loading"];
 const _hoisted_2$i = {
   key: 1,
   class: "avh-thumb__noimg"
 };
-const {computed: computed$e,ref: ref$h,watch: watch$a} = await importShared('vue');
+const {computed: computed$e,ref: ref$i,watch: watch$a} = await importShared('vue');
 
 const PROXY_MARK = "/img?url=";
-const _sfc_main$i = /* @__PURE__ */ _defineComponent$i({
+const _sfc_main$j = /* @__PURE__ */ _defineComponent$j({
   __name: "Thumb",
   props: {
     src: { default: "" },
@@ -2202,8 +2202,8 @@ const _sfc_main$i = /* @__PURE__ */ _defineComponent$i({
   setup(__props, { emit: __emit }) {
     const props = __props;
     const emit = __emit;
-    const useProxy = ref$h(false);
-    const failed = ref$h(false);
+    const useProxy = ref$i(false);
+    const failed = ref$i(false);
     watch$a(
       () => props.src,
       () => {
@@ -2237,10 +2237,10 @@ const _sfc_main$i = /* @__PURE__ */ _defineComponent$i({
       emit("failed", raw);
     }
     return (_ctx, _cache) => {
-      return _openBlock$i(), _createElementBlock$i("div", {
-        class: _normalizeClass$9(["avh-thumb", `avh-thumb--${_ctx.variant}`])
+      return _openBlock$j(), _createElementBlock$j("div", {
+        class: _normalizeClass$a(["avh-thumb", `avh-thumb--${_ctx.variant}`])
       }, [
-        !showPlaceholder.value ? (_openBlock$i(), _createElementBlock$i("img", {
+        !showPlaceholder.value ? (_openBlock$j(), _createElementBlock$j("img", {
           key: 0,
           src: currentSrc.value,
           alt: _ctx.alt,
@@ -2248,15 +2248,15 @@ const _sfc_main$i = /* @__PURE__ */ _defineComponent$i({
           loading: _ctx.lazy ? "lazy" : "eager",
           decoding: "async",
           onError
-        }, null, 40, _hoisted_1$i)) : (_openBlock$i(), _createElementBlock$i("div", _hoisted_2$i, _toDisplayString$i(_ctx.alt || "无图"), 1))
+        }, null, 40, _hoisted_1$i)) : (_openBlock$j(), _createElementBlock$j("div", _hoisted_2$i, _toDisplayString$i(_ctx.alt || "无图"), 1))
       ], 2);
     };
   }
 });
 
-const Thumb = /* @__PURE__ */ _export_sfc(_sfc_main$i, [["__scopeId", "data-v-983b098d"]]);
+const Thumb = /* @__PURE__ */ _export_sfc(_sfc_main$j, [["__scopeId", "data-v-983b098d"]]);
 
-const {ref: ref$g} = await importShared('vue');
+const {ref: ref$h} = await importShared('vue');
 
 function scoreLevel(score, pass) {
   if (!pass) return "lo";
@@ -2269,7 +2269,7 @@ const FILL_LIMIT = 3;
 const fillQueue = [];
 const fillTried = /* @__PURE__ */ new Set();
 let fillBusy = false;
-const filledThumbs = ref$g({});
+const filledThumbs = ref$h({});
 function queueThumb(api, number) {
   const num = String(number ?? "");
   if (!num || fillTried.has(num)) return;
@@ -2299,9 +2299,9 @@ async function pumpThumbFill(api) {
   }
 }
 
-const {defineComponent:_defineComponent$h} = await importShared('vue');
+const {defineComponent:_defineComponent$i} = await importShared('vue');
 
-const {createVNode:_createVNode$e,toDisplayString:_toDisplayString$h,createElementVNode:_createElementVNode$h,openBlock:_openBlock$h,createElementBlock:_createElementBlock$h,createCommentVNode:_createCommentVNode$e,createTextVNode:_createTextVNode$d,resolveComponent:_resolveComponent$e,withCtx:_withCtx$e,createBlock:_createBlock$d,renderList:_renderList$b,Fragment:_Fragment$c,normalizeClass:_normalizeClass$8,unref:_unref$2} = await importShared('vue');
+const {createVNode:_createVNode$f,toDisplayString:_toDisplayString$h,createElementVNode:_createElementVNode$i,openBlock:_openBlock$i,createElementBlock:_createElementBlock$i,createCommentVNode:_createCommentVNode$e,createTextVNode:_createTextVNode$d,resolveComponent:_resolveComponent$e,withCtx:_withCtx$e,createBlock:_createBlock$d,renderList:_renderList$b,Fragment:_Fragment$c,normalizeClass:_normalizeClass$9,unref:_unref$2} = await importShared('vue');
 
 const _hoisted_1$h = { class: "avh-cand" };
 const _hoisted_2$h = { class: "avh-cand__head" };
@@ -2328,8 +2328,8 @@ const _hoisted_13$8 = { class: "avh-cand__act" };
 const _hoisted_14$8 = { colspan: "7" };
 const _hoisted_15$7 = ["title"];
 const _hoisted_16$5 = { key: 0 };
-const {computed: computed$d,ref: ref$f} = await importShared('vue');
-const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
+const {computed: computed$d,ref: ref$g} = await importShared('vue');
+const _sfc_main$i = /* @__PURE__ */ _defineComponent$i({
   __name: "CandTable",
   props: {
     task: {},
@@ -2340,7 +2340,7 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
   setup(__props, { expose: __expose, emit: __emit }) {
     const props = __props;
     const emit = __emit;
-    const pending = ref$f({});
+    const pending = ref$g({});
     const cands = computed$d(() => Array.isArray(props.task.cands) ? props.task.cands : []);
     const passedCount = computed$d(() => cands.value.filter((item) => item.pass !== false).length);
     const taskId = computed$d(() => String(props.task.id ?? ""));
@@ -2398,7 +2398,7 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
       pending.value = { ...pending.value, [key]: true };
       emit("download", { taskId: taskId.value, site: String(cand.site || ""), force: !isPass(cand) });
     }
-    const canceling = ref$f(false);
+    const canceling = ref$g(false);
     function onCancel() {
       if (canceling.value || !taskId.value) return;
       canceling.value = true;
@@ -2426,22 +2426,22 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
     });
     return (_ctx, _cache) => {
       const _component_v_btn = _resolveComponent$e("v-btn");
-      return _openBlock$h(), _createElementBlock$h("div", _hoisted_1$h, [
-        _createElementVNode$h("div", _hoisted_2$h, [
-          _createVNode$e(Thumb, {
+      return _openBlock$i(), _createElementBlock$i("div", _hoisted_1$h, [
+        _createElementVNode$i("div", _hoisted_2$h, [
+          _createVNode$f(Thumb, {
             class: "avh-cand__poster",
             variant: "tposter",
             src: poster.value,
             alt: "无图",
             "plugin-id": _ctx.pluginId
           }, null, 8, ["src", "plugin-id"]),
-          _createElementVNode$h("div", null, [
-            _createElementVNode$h("div", _hoisted_3$g, _toDisplayString$h(_ctx.task.number || ""), 1),
-            _createElementVNode$h("div", _hoisted_4$e, _toDisplayString$h(origin.value) + " · 搜到 " + _toDisplayString$h(cands.value.length) + " · 合格 " + _toDisplayString$h(passedCount.value), 1)
+          _createElementVNode$i("div", null, [
+            _createElementVNode$i("div", _hoisted_3$g, _toDisplayString$h(_ctx.task.number || ""), 1),
+            _createElementVNode$i("div", _hoisted_4$e, _toDisplayString$h(origin.value) + " · 搜到 " + _toDisplayString$h(cands.value.length) + " · 合格 " + _toDisplayString$h(passedCount.value), 1)
           ]),
-          _cache[1] || (_cache[1] = _createElementVNode$h("div", { class: "avh-cand__spacer" }, null, -1)),
-          _ctx.task.auto && _ctx.task.source === "sub" ? (_openBlock$h(), _createElementBlock$h("span", _hoisted_5$d, " 订阅为自动下载，但无候选合格 ")) : _createCommentVNode$e("", true),
-          _ctx.cancelable ? (_openBlock$h(), _createBlock$d(_component_v_btn, {
+          _cache[1] || (_cache[1] = _createElementVNode$i("div", { class: "avh-cand__spacer" }, null, -1)),
+          _ctx.task.auto && _ctx.task.source === "sub" ? (_openBlock$i(), _createElementBlock$i("span", _hoisted_5$d, " 订阅为自动下载，但无候选合格 ")) : _createCommentVNode$e("", true),
+          _ctx.cancelable ? (_openBlock$i(), _createBlock$d(_component_v_btn, {
             key: 1,
             class: "avh-cand__cancel",
             variant: "outlined",
@@ -2457,68 +2457,68 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
             _: 1
           }, 8, ["loading"])) : _createCommentVNode$e("", true)
         ]),
-        _createElementVNode$h("table", _hoisted_6$b, [
-          _cache[6] || (_cache[6] = _createElementVNode$h("colgroup", null, [
-            _createElementVNode$h("col", { class: "avh-cand__col-site" }),
-            _createElementVNode$h("col", { class: "avh-cand__col-mark" }),
-            _createElementVNode$h("col", { class: "avh-cand__col-spec" }),
-            _createElementVNode$h("col", { class: "avh-cand__col-size" }),
-            _createElementVNode$h("col", { class: "avh-cand__col-seed" }),
-            _createElementVNode$h("col", { class: "avh-cand__col-score" }),
-            _createElementVNode$h("col", { class: "avh-cand__col-act" })
+        _createElementVNode$i("table", _hoisted_6$b, [
+          _cache[6] || (_cache[6] = _createElementVNode$i("colgroup", null, [
+            _createElementVNode$i("col", { class: "avh-cand__col-site" }),
+            _createElementVNode$i("col", { class: "avh-cand__col-mark" }),
+            _createElementVNode$i("col", { class: "avh-cand__col-spec" }),
+            _createElementVNode$i("col", { class: "avh-cand__col-size" }),
+            _createElementVNode$i("col", { class: "avh-cand__col-seed" }),
+            _createElementVNode$i("col", { class: "avh-cand__col-score" }),
+            _createElementVNode$i("col", { class: "avh-cand__col-act" })
           ], -1)),
-          _cache[7] || (_cache[7] = _createElementVNode$h("thead", null, [
-            _createElementVNode$h("tr", null, [
-              _createElementVNode$h("th", null, "站点"),
-              _createElementVNode$h("th", null, "标记"),
-              _createElementVNode$h("th", null, "规格"),
-              _createElementVNode$h("th", null, "大小"),
-              _createElementVNode$h("th", null, "做种"),
-              _createElementVNode$h("th", null, "匹配分"),
-              _createElementVNode$h("th", { class: "avh-cand__act" }, "操作")
+          _cache[7] || (_cache[7] = _createElementVNode$i("thead", null, [
+            _createElementVNode$i("tr", null, [
+              _createElementVNode$i("th", null, "站点"),
+              _createElementVNode$i("th", null, "标记"),
+              _createElementVNode$i("th", null, "规格"),
+              _createElementVNode$i("th", null, "大小"),
+              _createElementVNode$i("th", null, "做种"),
+              _createElementVNode$i("th", null, "匹配分"),
+              _createElementVNode$i("th", { class: "avh-cand__act" }, "操作")
             ])
           ], -1)),
-          _createElementVNode$h("tbody", null, [
-            (_openBlock$h(true), _createElementBlock$h(_Fragment$c, null, _renderList$b(rows.value, (row) => {
-              return _openBlock$h(), _createElementBlock$h(_Fragment$c, {
+          _createElementVNode$i("tbody", null, [
+            (_openBlock$i(true), _createElementBlock$i(_Fragment$c, null, _renderList$b(rows.value, (row) => {
+              return _openBlock$i(), _createElementBlock$i(_Fragment$c, {
                 key: row.key
               }, [
-                row.kind === "btnote" ? (_openBlock$h(), _createElementBlock$h("tr", _hoisted_7$a, _cache[2] || (_cache[2] = [
-                  _createElementVNode$h("td", {
+                row.kind === "btnote" ? (_openBlock$i(), _createElementBlock$i("tr", _hoisted_7$a, _cache[2] || (_cache[2] = [
+                  _createElementVNode$i("td", {
                     colspan: "7",
                     class: "avh-cand__hint avh-cand__btnote"
                   }, " — PT 没有合格候选，以下为 BT 磁力兜底 — ", -1)
-                ]))) : (_openBlock$h(), _createElementBlock$h(_Fragment$c, { key: 1 }, [
-                  _createElementVNode$h("tr", {
-                    class: _normalizeClass$8(rowClass(row.cand))
+                ]))) : (_openBlock$i(), _createElementBlock$i(_Fragment$c, { key: 1 }, [
+                  _createElementVNode$i("tr", {
+                    class: _normalizeClass$9(rowClass(row.cand))
                   }, [
-                    _createElementVNode$h("td", null, [
-                      row.cand.src === "BT" ? (_openBlock$h(), _createElementBlock$h("span", _hoisted_8$9, "BT")) : _createCommentVNode$e("", true),
+                    _createElementVNode$i("td", null, [
+                      row.cand.src === "BT" ? (_openBlock$i(), _createElementBlock$i("span", _hoisted_8$9, "BT")) : _createCommentVNode$e("", true),
                       _createTextVNode$d(" " + _toDisplayString$h(row.cand.site || ""), 1)
                     ]),
-                    _createElementVNode$h("td", _hoisted_9$9, [
-                      marks(row.cand).length ? (_openBlock$h(true), _createElementBlock$h(_Fragment$c, { key: 0 }, _renderList$b(marks(row.cand), (mark) => {
-                        return _openBlock$h(), _createElementBlock$h("span", {
+                    _createElementVNode$i("td", _hoisted_9$9, [
+                      marks(row.cand).length ? (_openBlock$i(true), _createElementBlock$i(_Fragment$c, { key: 0 }, _renderList$b(marks(row.cand), (mark) => {
+                        return _openBlock$i(), _createElementBlock$i("span", {
                           key: mark.text,
-                          class: _normalizeClass$8(["avh-tag", mark.cls])
+                          class: _normalizeClass$9(["avh-tag", mark.cls])
                         }, _toDisplayString$h(mark.text), 3);
-                      }), 128)) : (_openBlock$h(), _createElementBlock$h("span", _hoisted_10$9, "—"))
+                      }), 128)) : (_openBlock$i(), _createElementBlock$i("span", _hoisted_10$9, "—"))
                     ]),
-                    _createElementVNode$h("td", {
+                    _createElementVNode$i("td", {
                       class: "avh-cand__spec",
                       title: row.cand.spec || ""
                     }, _toDisplayString$h(row.cand.spec || ""), 9, _hoisted_11$8),
-                    _createElementVNode$h("td", null, _toDisplayString$h(row.cand.size || ""), 1),
-                    _createElementVNode$h("td", null, _toDisplayString$h(seedersText(row.cand)), 1),
-                    _createElementVNode$h("td", {
+                    _createElementVNode$i("td", null, _toDisplayString$h(row.cand.size || ""), 1),
+                    _createElementVNode$i("td", null, _toDisplayString$h(seedersText(row.cand)), 1),
+                    _createElementVNode$i("td", {
                       title: row.cand.breakdown || ""
                     }, [
-                      _createElementVNode$h("span", {
-                        class: _normalizeClass$8(["avh-score", `avh-score--${_unref$2(scoreLevel)(row.cand.score, isPass(row.cand))}`])
+                      _createElementVNode$i("span", {
+                        class: _normalizeClass$9(["avh-score", `avh-score--${_unref$2(scoreLevel)(row.cand.score, isPass(row.cand))}`])
                       }, _toDisplayString$h(scoreText(row.cand)), 3)
                     ], 8, _hoisted_12$8),
-                    _createElementVNode$h("td", _hoisted_13$8, [
-                      isPass(row.cand) ? (_openBlock$h(), _createBlock$d(_component_v_btn, {
+                    _createElementVNode$i("td", _hoisted_13$8, [
+                      isPass(row.cand) ? (_openBlock$i(), _createBlock$d(_component_v_btn, {
                         key: 0,
                         class: "avh-cand__dl",
                         variant: "outlined",
@@ -2530,7 +2530,7 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
                           _createTextVNode$d("下载")
                         ])),
                         _: 2
-                      }, 1032, ["loading", "onClick"])) : (_openBlock$h(), _createBlock$d(_component_v_btn, {
+                      }, 1032, ["loading", "onClick"])) : (_openBlock$i(), _createBlock$d(_component_v_btn, {
                         key: 1,
                         class: "avh-cand__dl",
                         variant: "outlined",
@@ -2546,12 +2546,12 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
                       }, 1032, ["title", "loading", "onClick"]))
                     ])
                   ], 2),
-                  titleOf(row.cand) ? (_openBlock$h(), _createElementBlock$h("tr", {
+                  titleOf(row.cand) ? (_openBlock$i(), _createElementBlock$i("tr", {
                     key: 0,
-                    class: _normalizeClass$8(["avh-cand__sub", ...rowClass(row.cand)])
+                    class: _normalizeClass$9(["avh-cand__sub", ...rowClass(row.cand)])
                   }, [
-                    _createElementVNode$h("td", _hoisted_14$8, [
-                      _createElementVNode$h("div", {
+                    _createElementVNode$i("td", _hoisted_14$8, [
+                      _createElementVNode$i("div", {
                         class: "avh-cand__ttl",
                         title: titleOf(row.cand)
                       }, _toDisplayString$h(titleOf(row.cand)), 9, _hoisted_15$7)
@@ -2560,8 +2560,8 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
                 ], 64))
               ], 64);
             }), 128)),
-            !cands.value.length ? (_openBlock$h(), _createElementBlock$h("tr", _hoisted_16$5, _cache[5] || (_cache[5] = [
-              _createElementVNode$h("td", {
+            !cands.value.length ? (_openBlock$i(), _createElementBlock$i("tr", _hoisted_16$5, _cache[5] || (_cache[5] = [
+              _createElementVNode$i("td", {
                 colspan: "7",
                 class: "avh-cand__hint avh-cand__empty"
               }, "没有搜到任何候选", -1)
@@ -2573,11 +2573,11 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
   }
 });
 
-const CandTable = /* @__PURE__ */ _export_sfc(_sfc_main$h, [["__scopeId", "data-v-4c3555d9"]]);
+const CandTable = /* @__PURE__ */ _export_sfc(_sfc_main$i, [["__scopeId", "data-v-4c3555d9"]]);
 
-const {defineComponent:_defineComponent$g} = await importShared('vue');
+const {defineComponent:_defineComponent$h} = await importShared('vue');
 
-const {createElementVNode:_createElementVNode$g,toDisplayString:_toDisplayString$g,openBlock:_openBlock$g,createElementBlock:_createElementBlock$g,createCommentVNode:_createCommentVNode$d,renderSlot:_renderSlot} = await importShared('vue');
+const {createElementVNode:_createElementVNode$h,toDisplayString:_toDisplayString$g,openBlock:_openBlock$h,createElementBlock:_createElementBlock$h,createCommentVNode:_createCommentVNode$d,renderSlot:_renderSlot} = await importShared('vue');
 
 const _hoisted_1$g = { class: "avh-empty" };
 const _hoisted_2$g = ["innerHTML"];
@@ -2589,7 +2589,7 @@ const _hoisted_4$d = {
   key: 1,
   class: "avh-empty__slot"
 };
-const _sfc_main$g = /* @__PURE__ */ _defineComponent$g({
+const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
   __name: "EmptyState",
   props: {
     text: { default: "" },
@@ -2597,13 +2597,13 @@ const _sfc_main$g = /* @__PURE__ */ _defineComponent$g({
   },
   setup(__props) {
     return (_ctx, _cache) => {
-      return _openBlock$g(), _createElementBlock$g("div", _hoisted_1$g, [
-        _createElementVNode$g("div", {
+      return _openBlock$h(), _createElementBlock$h("div", _hoisted_1$g, [
+        _createElementVNode$h("div", {
           class: "avh-empty__text",
           innerHTML: _ctx.text
         }, null, 8, _hoisted_2$g),
-        _ctx.hint ? (_openBlock$g(), _createElementBlock$g("div", _hoisted_3$f, _toDisplayString$g(_ctx.hint), 1)) : _createCommentVNode$d("", true),
-        _ctx.$slots.default ? (_openBlock$g(), _createElementBlock$g("div", _hoisted_4$d, [
+        _ctx.hint ? (_openBlock$h(), _createElementBlock$h("div", _hoisted_3$f, _toDisplayString$g(_ctx.hint), 1)) : _createCommentVNode$d("", true),
+        _ctx.$slots.default ? (_openBlock$h(), _createElementBlock$h("div", _hoisted_4$d, [
           _renderSlot(_ctx.$slots, "default", {}, void 0, true)
         ])) : _createCommentVNode$d("", true)
       ]);
@@ -2611,11 +2611,11 @@ const _sfc_main$g = /* @__PURE__ */ _defineComponent$g({
   }
 });
 
-const EmptyState = /* @__PURE__ */ _export_sfc(_sfc_main$g, [["__scopeId", "data-v-d928276a"]]);
+const EmptyState = /* @__PURE__ */ _export_sfc(_sfc_main$h, [["__scopeId", "data-v-d928276a"]]);
 
-const {defineComponent:_defineComponent$f} = await importShared('vue');
+const {defineComponent:_defineComponent$g} = await importShared('vue');
 
-const {toDisplayString:_toDisplayString$f,createElementVNode:_createElementVNode$f,createTextVNode:_createTextVNode$c,resolveComponent:_resolveComponent$d,withCtx:_withCtx$d,createVNode:_createVNode$d,openBlock:_openBlock$f,createElementBlock:_createElementBlock$f,createCommentVNode:_createCommentVNode$c} = await importShared('vue');
+const {toDisplayString:_toDisplayString$f,createElementVNode:_createElementVNode$g,createTextVNode:_createTextVNode$c,resolveComponent:_resolveComponent$d,withCtx:_withCtx$d,createVNode:_createVNode$e,openBlock:_openBlock$g,createElementBlock:_createElementBlock$g,createCommentVNode:_createCommentVNode$c} = await importShared('vue');
 
 const _hoisted_1$f = {
   class: "avh-errbox",
@@ -2626,7 +2626,7 @@ const _hoisted_3$e = {
   key: 0,
   class: "avh-errbox__act"
 };
-const _sfc_main$f = /* @__PURE__ */ _defineComponent$f({
+const _sfc_main$g = /* @__PURE__ */ _defineComponent$g({
   __name: "ErrorState",
   props: {
     message: { default: "" },
@@ -2639,10 +2639,10 @@ const _sfc_main$f = /* @__PURE__ */ _defineComponent$f({
     const emit = __emit;
     return (_ctx, _cache) => {
       const _component_v_btn = _resolveComponent$d("v-btn");
-      return _openBlock$f(), _createElementBlock$f("div", _hoisted_1$f, [
-        _createElementVNode$f("div", _hoisted_2$f, "⚠️ " + _toDisplayString$f(_ctx.message || "抓取失败，请稍后重试"), 1),
-        _ctx.retryable ? (_openBlock$f(), _createElementBlock$f("div", _hoisted_3$e, [
-          _createVNode$d(_component_v_btn, {
+      return _openBlock$g(), _createElementBlock$g("div", _hoisted_1$f, [
+        _createElementVNode$g("div", _hoisted_2$f, "⚠️ " + _toDisplayString$f(_ctx.message || "抓取失败，请稍后重试"), 1),
+        _ctx.retryable ? (_openBlock$g(), _createElementBlock$g("div", _hoisted_3$e, [
+          _createVNode$e(_component_v_btn, {
             color: "primary",
             variant: "flat",
             size: "small",
@@ -2660,7 +2660,7 @@ const _sfc_main$f = /* @__PURE__ */ _defineComponent$f({
   }
 });
 
-const ErrorState = /* @__PURE__ */ _export_sfc(_sfc_main$f, [["__scopeId", "data-v-8f8a571b"]]);
+const ErrorState = /* @__PURE__ */ _export_sfc(_sfc_main$g, [["__scopeId", "data-v-8f8a571b"]]);
 
 const KEY = "avhnext.pendingSettingsSection";
 function requestSettingsSection(key) {
@@ -2716,17 +2716,17 @@ function nowStr() {
   return (/* @__PURE__ */ new Date()).toLocaleTimeString("zh-CN", { hour12: false });
 }
 
-const {defineComponent:_defineComponent$e} = await importShared('vue');
+const {defineComponent:_defineComponent$f} = await importShared('vue');
 
-const {resolveComponent:_resolveComponent$c,withKeys:_withKeys$2,createVNode:_createVNode$c,toDisplayString:_toDisplayString$e,createTextVNode:_createTextVNode$b,withCtx:_withCtx$c,createElementVNode:_createElementVNode$e,openBlock:_openBlock$e,createBlock:_createBlock$c,createElementBlock:_createElementBlock$e} = await importShared('vue');
+const {resolveComponent:_resolveComponent$c,withKeys:_withKeys$2,createVNode:_createVNode$d,toDisplayString:_toDisplayString$e,createTextVNode:_createTextVNode$b,withCtx:_withCtx$c,createElementVNode:_createElementVNode$f,openBlock:_openBlock$f,createBlock:_createBlock$c,createElementBlock:_createElementBlock$f} = await importShared('vue');
 
 const _hoisted_1$e = { class: "avh-sitesearch" };
 const _hoisted_2$e = { class: "avh-sitesearch__toolbar" };
 const _hoisted_3$d = { class: "avh-sitesearch__hint" };
 const _hoisted_4$c = { class: "avh-sitesearch__range" };
 const _hoisted_5$c = ["title"];
-const {computed: computed$c,nextTick: nextTick$3,ref: ref$e,watch: watch$9} = await importShared('vue');
-const _sfc_main$e = /* @__PURE__ */ _defineComponent$e({
+const {computed: computed$c,nextTick: nextTick$4,ref: ref$f,watch: watch$9} = await importShared('vue');
+const _sfc_main$f = /* @__PURE__ */ _defineComponent$f({
   __name: "SiteSearchView",
   props: {
     store: {},
@@ -2739,13 +2739,13 @@ const _sfc_main$e = /* @__PURE__ */ _defineComponent$e({
     const props = __props;
     const emit = __emit;
     const t = hostToast(props.toast);
-    const candTableRef = ref$e(null);
-    const keyword = ref$e("");
-    const searching = ref$e(false);
-    const searchedAt = ref$e("");
-    const task = ref$e(null);
-    const errorText = ref$e("");
-    const retrying = ref$e(false);
+    const candTableRef = ref$f(null);
+    const keyword = ref$f("");
+    const searching = ref$f(false);
+    const searchedAt = ref$f("");
+    const task = ref$f(null);
+    const errorText = ref$f("");
+    const retrying = ref$f(false);
     const siteNames = computed$c(
       () => props.store.sites.value.map((item) => String(item?.name || "")).filter(Boolean)
     );
@@ -2769,12 +2769,12 @@ const _sfc_main$e = /* @__PURE__ */ _defineComponent$e({
     const searchLabel = computed$c(() => searching.value ? "搜索中…" : "搜索站点");
     watch$9(task, async () => {
       candTableRef.value?.clearPending();
-      await nextTick$3();
+      await nextTick$4();
       candTableRef.value?.clearPending();
     });
     function clearPending() {
       candTableRef.value?.clearPending();
-      void nextTick$3(() => candTableRef.value?.clearPending());
+      void nextTick$4(() => candTableRef.value?.clearPending());
     }
     async function doSearch() {
       const kw = keyword.value.trim();
@@ -2846,9 +2846,9 @@ const _sfc_main$e = /* @__PURE__ */ _defineComponent$e({
     return (_ctx, _cache) => {
       const _component_v_text_field = _resolveComponent$c("v-text-field");
       const _component_v_btn = _resolveComponent$c("v-btn");
-      return _openBlock$e(), _createElementBlock$e("div", _hoisted_1$e, [
-        _createElementVNode$e("div", _hoisted_2$e, [
-          _createVNode$c(_component_v_text_field, {
+      return _openBlock$f(), _createElementBlock$f("div", _hoisted_1$e, [
+        _createElementVNode$f("div", _hoisted_2$e, [
+          _createVNode$d(_component_v_text_field, {
             modelValue: keyword.value,
             "onUpdate:modelValue": _cache[0] || (_cache[0] = ($event) => keyword.value = $event),
             class: "avh-sitesearch__input",
@@ -2860,7 +2860,7 @@ const _sfc_main$e = /* @__PURE__ */ _defineComponent$e({
             disabled: searching.value,
             onKeydown: _withKeys$2(doSearch, ["enter"])
           }, null, 8, ["modelValue", "disabled"]),
-          _createVNode$c(_component_v_btn, {
+          _createVNode$d(_component_v_btn, {
             color: "primary",
             variant: "flat",
             loading: searching.value,
@@ -2873,17 +2873,17 @@ const _sfc_main$e = /* @__PURE__ */ _defineComponent$e({
             ]),
             _: 1
           }, 8, ["loading", "disabled"]),
-          _cache[1] || (_cache[1] = _createElementVNode$e("div", { class: "avh-sitesearch__spacer" }, null, -1)),
-          _createElementVNode$e("span", _hoisted_3$d, _toDisplayString$e(searchedAt.value ? `上次搜索 ${searchedAt.value}` : "命中即停 · 站点间隔 3-8 秒"), 1)
+          _cache[1] || (_cache[1] = _createElementVNode$f("div", { class: "avh-sitesearch__spacer" }, null, -1)),
+          _createElementVNode$f("span", _hoisted_3$d, _toDisplayString$e(searchedAt.value ? `上次搜索 ${searchedAt.value}` : "命中即停 · 站点间隔 3-8 秒"), 1)
         ]),
-        _createElementVNode$e("div", _hoisted_4$c, [
-          _cache[3] || (_cache[3] = _createElementVNode$e("div", { class: "avh-sitesearch__label" }, "搜索范围", -1)),
-          _createElementVNode$e("div", {
+        _createElementVNode$f("div", _hoisted_4$c, [
+          _cache[3] || (_cache[3] = _createElementVNode$f("div", { class: "avh-sitesearch__label" }, "搜索范围", -1)),
+          _createElementVNode$f("div", {
             class: "avh-sitesearch__scope",
             title: scopeText.value,
             onClick: onScopeClick
           }, _toDisplayString$e(scopeText.value), 9, _hoisted_5$c),
-          _createVNode$c(_component_v_btn, {
+          _createVNode$d(_component_v_btn, {
             variant: "text",
             size: "small",
             "prepend-icon": "mdi-tune",
@@ -2895,19 +2895,19 @@ const _sfc_main$e = /* @__PURE__ */ _defineComponent$e({
             _: 1
           })
         ]),
-        errorText.value ? (_openBlock$e(), _createBlock$c(ErrorState, {
+        errorText.value ? (_openBlock$f(), _createBlock$c(ErrorState, {
           key: 0,
           message: `站点搜索失败：${errorText.value}`,
           retrying: retrying.value,
           onRetry: retry
-        }, null, 8, ["message", "retrying"])) : hasResult.value && task.value ? (_openBlock$e(), _createBlock$c(CandTable, {
+        }, null, 8, ["message", "retrying"])) : hasResult.value && task.value ? (_openBlock$f(), _createBlock$c(CandTable, {
           key: 1,
           ref_key: "candTableRef",
           ref: candTableRef,
           task: task.value,
           "plugin-id": _ctx.pluginId,
           onDownload
-        }, null, 8, ["task", "plugin-id"])) : (_openBlock$e(), _createBlock$c(EmptyState, {
+        }, null, 8, ["task", "plugin-id"])) : (_openBlock$f(), _createBlock$c(EmptyState, {
           key: 2,
           text: "输入番号或关键词后点「搜索站点」"
         }))
@@ -2916,7 +2916,7 @@ const _sfc_main$e = /* @__PURE__ */ _defineComponent$e({
   }
 });
 
-const SiteSearchView = /* @__PURE__ */ _export_sfc(_sfc_main$e, [["__scopeId", "data-v-bf4e56fe"]]);
+const SiteSearchView = /* @__PURE__ */ _export_sfc(_sfc_main$f, [["__scopeId", "data-v-bf4e56fe"]]);
 
 function asItems(value) {
   return Array.isArray(value) ? value : null;
@@ -2985,9 +2985,9 @@ function filterRecords(items, query, onlyMissing) {
   });
 }
 
-const {defineComponent:_defineComponent$d} = await importShared('vue');
+const {defineComponent:_defineComponent$e} = await importShared('vue');
 
-const {createElementVNode:_createElementVNode$d,resolveComponent:_resolveComponent$b,createVNode:_createVNode$b,createTextVNode:_createTextVNode$a,withCtx:_withCtx$b,toDisplayString:_toDisplayString$d,openBlock:_openBlock$d,createElementBlock:_createElementBlock$d,createCommentVNode:_createCommentVNode$b,unref:_unref$1,renderList:_renderList$a,Fragment:_Fragment$b,createBlock:_createBlock$b} = await importShared('vue');
+const {createElementVNode:_createElementVNode$e,resolveComponent:_resolveComponent$b,createVNode:_createVNode$c,createTextVNode:_createTextVNode$a,withCtx:_withCtx$b,toDisplayString:_toDisplayString$d,openBlock:_openBlock$e,createElementBlock:_createElementBlock$e,createCommentVNode:_createCommentVNode$b,unref:_unref$1,renderList:_renderList$a,Fragment:_Fragment$b,createBlock:_createBlock$b} = await importShared('vue');
 
 const _hoisted_1$d = { class: "avh-history" };
 const _hoisted_2$d = { class: "avh-history__toolbar" };
@@ -3014,10 +3014,10 @@ const _hoisted_12$7 = ["title"];
 const _hoisted_13$7 = ["title"];
 const _hoisted_14$7 = ["title"];
 const _hoisted_15$6 = { class: "avh-history__act" };
-const {computed: computed$b,onMounted: onMounted$6,ref: ref$d} = await importShared('vue');
+const {computed: computed$b,onMounted: onMounted$7,ref: ref$e} = await importShared('vue');
 const ENDPOINT$1 = "plugin/downloads";
 const SKELETON_ROWS = 6;
-const _sfc_main$d = /* @__PURE__ */ _defineComponent$d({
+const _sfc_main$e = /* @__PURE__ */ _defineComponent$e({
   __name: "HistoryView",
   props: {
     api: { default: null },
@@ -3028,14 +3028,14 @@ const _sfc_main$d = /* @__PURE__ */ _defineComponent$d({
     const props = __props;
     const t = hostToast(props.toast);
     const confirm = useHostConfirm();
-    const items = ref$d([]);
-    const serverCounts = ref$d(null);
-    const loading = ref$d(false);
-    const error = ref$d("");
-    const loaded = ref$d(false);
-    const query = ref$d("");
-    const onlyMissing = ref$d(false);
-    const deletingKey = ref$d("");
+    const items = ref$e([]);
+    const serverCounts = ref$e(null);
+    const loading = ref$e(false);
+    const error = ref$e("");
+    const loaded = ref$e(false);
+    const query = ref$e("");
+    const onlyMissing = ref$e(false);
+    const deletingKey = ref$e("");
     const rows = computed$b(
       () => filterRecords(items.value, query.value, onlyMissing.value)
     );
@@ -3123,7 +3123,7 @@ const _sfc_main$d = /* @__PURE__ */ _defineComponent$d({
       return !!deletingKey.value && deletingKey.value === rowKey(item, index);
     }
     const skeletonRows = Array.from({ length: SKELETON_ROWS }, (_, index) => index);
-    onMounted$6(() => {
+    onMounted$7(() => {
       void load(false);
     });
     return (_ctx, _cache) => {
@@ -3131,11 +3131,11 @@ const _sfc_main$d = /* @__PURE__ */ _defineComponent$d({
       const _component_v_switch = _resolveComponent$b("v-switch");
       const _component_v_btn = _resolveComponent$b("v-btn");
       const _component_v_chip = _resolveComponent$b("v-chip");
-      return _openBlock$d(), _createElementBlock$d("div", _hoisted_1$d, [
-        _createElementVNode$d("div", _hoisted_2$d, [
-          _cache[5] || (_cache[5] = _createElementVNode$d("span", { class: "avh-history__hint" }, "插件下载过的番号都在这里，文件删了也留着记录", -1)),
-          _cache[6] || (_cache[6] = _createElementVNode$d("div", { class: "avh-history__spacer" }, null, -1)),
-          _createVNode$b(_component_v_text_field, {
+      return _openBlock$e(), _createElementBlock$e("div", _hoisted_1$d, [
+        _createElementVNode$e("div", _hoisted_2$d, [
+          _cache[5] || (_cache[5] = _createElementVNode$e("span", { class: "avh-history__hint" }, "插件下载过的番号都在这里，文件删了也留着记录", -1)),
+          _cache[6] || (_cache[6] = _createElementVNode$e("div", { class: "avh-history__spacer" }, null, -1)),
+          _createVNode$c(_component_v_text_field, {
             modelValue: query.value,
             "onUpdate:modelValue": _cache[0] || (_cache[0] = ($event) => query.value = $event),
             class: "avh-history__q",
@@ -3148,7 +3148,7 @@ const _sfc_main$d = /* @__PURE__ */ _defineComponent$d({
             placeholder: "番号 / 标题 / 演员",
             "aria-label": "按番号、标题或演员过滤下载历史"
           }, null, 8, ["modelValue"]),
-          _createVNode$b(_component_v_switch, {
+          _createVNode$c(_component_v_switch, {
             modelValue: onlyMissing.value,
             "onUpdate:modelValue": _cache[1] || (_cache[1] = ($event) => onlyMissing.value = $event),
             class: "avh-history__switch",
@@ -3157,7 +3157,7 @@ const _sfc_main$d = /* @__PURE__ */ _defineComponent$d({
             "hide-details": "",
             label: "只看不在库"
           }, null, 8, ["modelValue"]),
-          _createVNode$b(_component_v_btn, {
+          _createVNode$c(_component_v_btn, {
             variant: "outlined",
             size: "small",
             loading: loading.value,
@@ -3169,8 +3169,8 @@ const _sfc_main$d = /* @__PURE__ */ _defineComponent$d({
             _: 1
           }, 8, ["loading"])
         ]),
-        !error.value && (loaded.value || items.value.length) ? (_openBlock$d(), _createElementBlock$d("div", _hoisted_3$c, [
-          _createVNode$b(_component_v_chip, {
+        !error.value && (loaded.value || items.value.length) ? (_openBlock$e(), _createElementBlock$e("div", _hoisted_3$c, [
+          _createVNode$c(_component_v_chip, {
             size: "x-small",
             variant: "flat",
             color: "success",
@@ -3181,7 +3181,7 @@ const _sfc_main$d = /* @__PURE__ */ _defineComponent$d({
             ]),
             _: 1
           }),
-          _createVNode$b(_component_v_chip, {
+          _createVNode$c(_component_v_chip, {
             size: "x-small",
             variant: "outlined",
             label: ""
@@ -3191,102 +3191,102 @@ const _sfc_main$d = /* @__PURE__ */ _defineComponent$d({
             ]),
             _: 1
           }),
-          _createElementVNode$d("span", _hoisted_4$b, _toDisplayString$d(summary.value), 1)
+          _createElementVNode$e("span", _hoisted_4$b, _toDisplayString$d(summary.value), 1)
         ])) : _createCommentVNode$b("", true),
-        loading.value && !items.value.length ? (_openBlock$d(), _createElementBlock$d("div", _hoisted_5$b, [
-          _cache[10] || (_cache[10] = _createElementVNode$d("div", { class: "avh-history__loading" }, "正在读取下载历史…", -1)),
-          _createElementVNode$d("table", _hoisted_6$a, [
-            _cache[8] || (_cache[8] = _createElementVNode$d("colgroup", null, [
-              _createElementVNode$d("col", { class: "avh-history__col-pic" }),
-              _createElementVNode$d("col", { class: "avh-history__col-no" }),
-              _createElementVNode$d("col"),
-              _createElementVNode$d("col", { class: "avh-history__col-actor" }),
-              _createElementVNode$d("col", { class: "avh-history__col-size" }),
-              _createElementVNode$d("col", { class: "avh-history__col-time" }),
-              _createElementVNode$d("col", { class: "avh-history__col-lib" }),
-              _createElementVNode$d("col", { class: "avh-history__col-act" })
+        loading.value && !items.value.length ? (_openBlock$e(), _createElementBlock$e("div", _hoisted_5$b, [
+          _cache[10] || (_cache[10] = _createElementVNode$e("div", { class: "avh-history__loading" }, "正在读取下载历史…", -1)),
+          _createElementVNode$e("table", _hoisted_6$a, [
+            _cache[8] || (_cache[8] = _createElementVNode$e("colgroup", null, [
+              _createElementVNode$e("col", { class: "avh-history__col-pic" }),
+              _createElementVNode$e("col", { class: "avh-history__col-no" }),
+              _createElementVNode$e("col"),
+              _createElementVNode$e("col", { class: "avh-history__col-actor" }),
+              _createElementVNode$e("col", { class: "avh-history__col-size" }),
+              _createElementVNode$e("col", { class: "avh-history__col-time" }),
+              _createElementVNode$e("col", { class: "avh-history__col-lib" }),
+              _createElementVNode$e("col", { class: "avh-history__col-act" })
             ], -1)),
-            _cache[9] || (_cache[9] = _createElementVNode$d("thead", null, [
-              _createElementVNode$d("tr", null, [
-                _createElementVNode$d("th", null, "封面"),
-                _createElementVNode$d("th", null, "番号"),
-                _createElementVNode$d("th", null, "标题"),
-                _createElementVNode$d("th", null, "演员"),
-                _createElementVNode$d("th", null, "大小"),
-                _createElementVNode$d("th", null, "完成时间"),
-                _createElementVNode$d("th", null, "库状态"),
-                _createElementVNode$d("th", { class: "avh-history__act" }, "操作")
+            _cache[9] || (_cache[9] = _createElementVNode$e("thead", null, [
+              _createElementVNode$e("tr", null, [
+                _createElementVNode$e("th", null, "封面"),
+                _createElementVNode$e("th", null, "番号"),
+                _createElementVNode$e("th", null, "标题"),
+                _createElementVNode$e("th", null, "演员"),
+                _createElementVNode$e("th", null, "大小"),
+                _createElementVNode$e("th", null, "完成时间"),
+                _createElementVNode$e("th", null, "库状态"),
+                _createElementVNode$e("th", { class: "avh-history__act" }, "操作")
               ])
             ], -1)),
-            _createElementVNode$d("tbody", null, [
-              (_openBlock$d(true), _createElementBlock$d(_Fragment$b, null, _renderList$a(_unref$1(skeletonRows), (row) => {
-                return _openBlock$d(), _createElementBlock$d("tr", {
+            _createElementVNode$e("tbody", null, [
+              (_openBlock$e(true), _createElementBlock$e(_Fragment$b, null, _renderList$a(_unref$1(skeletonRows), (row) => {
+                return _openBlock$e(), _createElementBlock$e("tr", {
                   key: `sk-${row}`
                 }, _cache[7] || (_cache[7] = [
-                  _createElementVNode$d("td", null, [
-                    _createElementVNode$d("div", { class: "avh-history__sk avh-history__sk--pic" })
+                  _createElementVNode$e("td", null, [
+                    _createElementVNode$e("div", { class: "avh-history__sk avh-history__sk--pic" })
                   ], -1),
-                  _createElementVNode$d("td", null, [
-                    _createElementVNode$d("div", { class: "avh-history__sk" })
+                  _createElementVNode$e("td", null, [
+                    _createElementVNode$e("div", { class: "avh-history__sk" })
                   ], -1),
-                  _createElementVNode$d("td", null, [
-                    _createElementVNode$d("div", { class: "avh-history__sk" })
+                  _createElementVNode$e("td", null, [
+                    _createElementVNode$e("div", { class: "avh-history__sk" })
                   ], -1),
-                  _createElementVNode$d("td", null, [
-                    _createElementVNode$d("div", { class: "avh-history__sk" })
+                  _createElementVNode$e("td", null, [
+                    _createElementVNode$e("div", { class: "avh-history__sk" })
                   ], -1),
-                  _createElementVNode$d("td", null, [
-                    _createElementVNode$d("div", { class: "avh-history__sk" })
+                  _createElementVNode$e("td", null, [
+                    _createElementVNode$e("div", { class: "avh-history__sk" })
                   ], -1),
-                  _createElementVNode$d("td", null, [
-                    _createElementVNode$d("div", { class: "avh-history__sk" })
+                  _createElementVNode$e("td", null, [
+                    _createElementVNode$e("div", { class: "avh-history__sk" })
                   ], -1),
-                  _createElementVNode$d("td", null, [
-                    _createElementVNode$d("div", { class: "avh-history__sk" })
+                  _createElementVNode$e("td", null, [
+                    _createElementVNode$e("div", { class: "avh-history__sk" })
                   ], -1),
-                  _createElementVNode$d("td", null, [
-                    _createElementVNode$d("div", { class: "avh-history__sk" })
+                  _createElementVNode$e("td", null, [
+                    _createElementVNode$e("div", { class: "avh-history__sk" })
                   ], -1)
                 ]));
               }), 128))
             ])
           ])
-        ])) : error.value ? (_openBlock$d(), _createBlock$b(ErrorState, {
+        ])) : error.value ? (_openBlock$e(), _createBlock$b(ErrorState, {
           key: 2,
           message: `下载历史读取失败：${error.value}`,
           retrying: loading.value,
           onRetry: _cache[3] || (_cache[3] = ($event) => load(false))
-        }, null, 8, ["message", "retrying"])) : rows.value.length ? (_openBlock$d(), _createElementBlock$d("div", _hoisted_7$9, [
-          _createElementVNode$d("table", _hoisted_8$8, [
-            _cache[12] || (_cache[12] = _createElementVNode$d("colgroup", null, [
-              _createElementVNode$d("col", { class: "avh-history__col-pic" }),
-              _createElementVNode$d("col", { class: "avh-history__col-no" }),
-              _createElementVNode$d("col"),
-              _createElementVNode$d("col", { class: "avh-history__col-actor" }),
-              _createElementVNode$d("col", { class: "avh-history__col-size" }),
-              _createElementVNode$d("col", { class: "avh-history__col-time" }),
-              _createElementVNode$d("col", { class: "avh-history__col-lib" }),
-              _createElementVNode$d("col", { class: "avh-history__col-act" })
+        }, null, 8, ["message", "retrying"])) : rows.value.length ? (_openBlock$e(), _createElementBlock$e("div", _hoisted_7$9, [
+          _createElementVNode$e("table", _hoisted_8$8, [
+            _cache[12] || (_cache[12] = _createElementVNode$e("colgroup", null, [
+              _createElementVNode$e("col", { class: "avh-history__col-pic" }),
+              _createElementVNode$e("col", { class: "avh-history__col-no" }),
+              _createElementVNode$e("col"),
+              _createElementVNode$e("col", { class: "avh-history__col-actor" }),
+              _createElementVNode$e("col", { class: "avh-history__col-size" }),
+              _createElementVNode$e("col", { class: "avh-history__col-time" }),
+              _createElementVNode$e("col", { class: "avh-history__col-lib" }),
+              _createElementVNode$e("col", { class: "avh-history__col-act" })
             ], -1)),
-            _cache[13] || (_cache[13] = _createElementVNode$d("thead", null, [
-              _createElementVNode$d("tr", null, [
-                _createElementVNode$d("th", null, "封面"),
-                _createElementVNode$d("th", null, "番号"),
-                _createElementVNode$d("th", null, "标题"),
-                _createElementVNode$d("th", null, "演员"),
-                _createElementVNode$d("th", null, "大小"),
-                _createElementVNode$d("th", null, "完成时间"),
-                _createElementVNode$d("th", null, "库状态"),
-                _createElementVNode$d("th", { class: "avh-history__act" }, "操作")
+            _cache[13] || (_cache[13] = _createElementVNode$e("thead", null, [
+              _createElementVNode$e("tr", null, [
+                _createElementVNode$e("th", null, "封面"),
+                _createElementVNode$e("th", null, "番号"),
+                _createElementVNode$e("th", null, "标题"),
+                _createElementVNode$e("th", null, "演员"),
+                _createElementVNode$e("th", null, "大小"),
+                _createElementVNode$e("th", null, "完成时间"),
+                _createElementVNode$e("th", null, "库状态"),
+                _createElementVNode$e("th", { class: "avh-history__act" }, "操作")
               ])
             ], -1)),
-            _createElementVNode$d("tbody", null, [
-              (_openBlock$d(true), _createElementBlock$d(_Fragment$b, null, _renderList$a(rows.value, (item, index) => {
-                return _openBlock$d(), _createElementBlock$d("tr", {
+            _createElementVNode$e("tbody", null, [
+              (_openBlock$e(true), _createElementBlock$e(_Fragment$b, null, _renderList$a(rows.value, (item, index) => {
+                return _openBlock$e(), _createElementBlock$e("tr", {
                   key: rowKey(item, index)
                 }, [
-                  _createElementVNode$d("td", _hoisted_9$8, [
-                    _createVNode$b(Thumb, {
+                  _createElementVNode$e("td", _hoisted_9$8, [
+                    _createVNode$c(Thumb, {
                       class: "avh-history__thumb",
                       variant: "tposter",
                       src: String(item.thumb || ""),
@@ -3294,22 +3294,22 @@ const _sfc_main$d = /* @__PURE__ */ _defineComponent$d({
                       "plugin-id": _ctx.pluginId
                     }, null, 8, ["src", "plugin-id"])
                   ]),
-                  _createElementVNode$d("td", _hoisted_10$8, _toDisplayString$d(_unref$1(displayNumber)(item)), 1),
-                  _createElementVNode$d("td", {
+                  _createElementVNode$e("td", _hoisted_10$8, _toDisplayString$d(_unref$1(displayNumber)(item)), 1),
+                  _createElementVNode$e("td", {
                     class: "avh-history__title",
                     title: String(item.title || "")
                   }, _toDisplayString$d(String(item.title || "") || "—"), 9, _hoisted_11$7),
-                  _createElementVNode$d("td", {
+                  _createElementVNode$e("td", {
                     title: String(item.actor || "")
                   }, _toDisplayString$d(String(item.actor || "") || "—"), 9, _hoisted_12$7),
-                  _createElementVNode$d("td", null, _toDisplayString$d(_unref$1(sizeLabel)(item)), 1),
-                  _createElementVNode$d("td", {
+                  _createElementVNode$e("td", null, _toDisplayString$d(_unref$1(sizeLabel)(item)), 1),
+                  _createElementVNode$e("td", {
                     title: String(item.completedAt || item.createdAt || "")
                   }, _toDisplayString$d(_unref$1(completedText)(item)), 9, _hoisted_13$7),
-                  _createElementVNode$d("td", {
+                  _createElementVNode$e("td", {
                     title: String(item.lib?.path || "")
                   }, [
-                    _createVNode$b(_component_v_chip, {
+                    _createVNode$c(_component_v_chip, {
                       size: "x-small",
                       label: "",
                       variant: _unref$1(inLibrary)(item) ? "flat" : "outlined",
@@ -3322,8 +3322,8 @@ const _sfc_main$d = /* @__PURE__ */ _defineComponent$d({
                       _: 2
                     }, 1032, ["variant", "color"])
                   ], 8, _hoisted_14$7),
-                  _createElementVNode$d("td", _hoisted_15$6, [
-                    _createVNode$b(_component_v_btn, {
+                  _createElementVNode$e("td", _hoisted_15$6, [
+                    _createVNode$c(_component_v_btn, {
                       variant: "outlined",
                       size: "small",
                       loading: isDeleting(item, index),
@@ -3339,11 +3339,11 @@ const _sfc_main$d = /* @__PURE__ */ _defineComponent$d({
               }), 128))
             ])
           ])
-        ])) : filtered.value && loaded.value ? (_openBlock$d(), _createBlock$b(EmptyState, {
+        ])) : filtered.value && loaded.value ? (_openBlock$e(), _createBlock$b(EmptyState, {
           key: 4,
           text: "没有匹配的下载记录",
           hint: "试试清空搜索词，或关掉「只看不在库」"
-        })) : (_openBlock$d(), _createBlock$b(EmptyState, {
+        })) : (_openBlock$e(), _createBlock$b(EmptyState, {
           key: 5,
           text: "还没有下载记录<br>插件下载过的番号会自动登记在这里，删掉文件也不会消失"
         }))
@@ -3352,11 +3352,11 @@ const _sfc_main$d = /* @__PURE__ */ _defineComponent$d({
   }
 });
 
-const HistoryView = /* @__PURE__ */ _export_sfc(_sfc_main$d, [["__scopeId", "data-v-7af6c554"]]);
+const HistoryView = /* @__PURE__ */ _export_sfc(_sfc_main$e, [["__scopeId", "data-v-7af6c554"]]);
 
-const {defineComponent:_defineComponent$c} = await importShared('vue');
+const {defineComponent:_defineComponent$d} = await importShared('vue');
 
-const {renderList:_renderList$9,Fragment:_Fragment$a,openBlock:_openBlock$c,createElementBlock:_createElementBlock$c,toDisplayString:_toDisplayString$c,createTextVNode:_createTextVNode$9,createCommentVNode:_createCommentVNode$a,normalizeClass:_normalizeClass$7,createElementVNode:_createElementVNode$c,resolveComponent:_resolveComponent$a,withCtx:_withCtx$a,createBlock:_createBlock$a,createVNode:_createVNode$a,normalizeStyle:_normalizeStyle$2,vShow:_vShow,withDirectives:_withDirectives} = await importShared('vue');
+const {renderList:_renderList$9,Fragment:_Fragment$a,openBlock:_openBlock$d,createElementBlock:_createElementBlock$d,toDisplayString:_toDisplayString$c,createTextVNode:_createTextVNode$9,createCommentVNode:_createCommentVNode$a,normalizeClass:_normalizeClass$8,createElementVNode:_createElementVNode$d,resolveComponent:_resolveComponent$a,withCtx:_withCtx$a,createBlock:_createBlock$a,createVNode:_createVNode$b,normalizeStyle:_normalizeStyle$3,vShow:_vShow,withDirectives:_withDirectives} = await importShared('vue');
 
 const _hoisted_1$c = { class: "avh-downloads" };
 const _hoisted_2$c = { class: "avh-downloads__toolbar" };
@@ -3392,9 +3392,9 @@ const _hoisted_22$2 = {
   key: 3,
   class: "avh-downloads__hint"
 };
-const {computed: computed$a,onBeforeUnmount: onBeforeUnmount$6,onMounted: onMounted$5,ref: ref$c,watch: watch$8} = await importShared('vue');
+const {computed: computed$a,onBeforeUnmount: onBeforeUnmount$7,onMounted: onMounted$6,ref: ref$d,watch: watch$8} = await importShared('vue');
 const POLL_MS$1 = 5e3;
-const _sfc_main$c = /* @__PURE__ */ _defineComponent$c({
+const _sfc_main$d = /* @__PURE__ */ _defineComponent$d({
   __name: "DownloadsView",
   props: {
     store: {},
@@ -3409,8 +3409,8 @@ const _sfc_main$c = /* @__PURE__ */ _defineComponent$c({
       { key: "active", name: "下载中" },
       { key: "history", name: "下载历史" }
     ];
-    const tab = ref$c("active");
-    const historyMounted = ref$c(false);
+    const tab = ref$d("active");
+    const historyMounted = ref$d(false);
     function pickTab(key) {
       tab.value = key;
       if (key === "history") historyMounted.value = true;
@@ -3485,35 +3485,35 @@ const _sfc_main$c = /* @__PURE__ */ _defineComponent$c({
       if (key === "active") void props.store.refreshTasks(true);
       syncPolling();
     });
-    onMounted$5(() => {
+    onMounted$6(() => {
       syncPolling();
       document.addEventListener("visibilitychange", onVisibilityChange);
     });
-    onBeforeUnmount$6(() => {
+    onBeforeUnmount$7(() => {
       stopPolling();
       document.removeEventListener("visibilitychange", onVisibilityChange);
     });
     return (_ctx, _cache) => {
       const _component_v_btn = _resolveComponent$a("v-btn");
-      return _openBlock$c(), _createElementBlock$c("div", _hoisted_1$c, [
-        _createElementVNode$c("div", _hoisted_2$c, [
-          _createElementVNode$c("div", _hoisted_3$b, [
-            (_openBlock$c(), _createElementBlock$c(_Fragment$a, null, _renderList$9(TABS, (item) => {
-              return _createElementVNode$c("button", {
+      return _openBlock$d(), _createElementBlock$d("div", _hoisted_1$c, [
+        _createElementVNode$d("div", _hoisted_2$c, [
+          _createElementVNode$d("div", _hoisted_3$b, [
+            (_openBlock$d(), _createElementBlock$d(_Fragment$a, null, _renderList$9(TABS, (item) => {
+              return _createElementVNode$d("button", {
                 key: item.key,
-                class: _normalizeClass$7({ "avh-tabs__on": item.key === tab.value }),
+                class: _normalizeClass$8({ "avh-tabs__on": item.key === tab.value }),
                 onClick: ($event) => pickTab(item.key)
               }, [
                 _createTextVNode$9(_toDisplayString$c(item.name), 1),
-                item.key === "active" ? (_openBlock$c(), _createElementBlock$c(_Fragment$a, { key: 0 }, [
+                item.key === "active" ? (_openBlock$d(), _createElementBlock$d(_Fragment$a, { key: 0 }, [
                   _createTextVNode$9("（" + _toDisplayString$c(activeRows.value.length) + "）", 1)
                 ], 64)) : _createCommentVNode$a("", true)
               ], 10, _hoisted_4$a);
             }), 64))
           ]),
-          tab.value === "active" ? (_openBlock$c(), _createElementBlock$c("span", _hoisted_5$a, "进度取自下载器，每 5 秒自动刷新")) : _createCommentVNode$a("", true),
-          _cache[1] || (_cache[1] = _createElementVNode$c("div", { class: "avh-downloads__spacer" }, null, -1)),
-          tab.value === "active" ? (_openBlock$c(), _createBlock$a(_component_v_btn, {
+          tab.value === "active" ? (_openBlock$d(), _createElementBlock$d("span", _hoisted_5$a, "进度取自下载器，每 5 秒自动刷新")) : _createCommentVNode$a("", true),
+          _cache[1] || (_cache[1] = _createElementVNode$d("div", { class: "avh-downloads__spacer" }, null, -1)),
+          tab.value === "active" ? (_openBlock$d(), _createBlock$a(_component_v_btn, {
             key: 1,
             variant: "outlined",
             size: "small",
@@ -3525,74 +3525,74 @@ const _sfc_main$c = /* @__PURE__ */ _defineComponent$c({
             _: 1
           })) : _createCommentVNode$a("", true)
         ]),
-        tab.value === "active" ? (_openBlock$c(), _createElementBlock$c(_Fragment$a, { key: 0 }, [
-          rows.value.length ? (_openBlock$c(), _createElementBlock$c(_Fragment$a, { key: 0 }, [
-            _createElementVNode$c("div", _hoisted_6$9, "下载中（" + _toDisplayString$c(activeRows.value.length) + "）", 1),
-            activeRows.value.length ? (_openBlock$c(true), _createElementBlock$c(_Fragment$a, { key: 0 }, _renderList$9(activeRows.value, (item, index) => {
-              return _openBlock$c(), _createElementBlock$c("div", {
+        tab.value === "active" ? (_openBlock$d(), _createElementBlock$d(_Fragment$a, { key: 0 }, [
+          rows.value.length ? (_openBlock$d(), _createElementBlock$d(_Fragment$a, { key: 0 }, [
+            _createElementVNode$d("div", _hoisted_6$9, "下载中（" + _toDisplayString$c(activeRows.value.length) + "）", 1),
+            activeRows.value.length ? (_openBlock$d(true), _createElementBlock$d(_Fragment$a, { key: 0 }, _renderList$9(activeRows.value, (item, index) => {
+              return _openBlock$d(), _createElementBlock$d("div", {
                 key: rowKey(item, index),
                 class: "avh-q"
               }, [
-                _createElementVNode$c("div", _hoisted_7$8, [
-                  _createVNode$a(Thumb, {
+                _createElementVNode$d("div", _hoisted_7$8, [
+                  _createVNode$b(Thumb, {
                     class: "avh-q__poster",
                     variant: "tposter",
                     src: thumbOf(item),
                     alt: "无图",
                     "plugin-id": _ctx.pluginId
                   }, null, 8, ["src", "plugin-id"]),
-                  _createElementVNode$c("div", _hoisted_8$7, [
-                    _createElementVNode$c("div", _hoisted_9$7, _toDisplayString$c(item.number || ""), 1),
-                    _createElementVNode$c("div", _hoisted_10$7, _toDisplayString$c(metaOf(item)), 1),
-                    _createElementVNode$c("div", _hoisted_11$6, _toDisplayString$c(pathOf(item)), 1)
+                  _createElementVNode$d("div", _hoisted_8$7, [
+                    _createElementVNode$d("div", _hoisted_9$7, _toDisplayString$c(item.number || ""), 1),
+                    _createElementVNode$d("div", _hoisted_10$7, _toDisplayString$c(metaOf(item)), 1),
+                    _createElementVNode$d("div", _hoisted_11$6, _toDisplayString$c(pathOf(item)), 1)
                   ]),
-                  _createElementVNode$c("div", _hoisted_12$6, [
-                    _createElementVNode$c("div", _hoisted_13$6, _toDisplayString$c(progressOf(item)) + "%", 1),
-                    _cache[2] || (_cache[2] = _createElementVNode$c("div", { class: "avh-q__hint" }, "下载中…", -1))
+                  _createElementVNode$d("div", _hoisted_12$6, [
+                    _createElementVNode$d("div", _hoisted_13$6, _toDisplayString$c(progressOf(item)) + "%", 1),
+                    _cache[2] || (_cache[2] = _createElementVNode$d("div", { class: "avh-q__hint" }, "下载中…", -1))
                   ])
                 ]),
-                _createElementVNode$c("div", _hoisted_14$6, [
-                  _createElementVNode$c("i", {
-                    style: _normalizeStyle$2({ width: `${progressOf(item)}%` })
+                _createElementVNode$d("div", _hoisted_14$6, [
+                  _createElementVNode$d("i", {
+                    style: _normalizeStyle$3({ width: `${progressOf(item)}%` })
                   }, null, 4)
                 ])
               ]);
-            }), 128)) : (_openBlock$c(), _createElementBlock$c("div", _hoisted_15$5, "没有下载中的任务")),
-            _createElementVNode$c("div", _hoisted_16$4, [
-              _createElementVNode$c("span", null, "已完成（" + _toDisplayString$c(doneRows.value.length) + "）", 1),
-              _cache[3] || (_cache[3] = _createElementVNode$c("span", { class: "avh-downloads__secttl-note" }, "完整清单见本页「下载历史」", -1))
+            }), 128)) : (_openBlock$d(), _createElementBlock$d("div", _hoisted_15$5, "没有下载中的任务")),
+            _createElementVNode$d("div", _hoisted_16$4, [
+              _createElementVNode$d("span", null, "已完成（" + _toDisplayString$c(doneRows.value.length) + "）", 1),
+              _cache[3] || (_cache[3] = _createElementVNode$d("span", { class: "avh-downloads__secttl-note" }, "完整清单见本页「下载历史」", -1))
             ]),
-            doneRows.value.length ? (_openBlock$c(true), _createElementBlock$c(_Fragment$a, { key: 2 }, _renderList$9(doneRows.value, (item, index) => {
-              return _openBlock$c(), _createElementBlock$c("div", {
+            doneRows.value.length ? (_openBlock$d(true), _createElementBlock$d(_Fragment$a, { key: 2 }, _renderList$9(doneRows.value, (item, index) => {
+              return _openBlock$d(), _createElementBlock$d("div", {
                 key: rowKey(item, index),
                 class: "avh-q avh-q--done"
               }, [
-                _createElementVNode$c("div", _hoisted_17$3, [
-                  _createVNode$a(Thumb, {
+                _createElementVNode$d("div", _hoisted_17$3, [
+                  _createVNode$b(Thumb, {
                     class: "avh-q__poster",
                     variant: "tposter",
                     src: thumbOf(item),
                     alt: "无图",
                     "plugin-id": _ctx.pluginId
                   }, null, 8, ["src", "plugin-id"]),
-                  _createElementVNode$c("div", _hoisted_18$3, [
-                    _createElementVNode$c("div", _hoisted_19$3, _toDisplayString$c(item.number || ""), 1),
-                    item.title ? (_openBlock$c(), _createElementBlock$c("div", _hoisted_20$3, _toDisplayString$c(item.title), 1)) : _createCommentVNode$a("", true),
-                    _createElementVNode$c("div", _hoisted_21$2, _toDisplayString$c(doneInfoOf(item)), 1)
+                  _createElementVNode$d("div", _hoisted_18$3, [
+                    _createElementVNode$d("div", _hoisted_19$3, _toDisplayString$c(item.number || ""), 1),
+                    item.title ? (_openBlock$d(), _createElementBlock$d("div", _hoisted_20$3, _toDisplayString$c(item.title), 1)) : _createCommentVNode$a("", true),
+                    _createElementVNode$d("div", _hoisted_21$2, _toDisplayString$c(doneInfoOf(item)), 1)
                   ])
                 ])
               ]);
-            }), 128)) : (_openBlock$c(), _createElementBlock$c("div", _hoisted_22$2, _cache[4] || (_cache[4] = [
+            }), 128)) : (_openBlock$d(), _createElementBlock$d("div", _hoisted_22$2, _cache[4] || (_cache[4] = [
               _createTextVNode$9(" 暂无已完成条目"),
-              _createElementVNode$c("br", null, null, -1),
+              _createElementVNode$d("br", null, null, -1),
               _createTextVNode$9("完成的下载会记入「下载历史」，这里只在旧快照与刷新间隙里短暂出现 ")
             ])))
-          ], 64)) : (_openBlock$c(), _createBlock$a(EmptyState, {
+          ], 64)) : (_openBlock$d(), _createBlock$a(EmptyState, {
             key: 1,
             text: "下载队列为空<br>在「任务」页挑好候选点「下载」，进度在这里看<br>完成的下载在「下载历史」页签，删了文件也还在"
           }))
         ], 64)) : _createCommentVNode$a("", true),
-        historyMounted.value ? _withDirectives((_openBlock$c(), _createBlock$a(HistoryView, {
+        historyMounted.value ? _withDirectives((_openBlock$d(), _createBlock$a(HistoryView, {
           key: 1,
           api: props.api,
           "plugin-id": props.pluginId,
@@ -3605,11 +3605,11 @@ const _sfc_main$c = /* @__PURE__ */ _defineComponent$c({
   }
 });
 
-const DownloadsView = /* @__PURE__ */ _export_sfc(_sfc_main$c, [["__scopeId", "data-v-822f5d06"]]);
+const DownloadsView = /* @__PURE__ */ _export_sfc(_sfc_main$d, [["__scopeId", "data-v-822f5d06"]]);
 
-const {defineComponent:_defineComponent$b} = await importShared('vue');
+const {defineComponent:_defineComponent$c} = await importShared('vue');
 
-const {createVNode:_createVNode$9,openBlock:_openBlock$b,createElementBlock:_createElementBlock$b,createCommentVNode:_createCommentVNode$9,createElementVNode:_createElementVNode$b,toDisplayString:_toDisplayString$b,withModifiers:_withModifiers,Fragment:_Fragment$9} = await importShared('vue');
+const {createVNode:_createVNode$a,openBlock:_openBlock$c,createElementBlock:_createElementBlock$c,createCommentVNode:_createCommentVNode$9,createElementVNode:_createElementVNode$c,toDisplayString:_toDisplayString$b,withModifiers:_withModifiers,Fragment:_Fragment$9} = await importShared('vue');
 
 const _hoisted_1$b = ["title"];
 const _hoisted_2$b = { class: "avh-card__thumb" };
@@ -3642,7 +3642,7 @@ const _hoisted_13$5 = { key: 1 };
 const _hoisted_14$5 = { class: "avh-card__sub" };
 const _hoisted_15$4 = ["title"];
 const _hoisted_16$3 = ["href"];
-const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
+const _sfc_main$c = /* @__PURE__ */ _defineComponent$c({
   __name: "NumCard",
   props: {
     movie: {},
@@ -3668,39 +3668,39 @@ const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
     const fileName = () => String(props.movie.lib?.path || "").replace(/\\/g, "/").split("/").pop() || "";
     const watchUrl = () => String(props.movie.lib?.url || "");
     return (_ctx, _cache) => {
-      return _openBlock$b(), _createElementBlock$b("div", {
+      return _openBlock$c(), _createElementBlock$c("div", {
         class: "avh-card",
         title: _ctx.movie.title || number(),
         onClick: _cache[1] || (_cache[1] = ($event) => emit("select", { number: number(), id: id() })),
         onMouseenter: _cache[2] || (_cache[2] = ($event) => emit("hover", { number: number(), id: id() }))
       }, [
-        _createElementVNode$b("div", _hoisted_2$b, [
-          _createVNode$9(Thumb, {
+        _createElementVNode$c("div", _hoisted_2$b, [
+          _createVNode$a(Thumb, {
             variant: "thumb",
             src: _ctx.movie.thumb,
             alt: number(),
             "plugin-id": _ctx.pluginId
           }, null, 8, ["src", "alt", "plugin-id"]),
-          _createElementVNode$b("div", _hoisted_3$a, [
-            _ctx.movie.cnsub ? (_openBlock$b(), _createElementBlock$b("span", _hoisted_4$9, "中字")) : _createCommentVNode$9("", true),
-            _ctx.movie.uncensored ? (_openBlock$b(), _createElementBlock$b("span", _hoisted_5$9, "破解")) : _createCommentVNode$9("", true),
-            _ctx.actorFavorited ? (_openBlock$b(), _createElementBlock$b("span", _hoisted_6$8, "⭐已收藏演员")) : _createCommentVNode$9("", true),
-            _ctx.movie.lib ? (_openBlock$b(), _createElementBlock$b("span", _hoisted_7$7, "✔已入库")) : _createCommentVNode$9("", true),
-            _ctx.movie.downloaded && !_ctx.movie.lib ? (_openBlock$b(), _createElementBlock$b("span", _hoisted_8$6, "✔已下载")) : _createCommentVNode$9("", true)
+          _createElementVNode$c("div", _hoisted_3$a, [
+            _ctx.movie.cnsub ? (_openBlock$c(), _createElementBlock$c("span", _hoisted_4$9, "中字")) : _createCommentVNode$9("", true),
+            _ctx.movie.uncensored ? (_openBlock$c(), _createElementBlock$c("span", _hoisted_5$9, "破解")) : _createCommentVNode$9("", true),
+            _ctx.actorFavorited ? (_openBlock$c(), _createElementBlock$c("span", _hoisted_6$8, "⭐已收藏演员")) : _createCommentVNode$9("", true),
+            _ctx.movie.lib ? (_openBlock$c(), _createElementBlock$c("span", _hoisted_7$7, "✔已入库")) : _createCommentVNode$9("", true),
+            _ctx.movie.downloaded && !_ctx.movie.lib ? (_openBlock$c(), _createElementBlock$c("span", _hoisted_8$6, "✔已下载")) : _createCommentVNode$9("", true)
           ])
         ]),
-        _createElementVNode$b("div", _hoisted_9$6, [
-          _createElementVNode$b("div", _hoisted_10$6, _toDisplayString$b(number()), 1),
-          _createElementVNode$b("div", _hoisted_11$5, [
-            _createElementVNode$b("span", null, _toDisplayString$b(_ctx.movie.actor || "—"), 1),
-            library() ? (_openBlock$b(), _createElementBlock$b("span", _hoisted_12$5, _toDisplayString$b(addedText()), 1)) : (_openBlock$b(), _createElementBlock$b("span", _hoisted_13$5, "🧲 " + _toDisplayString$b(_ctx.movie.magnets || 0), 1))
+        _createElementVNode$c("div", _hoisted_9$6, [
+          _createElementVNode$c("div", _hoisted_10$6, _toDisplayString$b(number()), 1),
+          _createElementVNode$c("div", _hoisted_11$5, [
+            _createElementVNode$c("span", null, _toDisplayString$b(_ctx.movie.actor || "—"), 1),
+            library() ? (_openBlock$c(), _createElementBlock$c("span", _hoisted_12$5, _toDisplayString$b(addedText()), 1)) : (_openBlock$c(), _createElementBlock$c("span", _hoisted_13$5, "🧲 " + _toDisplayString$b(_ctx.movie.magnets || 0), 1))
           ]),
-          _createElementVNode$b("div", _hoisted_14$5, [
-            library() ? (_openBlock$b(), _createElementBlock$b(_Fragment$9, { key: 0 }, [
-              _createElementVNode$b("span", {
+          _createElementVNode$c("div", _hoisted_14$5, [
+            library() ? (_openBlock$c(), _createElementBlock$c(_Fragment$9, { key: 0 }, [
+              _createElementVNode$c("span", {
                 title: String(_ctx.movie.lib?.path || "")
               }, _toDisplayString$b(fileName()), 9, _hoisted_15$4),
-              watchUrl() ? (_openBlock$b(), _createElementBlock$b("a", {
+              watchUrl() ? (_openBlock$c(), _createElementBlock$c("a", {
                 key: 0,
                 class: "avh-card__watch",
                 href: watchUrl(),
@@ -3710,9 +3710,9 @@ const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
                 onClick: _cache[0] || (_cache[0] = _withModifiers(() => {
                 }, ["stop"]))
               }, "▶ 观看", 8, _hoisted_16$3)) : _createCommentVNode$9("", true)
-            ], 64)) : (_openBlock$b(), _createElementBlock$b(_Fragment$9, { key: 1 }, [
-              _createElementVNode$b("span", null, _toDisplayString$b(_ctx.movie.date || ""), 1),
-              _createElementVNode$b("span", null, _toDisplayString$b(durationText()), 1)
+            ], 64)) : (_openBlock$c(), _createElementBlock$c(_Fragment$9, { key: 1 }, [
+              _createElementVNode$c("span", null, _toDisplayString$b(_ctx.movie.date || ""), 1),
+              _createElementVNode$c("span", null, _toDisplayString$b(durationText()), 1)
             ], 64))
           ])
         ])
@@ -3721,7 +3721,7 @@ const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
   }
 });
 
-const NumCard = /* @__PURE__ */ _export_sfc(_sfc_main$b, [["__scopeId", "data-v-08471911"]]);
+const NumCard = /* @__PURE__ */ _export_sfc(_sfc_main$c, [["__scopeId", "data-v-08471911"]]);
 
 const {reactive: reactive$2} = await importShared('vue');
 
@@ -3856,9 +3856,9 @@ function createDetailPrefetcher(api) {
   };
 }
 
-const {defineComponent:_defineComponent$a} = await importShared('vue');
+const {defineComponent:_defineComponent$b} = await importShared('vue');
 
-const {createElementVNode:_createElementVNode$a,resolveComponent:_resolveComponent$9,createVNode:_createVNode$8,createTextVNode:_createTextVNode$8,withCtx:_withCtx$9,toDisplayString:_toDisplayString$a,openBlock:_openBlock$a,createElementBlock:_createElementBlock$a,createCommentVNode:_createCommentVNode$8,createBlock:_createBlock$9,renderList:_renderList$8,Fragment:_Fragment$8} = await importShared('vue');
+const {createElementVNode:_createElementVNode$b,resolveComponent:_resolveComponent$9,createVNode:_createVNode$9,createTextVNode:_createTextVNode$8,withCtx:_withCtx$9,toDisplayString:_toDisplayString$a,openBlock:_openBlock$b,createElementBlock:_createElementBlock$b,createCommentVNode:_createCommentVNode$8,createBlock:_createBlock$9,renderList:_renderList$8,Fragment:_Fragment$8} = await importShared('vue');
 
 const _hoisted_1$a = { class: "avh-library" };
 const _hoisted_2$a = { class: "avh-library__toolbar" };
@@ -3875,9 +3875,9 @@ const _hoisted_6$7 = {
   key: 6,
   class: "avh-library__grid"
 };
-const {computed: computed$9,onBeforeUnmount: onBeforeUnmount$5,ref: ref$b,watch: watch$7} = await importShared('vue');
+const {computed: computed$9,onBeforeUnmount: onBeforeUnmount$6,ref: ref$c,watch: watch$7} = await importShared('vue');
 const ENDPOINT = "plugin/library";
-const _sfc_main$a = /* @__PURE__ */ _defineComponent$a({
+const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
   __name: "LibraryView",
   props: {
     pluginId: { default: "" },
@@ -3889,13 +3889,13 @@ const _sfc_main$a = /* @__PURE__ */ _defineComponent$a({
     const props = __props;
     const emit = __emit;
     const t = hostToast(props.toast);
-    const items = ref$b([]);
-    const total = ref$b(0);
-    const libraryReady = ref$b(true);
-    const loading = ref$b(false);
-    const error = ref$b("");
-    const loaded = ref$b(false);
-    const query = ref$b("");
+    const items = ref$c([]);
+    const total = ref$c(0);
+    const libraryReady = ref$c(true);
+    const loading = ref$c(false);
+    const error = ref$c("");
+    const loaded = ref$c(false);
+    const query = ref$c("");
     const rows = computed$9(() => {
       const keyword = String(query.value || "").trim().toLowerCase();
       if (!keyword) return items.value;
@@ -3946,7 +3946,7 @@ const _sfc_main$a = /* @__PURE__ */ _defineComponent$a({
       return `${movie.number || ""}#${index}`;
     }
     watch$7(rows, (list) => prefetcher.enqueueMany(list), { immediate: true });
-    onBeforeUnmount$5(() => {
+    onBeforeUnmount$6(() => {
       prefetcher.flush();
     });
     void load(false, false);
@@ -3954,11 +3954,11 @@ const _sfc_main$a = /* @__PURE__ */ _defineComponent$a({
       const _component_v_text_field = _resolveComponent$9("v-text-field");
       const _component_v_btn = _resolveComponent$9("v-btn");
       const _component_v_chip = _resolveComponent$9("v-chip");
-      return _openBlock$a(), _createElementBlock$a("div", _hoisted_1$a, [
-        _createElementVNode$a("div", _hoisted_2$a, [
-          _cache[4] || (_cache[4] = _createElementVNode$a("span", { class: "avh-library__hint" }, "媒体库里现在的番号，点卡片看详情、点「▶ 观看」直接播放", -1)),
-          _cache[5] || (_cache[5] = _createElementVNode$a("div", { class: "avh-library__spacer" }, null, -1)),
-          _createVNode$8(_component_v_text_field, {
+      return _openBlock$b(), _createElementBlock$b("div", _hoisted_1$a, [
+        _createElementVNode$b("div", _hoisted_2$a, [
+          _cache[4] || (_cache[4] = _createElementVNode$b("span", { class: "avh-library__hint" }, "媒体库里现在的番号，点卡片看详情、点「▶ 观看」直接播放", -1)),
+          _cache[5] || (_cache[5] = _createElementVNode$b("div", { class: "avh-library__spacer" }, null, -1)),
+          _createVNode$9(_component_v_text_field, {
             modelValue: query.value,
             "onUpdate:modelValue": _cache[0] || (_cache[0] = ($event) => query.value = $event),
             class: "avh-library__q",
@@ -3971,7 +3971,7 @@ const _sfc_main$a = /* @__PURE__ */ _defineComponent$a({
             placeholder: "番号 / 片名 / 演员",
             "aria-label": "按番号、片名或演员过滤已入库的番号"
           }, null, 8, ["modelValue"]),
-          _createVNode$8(_component_v_btn, {
+          _createVNode$9(_component_v_btn, {
             variant: "outlined",
             size: "small",
             loading: loading.value,
@@ -3983,8 +3983,8 @@ const _sfc_main$a = /* @__PURE__ */ _defineComponent$a({
             _: 1
           }, 8, ["loading"])
         ]),
-        !error.value && (loaded.value || items.value.length) ? (_openBlock$a(), _createElementBlock$a("div", _hoisted_3$9, [
-          _createVNode$8(_component_v_chip, {
+        !error.value && (loaded.value || items.value.length) ? (_openBlock$b(), _createElementBlock$b("div", _hoisted_3$9, [
+          _createVNode$9(_component_v_chip, {
             size: "x-small",
             variant: "flat",
             color: "success",
@@ -3995,27 +3995,27 @@ const _sfc_main$a = /* @__PURE__ */ _defineComponent$a({
             ])),
             _: 1
           }),
-          _createElementVNode$a("span", _hoisted_4$8, _toDisplayString$a(summary.value), 1)
+          _createElementVNode$b("span", _hoisted_4$8, _toDisplayString$a(summary.value), 1)
         ])) : _createCommentVNode$8("", true),
-        error.value ? (_openBlock$a(), _createBlock$9(ErrorState, {
+        error.value ? (_openBlock$b(), _createBlock$9(ErrorState, {
           key: 1,
           message: `已入库列表读取失败：${error.value}`,
           retrying: loading.value,
           onRetry: _cache[2] || (_cache[2] = ($event) => load(false, false))
-        }, null, 8, ["message", "retrying"])) : loading.value && !items.value.length ? (_openBlock$a(), _createElementBlock$a("div", _hoisted_5$8, "正在读取媒体库…")) : !libraryReady.value && !items.value.length ? (_openBlock$a(), _createBlock$9(EmptyState, {
+        }, null, 8, ["message", "retrying"])) : loading.value && !items.value.length ? (_openBlock$b(), _createElementBlock$b("div", _hoisted_5$8, "正在读取媒体库…")) : !libraryReady.value && !items.value.length ? (_openBlock$b(), _createBlock$9(EmptyState, {
           key: 3,
           text: "没有连上 Emby 媒体库",
           hint: "插件默认复用 MoviePilot「设置 → 媒体服务器」里已启用的 Emby；也可以在「设置 → 媒体库」里单独填 host 与 api_key"
-        })) : !items.value.length ? (_openBlock$a(), _createBlock$9(EmptyState, {
+        })) : !items.value.length ? (_openBlock$b(), _createBlock$9(EmptyState, {
           key: 4,
           text: "媒体库里还没有片子<br>下载并整理入库后，这里会按入库时间列出全部番号"
-        })) : filtered.value && !rows.value.length ? (_openBlock$a(), _createBlock$9(EmptyState, {
+        })) : filtered.value && !rows.value.length ? (_openBlock$b(), _createBlock$9(EmptyState, {
           key: 5,
           text: "没有匹配的番号",
           hint: "试试清空搜索词，或者换个番号 / 演员名"
-        })) : (_openBlock$a(), _createElementBlock$a("div", _hoisted_6$7, [
-          (_openBlock$a(true), _createElementBlock$a(_Fragment$8, null, _renderList$8(rows.value, (movie, index) => {
-            return _openBlock$a(), _createBlock$9(NumCard, {
+        })) : (_openBlock$b(), _createElementBlock$b("div", _hoisted_6$7, [
+          (_openBlock$b(true), _createElementBlock$b(_Fragment$8, null, _renderList$8(rows.value, (movie, index) => {
+            return _openBlock$b(), _createBlock$9(NumCard, {
               key: cardKey(movie, index),
               movie,
               "plugin-id": _ctx.pluginId,
@@ -4030,18 +4030,18 @@ const _sfc_main$a = /* @__PURE__ */ _defineComponent$a({
   }
 });
 
-const LibraryView = /* @__PURE__ */ _export_sfc(_sfc_main$a, [["__scopeId", "data-v-a23add17"]]);
+const LibraryView = /* @__PURE__ */ _export_sfc(_sfc_main$b, [["__scopeId", "data-v-a23add17"]]);
 
-const {defineComponent:_defineComponent$9} = await importShared('vue');
+const {defineComponent:_defineComponent$a} = await importShared('vue');
 
-const {createElementVNode:_createElementVNode$9,createTextVNode:_createTextVNode$7,resolveComponent:_resolveComponent$8,withCtx:_withCtx$8,createVNode:_createVNode$7,toDisplayString:_toDisplayString$9,renderList:_renderList$7,Fragment:_Fragment$7,openBlock:_openBlock$9,createElementBlock:_createElementBlock$9,createBlock:_createBlock$8} = await importShared('vue');
+const {createElementVNode:_createElementVNode$a,createTextVNode:_createTextVNode$7,resolveComponent:_resolveComponent$8,withCtx:_withCtx$8,createVNode:_createVNode$8,toDisplayString:_toDisplayString$9,renderList:_renderList$7,Fragment:_Fragment$7,openBlock:_openBlock$a,createElementBlock:_createElementBlock$a,createBlock:_createBlock$8} = await importShared('vue');
 
 const _hoisted_1$9 = { class: "avh-tasks" };
 const _hoisted_2$9 = { class: "avh-tasks__toolbar" };
 const _hoisted_3$8 = { class: "avh-tasks__secttl" };
-const {computed: computed$8,onBeforeUnmount: onBeforeUnmount$4,onMounted: onMounted$4,ref: ref$a,watch: watch$6} = await importShared('vue');
+const {computed: computed$8,onBeforeUnmount: onBeforeUnmount$5,onMounted: onMounted$5,ref: ref$b,watch: watch$6} = await importShared('vue');
 const POLL_MS = 5e3;
-const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
+const _sfc_main$a = /* @__PURE__ */ _defineComponent$a({
   __name: "TasksView",
   props: {
     store: {},
@@ -4052,7 +4052,7 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
   setup(__props) {
     const props = __props;
     const t = hostToast(props.toast);
-    const tables = ref$a([]);
+    const tables = ref$b([]);
     const pending = computed$8(() => {
       const all = Array.isArray(props.store.tasks.value) ? props.store.tasks.value : [];
       return all.filter((item) => item.state === "await");
@@ -4121,21 +4121,21 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
       if (document.visibilityState === "visible") startPolling();
       else stopPolling();
     }
-    onMounted$4(() => {
+    onMounted$5(() => {
       void props.store.refreshTasks(true);
       if (document.visibilityState === "visible") startPolling();
       document.addEventListener("visibilitychange", onVisibilityChange);
     });
-    onBeforeUnmount$4(() => {
+    onBeforeUnmount$5(() => {
       stopPolling();
       document.removeEventListener("visibilitychange", onVisibilityChange);
     });
     return (_ctx, _cache) => {
       const _component_v_btn = _resolveComponent$8("v-btn");
-      return _openBlock$9(), _createElementBlock$9("div", _hoisted_1$9, [
-        _createElementVNode$9("div", _hoisted_2$9, [
-          _cache[1] || (_cache[1] = _createElementVNode$9("div", { class: "avh-tasks__spacer" }, null, -1)),
-          _createVNode$7(_component_v_btn, {
+      return _openBlock$a(), _createElementBlock$a("div", _hoisted_1$9, [
+        _createElementVNode$a("div", _hoisted_2$9, [
+          _cache[1] || (_cache[1] = _createElementVNode$a("div", { class: "avh-tasks__spacer" }, null, -1)),
+          _createVNode$8(_component_v_btn, {
             variant: "outlined",
             size: "small",
             onClick: refreshTasks
@@ -4146,10 +4146,10 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
             _: 1
           })
         ]),
-        pending.value.length ? (_openBlock$9(), _createElementBlock$9(_Fragment$7, { key: 0 }, [
-          _createElementVNode$9("div", _hoisted_3$8, "待确认（" + _toDisplayString$9(pending.value.length) + "）", 1),
-          (_openBlock$9(true), _createElementBlock$9(_Fragment$7, null, _renderList$7(pending.value, (task, index) => {
-            return _openBlock$9(), _createBlock$8(CandTable, {
+        pending.value.length ? (_openBlock$a(), _createElementBlock$a(_Fragment$7, { key: 0 }, [
+          _createElementVNode$a("div", _hoisted_3$8, "待确认（" + _toDisplayString$9(pending.value.length) + "）", 1),
+          (_openBlock$a(true), _createElementBlock$a(_Fragment$7, null, _renderList$7(pending.value, (task, index) => {
+            return _openBlock$a(), _createBlock$8(CandTable, {
               key: rowKey(task, index),
               ref_for: true,
               ref_key: "tables",
@@ -4161,7 +4161,7 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
               onCancel
             }, null, 8, ["task", "plugin-id"]);
           }), 128))
-        ], 64)) : (_openBlock$9(), _createBlock$8(EmptyState, {
+        ], 64)) : (_openBlock$a(), _createBlock$8(EmptyState, {
           key: 1,
           text: "没有待确认的任务"
         }))
@@ -4170,11 +4170,11 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
   }
 });
 
-const TasksView = /* @__PURE__ */ _export_sfc(_sfc_main$9, [["__scopeId", "data-v-65040ab1"]]);
+const TasksView = /* @__PURE__ */ _export_sfc(_sfc_main$a, [["__scopeId", "data-v-65040ab1"]]);
 
-const {defineComponent:_defineComponent$8} = await importShared('vue');
+const {defineComponent:_defineComponent$9} = await importShared('vue');
 
-const {toDisplayString:_toDisplayString$8,createElementVNode:_createElementVNode$8,createTextVNode:_createTextVNode$6,resolveComponent:_resolveComponent$7,withCtx:_withCtx$7,createVNode:_createVNode$6,renderList:_renderList$6,Fragment:_Fragment$6,openBlock:_openBlock$8,createElementBlock:_createElementBlock$8,normalizeClass:_normalizeClass$6,createBlock:_createBlock$7} = await importShared('vue');
+const {toDisplayString:_toDisplayString$8,createElementVNode:_createElementVNode$9,createTextVNode:_createTextVNode$6,resolveComponent:_resolveComponent$7,withCtx:_withCtx$7,createVNode:_createVNode$7,renderList:_renderList$6,Fragment:_Fragment$6,openBlock:_openBlock$9,createElementBlock:_createElementBlock$9,normalizeClass:_normalizeClass$7,createBlock:_createBlock$7} = await importShared('vue');
 
 const _hoisted_1$8 = { class: "avh-subs" };
 const _hoisted_2$8 = { class: "avh-subs__toolbar" };
@@ -4191,9 +4191,9 @@ const _hoisted_12$4 = { class: "avh-sub__name" };
 const _hoisted_13$4 = { class: "avh-subs__hint avh-sub__rule" };
 const _hoisted_14$4 = { class: "avh-subs__hint avh-sub__stat" };
 const _hoisted_15$3 = { class: "avh-sub__right" };
-const {computed: computed$7,ref: ref$9} = await importShared('vue');
+const {computed: computed$7,ref: ref$a} = await importShared('vue');
 const ALL = "";
-const _sfc_main$8 = /* @__PURE__ */ _defineComponent$8({
+const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
   __name: "SubsView",
   props: {
     store: {},
@@ -4207,7 +4207,7 @@ const _sfc_main$8 = /* @__PURE__ */ _defineComponent$8({
     const emit = __emit;
     const t = hostToast(props.toast);
     const confirm = useHostConfirm();
-    const checking = ref$9("");
+    const checking = ref$a("");
     const subs = computed$7(
       () => Array.isArray(props.store.subs.value) ? props.store.subs.value : []
     );
@@ -4321,11 +4321,11 @@ const _sfc_main$8 = /* @__PURE__ */ _defineComponent$8({
     return (_ctx, _cache) => {
       const _component_v_btn = _resolveComponent$7("v-btn");
       const _component_v_icon = _resolveComponent$7("v-icon");
-      return _openBlock$8(), _createElementBlock$8("div", _hoisted_1$8, [
-        _createElementVNode$8("div", _hoisted_2$8, [
-          _createElementVNode$8("span", _hoisted_3$7, "默认规则：" + _toDisplayString$8(defaultSummary.value), 1),
-          _cache[3] || (_cache[3] = _createElementVNode$8("div", { class: "avh-subs__spacer" }, null, -1)),
-          _createVNode$6(_component_v_btn, {
+      return _openBlock$9(), _createElementBlock$9("div", _hoisted_1$8, [
+        _createElementVNode$9("div", _hoisted_2$8, [
+          _createElementVNode$9("span", _hoisted_3$7, "默认规则：" + _toDisplayString$8(defaultSummary.value), 1),
+          _cache[3] || (_cache[3] = _createElementVNode$9("div", { class: "avh-subs__spacer" }, null, -1)),
+          _createVNode$7(_component_v_btn, {
             variant: "outlined",
             size: "small",
             "prepend-icon": "mdi-cog-outline",
@@ -4336,7 +4336,7 @@ const _sfc_main$8 = /* @__PURE__ */ _defineComponent$8({
             ])),
             _: 1
           }),
-          _createVNode$6(_component_v_btn, {
+          _createVNode$7(_component_v_btn, {
             variant: "outlined",
             size: "small",
             "prepend-icon": "mdi-lightning-bolt",
@@ -4350,45 +4350,45 @@ const _sfc_main$8 = /* @__PURE__ */ _defineComponent$8({
             _: 1
           }, 8, ["loading", "disabled"])
         ]),
-        _createElementVNode$8("div", _hoisted_4$7, [
-          _createElementVNode$8("div", _hoisted_5$7, [
-            _cache[4] || (_cache[4] = _createElementVNode$8("div", { class: "avh-subs__ruletitle" }, "默认规则（手动搜索与新建订阅的基准）", -1)),
-            _createElementVNode$8("div", _hoisted_6$6, "分辨率策略：" + _toDisplayString$8(resText.value), 1),
-            _cache[5] || (_cache[5] = _createElementVNode$8("div", { class: "avh-subs__hint" }, "规则在「设置台 → 下载规则」里改", -1))
+        _createElementVNode$9("div", _hoisted_4$7, [
+          _createElementVNode$9("div", _hoisted_5$7, [
+            _cache[4] || (_cache[4] = _createElementVNode$9("div", { class: "avh-subs__ruletitle" }, "默认规则（手动搜索与新建订阅的基准）", -1)),
+            _createElementVNode$9("div", _hoisted_6$6, "分辨率策略：" + _toDisplayString$8(resText.value), 1),
+            _cache[5] || (_cache[5] = _createElementVNode$9("div", { class: "avh-subs__hint" }, "规则在「设置台 → 下载规则」里改", -1))
           ]),
-          _createElementVNode$8("div", _hoisted_7$6, [
-            (_openBlock$8(true), _createElementBlock$8(_Fragment$6, null, _renderList$6(ruleRows.value, (row) => {
-              return _openBlock$8(), _createElementBlock$8("div", {
+          _createElementVNode$9("div", _hoisted_7$6, [
+            (_openBlock$9(true), _createElementBlock$9(_Fragment$6, null, _renderList$6(ruleRows.value, (row) => {
+              return _openBlock$9(), _createElementBlock$9("div", {
                 key: row.label,
                 class: "avh-subs__ruleitem"
               }, [
-                _createElementVNode$8("span", _hoisted_8$5, _toDisplayString$8(row.label), 1),
-                _createElementVNode$8("span", {
-                  class: _normalizeClass$6(["avh-subs__rulevalue", { "avh-subs__rulevalue--on": row.on }])
+                _createElementVNode$9("span", _hoisted_8$5, _toDisplayString$8(row.label), 1),
+                _createElementVNode$9("span", {
+                  class: _normalizeClass$7(["avh-subs__rulevalue", { "avh-subs__rulevalue--on": row.on }])
                 }, _toDisplayString$8(row.text), 3)
               ]);
             }), 128))
           ])
         ]),
-        hasSubs.value ? (_openBlock$8(), _createElementBlock$8("div", _hoisted_9$5, [
-          (_openBlock$8(true), _createElementBlock$8(_Fragment$6, null, _renderList$6(subs.value, (sub, index) => {
-            return _openBlock$8(), _createElementBlock$8("div", {
+        hasSubs.value ? (_openBlock$9(), _createElementBlock$9("div", _hoisted_9$5, [
+          (_openBlock$9(true), _createElementBlock$9(_Fragment$6, null, _renderList$6(subs.value, (sub, index) => {
+            return _openBlock$9(), _createElementBlock$9("div", {
               key: rowKey(sub, index),
               class: "avh-sub"
             }, [
-              _createElementVNode$8("div", _hoisted_10$5, [
-                _createVNode$6(_component_v_icon, {
+              _createElementVNode$9("div", _hoisted_10$5, [
+                _createVNode$7(_component_v_icon, {
                   icon: typeIcon(sub),
                   size: "20",
                   class: "avh-sub__icon"
                 }, null, 8, ["icon"]),
-                _createElementVNode$8("div", _hoisted_11$4, [
-                  _createElementVNode$8("div", _hoisted_12$4, _toDisplayString$8(sub.name), 1),
-                  _createElementVNode$8("div", _hoisted_13$4, _toDisplayString$8(ruleSummary(subRule(sub))), 1),
-                  _createElementVNode$8("div", _hoisted_14$4, " 命中 " + _toDisplayString$8(hitsText(sub)) + " 次 · 上次检查 " + _toDisplayString$8(lastText(sub)), 1)
+                _createElementVNode$9("div", _hoisted_11$4, [
+                  _createElementVNode$9("div", _hoisted_12$4, _toDisplayString$8(sub.name), 1),
+                  _createElementVNode$9("div", _hoisted_13$4, _toDisplayString$8(ruleSummary(subRule(sub))), 1),
+                  _createElementVNode$9("div", _hoisted_14$4, " 命中 " + _toDisplayString$8(hitsText(sub)) + " 次 · 上次检查 " + _toDisplayString$8(lastText(sub)), 1)
                 ]),
-                _createElementVNode$8("div", _hoisted_15$3, [
-                  _createVNode$6(_component_v_btn, {
+                _createElementVNode$9("div", _hoisted_15$3, [
+                  _createVNode$7(_component_v_btn, {
                     variant: "outlined",
                     size: "small",
                     loading: checking.value === String(sub.name || ""),
@@ -4400,7 +4400,7 @@ const _sfc_main$8 = /* @__PURE__ */ _defineComponent$8({
                     ])),
                     _: 2
                   }, 1032, ["loading", "disabled", "onClick"]),
-                  _createVNode$6(_component_v_btn, {
+                  _createVNode$7(_component_v_btn, {
                     variant: "outlined",
                     color: "error",
                     size: "small",
@@ -4416,7 +4416,7 @@ const _sfc_main$8 = /* @__PURE__ */ _defineComponent$8({
               ])
             ]);
           }), 128))
-        ])) : (_openBlock$8(), _createBlock$7(EmptyState, {
+        ])) : (_openBlock$9(), _createBlock$7(EmptyState, {
           key: 1,
           text: "还没有订阅"
         }))
@@ -4425,11 +4425,11 @@ const _sfc_main$8 = /* @__PURE__ */ _defineComponent$8({
   }
 });
 
-const SubsView = /* @__PURE__ */ _export_sfc(_sfc_main$8, [["__scopeId", "data-v-1e2afa2f"]]);
+const SubsView = /* @__PURE__ */ _export_sfc(_sfc_main$9, [["__scopeId", "data-v-1e2afa2f"]]);
 
-const {defineComponent:_defineComponent$7} = await importShared('vue');
+const {defineComponent:_defineComponent$8} = await importShared('vue');
 
-const {openBlock:_openBlock$7,createElementBlock:_createElementBlock$7,createCommentVNode:_createCommentVNode$7,createVNode:_createVNode$5,toDisplayString:_toDisplayString$7,createElementVNode:_createElementVNode$7,normalizeClass:_normalizeClass$5} = await importShared('vue');
+const {openBlock:_openBlock$8,createElementBlock:_createElementBlock$8,createCommentVNode:_createCommentVNode$7,createVNode:_createVNode$6,toDisplayString:_toDisplayString$7,createElementVNode:_createElementVNode$8,normalizeClass:_normalizeClass$6} = await importShared('vue');
 
 const _hoisted_1$7 = ["title"];
 const _hoisted_2$7 = {
@@ -4442,7 +4442,7 @@ const _hoisted_5$6 = {
   key: 1,
   class: "avh-actor__tag"
 };
-const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
+const _sfc_main$8 = /* @__PURE__ */ _defineComponent$8({
   __name: "ActorRow",
   props: {
     name: {},
@@ -4466,24 +4466,24 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
       emit("select", props.name);
     }
     return (_ctx, _cache) => {
-      return _openBlock$7(), _createElementBlock$7("div", {
-        class: _normalizeClass$5(["avh-actor", { "avh-actor--picker": _ctx.picker, "avh-actor--faved": _ctx.picker && _ctx.favorited }]),
+      return _openBlock$8(), _createElementBlock$8("div", {
+        class: _normalizeClass$6(["avh-actor", { "avh-actor--picker": _ctx.picker, "avh-actor--faved": _ctx.picker && _ctx.favorited }]),
         title: _ctx.name,
         onClick: onSelect
       }, [
-        !_ctx.picker && _ctx.favorited ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_2$7, "⭐")) : _createCommentVNode$7("", true),
-        _createVNode$5(Thumb, {
+        !_ctx.picker && _ctx.favorited ? (_openBlock$8(), _createElementBlock$8("div", _hoisted_2$7, "⭐")) : _createCommentVNode$7("", true),
+        _createVNode$6(Thumb, {
           class: "avh-actor__av",
           variant: "av",
           src: _ctx.avatar,
           alt: _ctx.name,
           "plugin-id": _ctx.pluginId
         }, null, 8, ["src", "alt", "plugin-id"]),
-        _createElementVNode$7("div", _hoisted_3$6, _toDisplayString$7(_ctx.name), 1),
-        _createElementVNode$7("div", _hoisted_4$6, _toDisplayString$7(_ctx.zh || ""), 1),
-        _ctx.picker ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_5$6, [
-          _createElementVNode$7("span", {
-            class: _normalizeClass$5(["avh-tag", _ctx.favorited ? "avh-tag--on" : ""])
+        _createElementVNode$8("div", _hoisted_3$6, _toDisplayString$7(_ctx.name), 1),
+        _createElementVNode$8("div", _hoisted_4$6, _toDisplayString$7(_ctx.zh || ""), 1),
+        _ctx.picker ? (_openBlock$8(), _createElementBlock$8("div", _hoisted_5$6, [
+          _createElementVNode$8("span", {
+            class: _normalizeClass$6(["avh-tag", _ctx.favorited ? "avh-tag--on" : ""])
           }, _toDisplayString$7(_ctx.favorited ? "✓ 已收藏" : "➕ 收藏"), 3)
         ])) : _createCommentVNode$7("", true)
       ], 10, _hoisted_1$7);
@@ -4491,7 +4491,121 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
   }
 });
 
-const ActorRow = /* @__PURE__ */ _export_sfc(_sfc_main$7, [["__scopeId", "data-v-077ee37d"]]);
+const ActorRow = /* @__PURE__ */ _export_sfc(_sfc_main$8, [["__scopeId", "data-v-077ee37d"]]);
+
+const {defineComponent:_defineComponent$7} = await importShared('vue');
+
+const {createElementVNode:_createElementVNode$7,normalizeClass:_normalizeClass$5,normalizeStyle:_normalizeStyle$2,openBlock:_openBlock$7,createElementBlock:_createElementBlock$7} = await importShared('vue');
+
+const {nextTick: nextTick$3,onBeforeUnmount: onBeforeUnmount$4,onMounted: onMounted$4,ref: ref$9} = await importShared('vue');
+
+const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
+  __name: "BackToTop",
+  props: {
+    threshold: { default: 260 },
+    offset: { default: 18 }
+  },
+  setup(__props) {
+    const props = __props;
+    const hostEl = ref$9(null);
+    const show = ref$9(false);
+    let scroller = null;
+    let frame = 0;
+    function findScroller(start) {
+      let el = start;
+      while (el && el !== document.body && el !== document.documentElement) {
+        const overflowY = window.getComputedStyle(el).overflowY;
+        if (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") return el;
+        el = el.parentElement;
+      }
+      return null;
+    }
+    function active() {
+      const winTop = window.scrollY || document.documentElement.scrollTop || 0;
+      const inner = scroller;
+      if (inner && inner.scrollHeight - inner.clientHeight > 1) {
+        if (inner.scrollTop > 0 || winTop <= 0) return { el: inner, top: inner.scrollTop };
+      }
+      return { el: window, top: winTop };
+    }
+    function measure() {
+      show.value = active().top > props.threshold;
+    }
+    function onScroll() {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        measure();
+      });
+    }
+    function onResize() {
+      detach();
+      attach();
+    }
+    function detach() {
+      if (scroller) scroller.removeEventListener("scroll", onScroll);
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onResize);
+    }
+    function attach() {
+      detach();
+      scroller = findScroller(hostEl.value ? hostEl.value.parentElement : null);
+      if (scroller) scroller.addEventListener("scroll", onScroll, { passive: true });
+      window.addEventListener("scroll", onScroll, { passive: true });
+      window.addEventListener("resize", onResize, { passive: true });
+      measure();
+    }
+    function toTop() {
+      active().el.scrollTo({ top: 0, behavior: "smooth" });
+    }
+    onMounted$4(() => {
+      attach();
+      void nextTick$3(measure);
+    });
+    onBeforeUnmount$4(() => {
+      detach();
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+        frame = 0;
+      }
+    });
+    return (_ctx, _cache) => {
+      return _openBlock$7(), _createElementBlock$7("div", {
+        ref_key: "hostEl",
+        ref: hostEl,
+        class: _normalizeClass$5(["avh-top", { "avh-top--on": show.value }]),
+        style: _normalizeStyle$2({ "--avh-top-bottom": `${_ctx.offset}px` })
+      }, [
+        _createElementVNode$7("button", {
+          type: "button",
+          class: "avh-top__btn",
+          title: "回到顶部",
+          "aria-label": "回到顶部",
+          onClick: toTop
+        }, _cache[0] || (_cache[0] = [
+          _createElementVNode$7("span", {
+            class: "avh-top__ico",
+            "aria-hidden": "true"
+          }, [
+            _createElementVNode$7("svg", {
+              viewBox: "0 0 24 24",
+              width: "17",
+              height: "17"
+            }, [
+              _createElementVNode$7("path", {
+                fill: "currentColor",
+                d: "M12 4.4 4.6 11.8l1.5 1.5 4.9-4.9V19.6h2V8.4l4.9 4.9 1.5-1.5z"
+              })
+            ])
+          ], -1),
+          _createElementVNode$7("span", { class: "avh-top__txt" }, "回到顶部", -1)
+        ]))
+      ], 6);
+    };
+  }
+});
+
+const BackToTop = /* @__PURE__ */ _export_sfc(_sfc_main$7, [["__scopeId", "data-v-95b525fa"]]);
 
 function cssUrl(value) {
   return String(value || "").replace(/["'()\\\s]/g, (char) => encodeURIComponent(char));
@@ -4499,7 +4613,7 @@ function cssUrl(value) {
 
 const {defineComponent:_defineComponent$6} = await importShared('vue');
 
-const {createTextVNode:_createTextVNode$5,resolveComponent:_resolveComponent$6,withCtx:_withCtx$6,createVNode:_createVNode$4,createElementVNode:_createElementVNode$6,openBlock:_openBlock$6,createElementBlock:_createElementBlock$6,createCommentVNode:_createCommentVNode$6,createBlock:_createBlock$6,toDisplayString:_toDisplayString$6,normalizeClass:_normalizeClass$4,renderList:_renderList$5,Fragment:_Fragment$5,normalizeStyle:_normalizeStyle$1} = await importShared('vue');
+const {createTextVNode:_createTextVNode$5,resolveComponent:_resolveComponent$6,withCtx:_withCtx$6,createVNode:_createVNode$5,createElementVNode:_createElementVNode$6,openBlock:_openBlock$6,createElementBlock:_createElementBlock$6,createCommentVNode:_createCommentVNode$6,createBlock:_createBlock$6,toDisplayString:_toDisplayString$6,normalizeClass:_normalizeClass$4,renderList:_renderList$5,Fragment:_Fragment$5,normalizeStyle:_normalizeStyle$1} = await importShared('vue');
 
 const _hoisted_1$6 = { class: "avh-actors__toolbar" };
 const _hoisted_2$6 = {
@@ -4551,21 +4665,28 @@ const _hoisted_29$1 = {
   key: 1,
   class: "avh-morebar"
 };
-const _hoisted_30$1 = { class: "avh-hint" };
-const _hoisted_31$1 = { class: "avh-actors__toolbar" };
+const _hoisted_30$1 = { class: "avh-hint avh-morebar__tip" };
+const _hoisted_31$1 = {
+  key: 2,
+  class: "avh-morebar"
+};
 const _hoisted_32$1 = { class: "avh-hint" };
-const _hoisted_33$1 = { class: "avh-actors" };
-const _hoisted_34$1 = {
+const _hoisted_33$1 = { class: "avh-actors__toolbar" };
+const _hoisted_34$1 = { class: "avh-hint" };
+const _hoisted_35$1 = { class: "avh-actors" };
+const _hoisted_36$1 = {
   key: 0,
   class: "avh-loading"
 };
-const _hoisted_35$1 = {
+const _hoisted_37$1 = {
   key: 2,
   class: "avh-hint"
 };
-const _hoisted_36$1 = { class: "avh-actors avh-actors--pick" };
+const _hoisted_38$1 = { class: "avh-actors avh-actors--pick" };
 const {computed: computed$6,nextTick: nextTick$2,onUnmounted,reactive: reactive$1,ref: ref$8,watch: watch$5} = await importShared('vue');
 const FILM_PAGE = 30;
+const ALL_LIMIT = 50;
+const ALL_MAX_PAGES = 20;
 const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
   __name: "ActorsView",
   props: {
@@ -4693,6 +4814,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
       if (!target) return;
       actor.value = target;
       actorYear.value = "";
+      allCapped.value = false;
       void loadPage(target);
       void nextTick$2(() => rootEl.value?.scrollIntoView({ block: "start" }));
     }
@@ -4703,6 +4825,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
       const name = actor.value;
       if (!name) return;
       pageRetrying.value = true;
+      allCapped.value = false;
       try {
         pageCache.delete(`page:actor:${name}`);
         await loadPage(name, true);
@@ -4719,29 +4842,32 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
     async function loadMoreFilms() {
       const name = actor.value;
       const entry = pageEntry.value;
-      if (!name || !entry || loadingMore.value) return;
+      if (!name || !entry || loadingMore.value || allLoading.value) return;
       const data = entry.data || {};
+      const limit = Number(data.limit) || FILM_PAGE;
       const page = (Number(data.page) || 1) + 1;
       const before = year.value ? yearCountOf(movies.value, year.value) : 0;
       loadingMore.value = true;
       try {
-        const res = await apiGet("actor", { name, page, limit: FILM_PAGE });
+        const res = await apiGet("actor", { name, page, limit });
         if (!res.ok) {
           t.warning("加载更多失败");
           t.info(res.message || "请稍后重试");
           return;
         }
         const next = res.payload || {};
+        const base = Array.isArray(data.movies) ? data.movies : [];
         const seen = {};
-        movies.value.forEach((x) => {
+        base.forEach((x) => {
           seen[`${x.id || ""}|${x.number || ""}`] = true;
         });
         const add = (next.movies || []).filter((x) => !seen[`${x.id || ""}|${x.number || ""}`]);
-        data.movies = movies.value.concat(add);
+        data.movies = base.concat(add);
         data.page = page;
         data.hasMore = !!next.hasMore;
         data.total = next.total || data.total;
         data.entity = next.entity || data.entity;
+        allCapped.value = false;
         if (actor.value !== name) return;
         if (year.value && yearCountOf(data.movies, year.value) === before) {
           t.warning("继续加载");
@@ -4749,6 +4875,88 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
         }
       } finally {
         loadingMore.value = false;
+      }
+    }
+    const allLoading = ref$8(false);
+    const allStop = ref$8(false);
+    const allPages = ref$8(0);
+    const allCapped = ref$8(false);
+    const allLabel = computed$6(() => {
+      const loaded = movies.value.length;
+      const total = totalCount.value;
+      if (allLoading.value) {
+        return total > loaded ? `⏹ 停止（已加载 ${loaded} / ${total} 部）` : `⏹ 停止（已加载 ${loaded} 部）`;
+      }
+      if (total > loaded) return `⏬ 加载全部（还有 ${total - loaded} 部）`;
+      return "⏬ 加载全部";
+    });
+    async function loadAllFilms() {
+      const name = actor.value;
+      const entry = pageEntry.value;
+      if (!name || !entry || loadingMore.value) return;
+      if (allLoading.value) {
+        allStop.value = true;
+        return;
+      }
+      const data = entry.data || {};
+      const loadedLimit = Number(data.limit) || FILM_PAGE;
+      const loadedPage = Number(data.page) || 1;
+      const resume = loadedLimit === ALL_LIMIT && loadedPage >= 1 && movies.value.length > 0;
+      let page = resume ? loadedPage + 1 : 1;
+      const acc = movies.value.slice();
+      const seen = {};
+      acc.forEach((mv) => {
+        seen[`${mv.id || ""}|${mv.number || ""}`] = true;
+      });
+      let stopped = false;
+      allLoading.value = true;
+      allStop.value = false;
+      allCapped.value = false;
+      allPages.value = 0;
+      try {
+        for (let i = 0; i < ALL_MAX_PAGES; i++) {
+          const res = await apiGet("actor", { name, page, limit: ALL_LIMIT });
+          if (!res.ok) {
+            t.warning(allPages.value ? "「加载全部」中断" : "「加载全部」失败");
+            t.info(res.message || "请稍后重试");
+            break;
+          }
+          const next = res.payload || {};
+          const items = Array.isArray(next.movies) ? next.movies : [];
+          items.forEach((mv) => {
+            const key = `${mv.id || ""}|${mv.number || ""}`;
+            if (!seen[key]) {
+              seen[key] = true;
+              acc.push(mv);
+            }
+          });
+          data.movies = acc.slice();
+          data.limit = ALL_LIMIT;
+          data.page = page;
+          data.total = Number(next.total || 0) || data.total;
+          data.entity = next.entity || data.entity;
+          data.hasMore = !!next.hasMore;
+          allPages.value = i + 1;
+          if (!items.length || !next.hasMore) break;
+          if (allStop.value) {
+            stopped = true;
+            break;
+          }
+          if (actor.value !== name) break;
+          if (allPages.value >= ALL_MAX_PAGES) {
+            allCapped.value = true;
+            break;
+          }
+          page += 1;
+        }
+      } finally {
+        allLoading.value = false;
+        allStop.value = false;
+      }
+      if (actor.value !== name) return;
+      if (stopped) t.info(`已停止，共加载 ${acc.length} 部`);
+      if (allCapped.value) {
+        t.info(`已一次拉满 ${ALL_MAX_PAGES * ALL_LIMIT} 部（与 javdb-cli 的 --all 同口径），再点「加载全部」可以继续`);
       }
     }
     async function setFav(name, zh, avatar, next) {
@@ -4938,7 +5146,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
       }, [
         actor.value ? (_openBlock$6(), _createElementBlock$6(_Fragment$5, { key: 0 }, [
           _createElementVNode$6("div", _hoisted_1$6, [
-            _createVNode$4(_component_v_btn, {
+            _createVNode$5(_component_v_btn, {
               variant: "outlined",
               size: "small",
               onClick: backToList
@@ -4957,7 +5165,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
           }, null, 8, ["message", "retrying"])) : (_openBlock$6(), _createElementBlock$6(_Fragment$5, { key: 2 }, [
             _createElementVNode$6("div", _hoisted_3$5, [
               _createElementVNode$6("div", _hoisted_4$5, [
-                _createVNode$4(Thumb, {
+                _createVNode$5(Thumb, {
                   src: entity.value.avatar,
                   alt: actor.value,
                   "plugin-id": _ctx.pluginId
@@ -5003,7 +5211,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
                   ])
                 ]),
                 _createElementVNode$6("div", _hoisted_16$2, [
-                  _createVNode$4(_component_v_btn, {
+                  _createVNode$5(_component_v_btn, {
                     color: faved.value ? void 0 : "primary",
                     variant: faved.value ? "outlined" : "flat",
                     size: "small",
@@ -5014,7 +5222,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
                     ]),
                     _: 1
                   }, 8, ["color", "variant"]),
-                  _createVNode$4(_component_v_btn, {
+                  _createVNode$5(_component_v_btn, {
                     color: sub.value ? void 0 : "primary",
                     variant: sub.value ? "outlined" : "flat",
                     size: "small",
@@ -5027,7 +5235,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
                     ]),
                     _: 1
                   }, 8, ["color", "variant", "loading", "disabled"]),
-                  _createVNode$4(_component_v_btn, {
+                  _createVNode$5(_component_v_btn, {
                     variant: "outlined",
                     size: "small",
                     loading: checking.value,
@@ -5074,7 +5282,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
                       class: "avh-film__pic",
                       style: _normalizeStyle$1(picStyle(mv))
                     }, [
-                      _createVNode$4(Thumb, {
+                      _createVNode$5(Thumb, {
                         variant: "film",
                         src: mv.thumb,
                         alt: mv.number || "",
@@ -5097,19 +5305,35 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
                 }), 128))
               ]),
               hasMore.value ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_28$1, [
-                _createVNode$4(_component_v_btn, {
+                _createVNode$5(_component_v_btn, {
                   variant: "outlined",
                   size: "small",
                   loading: loadingMore.value,
+                  disabled: allLoading.value,
                   onClick: loadMoreFilms
                 }, {
                   default: _withCtx$6(() => [
                     _createTextVNode$5(_toDisplayString$6(moreLabel.value), 1)
                   ]),
                   _: 1
-                }, 8, ["loading"])
-              ])) : movies.value.length > FILM_PAGE ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_29$1, [
-                _createElementVNode$6("span", _hoisted_30$1, "已加载全部 " + _toDisplayString$6(movies.value.length) + " 部", 1)
+                }, 8, ["loading", "disabled"]),
+                _createVNode$5(_component_v_btn, {
+                  variant: allLoading.value ? "outlined" : "tonal",
+                  color: allLoading.value ? "warning" : "primary",
+                  size: "small",
+                  disabled: loadingMore.value,
+                  onClick: loadAllFilms
+                }, {
+                  default: _withCtx$6(() => [
+                    _createTextVNode$5(_toDisplayString$6(allLabel.value), 1)
+                  ]),
+                  _: 1
+                }, 8, ["variant", "color", "disabled"])
+              ])) : _createCommentVNode$6("", true),
+              allCapped.value ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_29$1, [
+                _createElementVNode$6("span", _hoisted_30$1, " 已一次拉满 " + _toDisplayString$6(ALL_MAX_PAGES * ALL_LIMIT) + " 部（与 javdb-cli 的 --all 同口径）， 再点一次「加载全部」可以接着往下拉。 ", 1)
+              ])) : !hasMore.value && movies.value.length > FILM_PAGE ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_31$1, [
+                _createElementVNode$6("span", _hoisted_32$1, "已加载全部 " + _toDisplayString$6(movies.value.length) + " 部", 1)
               ])) : _createCommentVNode$6("", true)
             ], 64)) : (_openBlock$6(), _createBlock$6(EmptyState, {
               key: 2,
@@ -5118,10 +5342,10 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
           ], 64))
         ], 64)) : (_openBlock$6(), _createElementBlock$6(_Fragment$5, { key: 1 }, [
           hasFavs.value ? (_openBlock$6(), _createElementBlock$6(_Fragment$5, { key: 0 }, [
-            _createElementVNode$6("div", _hoisted_31$1, [
-              _createElementVNode$6("span", _hoisted_32$1, "共 " + _toDisplayString$6(favs.value.length) + " 位", 1),
+            _createElementVNode$6("div", _hoisted_33$1, [
+              _createElementVNode$6("span", _hoisted_34$1, "共 " + _toDisplayString$6(favs.value.length) + " 位", 1),
               _cache[14] || (_cache[14] = _createElementVNode$6("div", { class: "avh-actors__spacer" }, null, -1)),
-              _createVNode$4(_component_v_btn, {
+              _createVNode$5(_component_v_btn, {
                 variant: "outlined",
                 size: "small",
                 onClick: openPicker
@@ -5132,7 +5356,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
                 _: 1
               })
             ]),
-            _createElementVNode$6("div", _hoisted_33$1, [
+            _createElementVNode$6("div", _hoisted_35$1, [
               (_openBlock$6(true), _createElementBlock$6(_Fragment$5, null, _renderList$5(favs.value, (item) => {
                 return _openBlock$6(), _createBlock$6(ActorRow, {
                   key: item.name,
@@ -5150,7 +5374,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
             text: "还没有收藏演员"
           }, {
             default: _withCtx$6(() => [
-              _createVNode$4(_component_v_btn, {
+              _createVNode$5(_component_v_btn, {
                 color: "primary",
                 variant: "flat",
                 onClick: openPicker
@@ -5164,7 +5388,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
             _: 1
           }))
         ], 64)),
-        _createVNode$4(_component_v_dialog, {
+        _createVNode$5(_component_v_dialog, {
           modelValue: pickerOpen.value,
           "onUpdate:modelValue": _cache[2] || (_cache[2] = ($event) => pickerOpen.value = $event),
           "max-width": "880",
@@ -5172,24 +5396,24 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
           attach: "body"
         }, {
           default: _withCtx$6(() => [
-            _createVNode$4(_component_v_card, null, {
+            _createVNode$5(_component_v_card, null, {
               default: _withCtx$6(() => [
-                _createVNode$4(_component_v_card_title, { class: "d-flex align-center" }, {
+                _createVNode$5(_component_v_card_title, { class: "d-flex align-center" }, {
                   default: _withCtx$6(() => _cache[16] || (_cache[16] = [
                     _createTextVNode$5("从演员榜挑选")
                   ])),
                   _: 1
                 }),
-                _createVNode$4(_component_v_card_text, null, {
+                _createVNode$5(_component_v_card_text, null, {
                   default: _withCtx$6(() => [
-                    pickerLoading.value ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_34$1, "正在抓取演员榜…")) : pickerError.value ? (_openBlock$6(), _createBlock$6(ErrorState, {
+                    pickerLoading.value ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_36$1, "正在抓取演员榜…")) : pickerError.value ? (_openBlock$6(), _createBlock$6(ErrorState, {
                       key: 1,
                       message: pickerError.value,
                       retrying: pickerLoading.value,
                       onRetry: retryRank
-                    }, null, 8, ["message", "retrying"])) : !pickerRows.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_35$1, "演员榜里的人都已收藏。")) : (_openBlock$6(), _createElementBlock$6(_Fragment$5, { key: 3 }, [
+                    }, null, 8, ["message", "retrying"])) : !pickerRows.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_37$1, "演员榜里的人都已收藏。")) : (_openBlock$6(), _createElementBlock$6(_Fragment$5, { key: 3 }, [
                       _cache[17] || (_cache[17] = _createElementVNode$6("div", { class: "avh-actorpick__tip avh-hint" }, "点 ➕ 加入收藏", -1)),
-                      _createElementVNode$6("div", _hoisted_36$1, [
+                      _createElementVNode$6("div", _hoisted_38$1, [
                         (_openBlock$6(true), _createElementBlock$6(_Fragment$5, null, _renderList$5(pickerRows.value, (row) => {
                           return _openBlock$6(), _createBlock$6(ActorRow, {
                             key: row.name,
@@ -5208,10 +5432,10 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
                   ]),
                   _: 1
                 }),
-                _createVNode$4(_component_v_card_actions, null, {
+                _createVNode$5(_component_v_card_actions, null, {
                   default: _withCtx$6(() => [
-                    _createVNode$4(_component_v_spacer),
-                    _createVNode$4(_component_v_btn, {
+                    _createVNode$5(_component_v_spacer),
+                    _createVNode$5(_component_v_btn, {
                       color: "error",
                       variant: "outlined",
                       onClick: _cache[1] || (_cache[1] = ($event) => pickerOpen.value = false)
@@ -5229,13 +5453,14 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
             })
           ]),
           _: 1
-        }, 8, ["modelValue"])
+        }, 8, ["modelValue"]),
+        actor.value ? (_openBlock$6(), _createBlock$6(BackToTop, { key: 2 })) : _createCommentVNode$6("", true)
       ], 512);
     };
   }
 });
 
-const ActorsView = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-96bd55da"]]);
+const ActorsView = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-5a6c17da"]]);
 
 const {reactive,ref: ref$7} = await importShared('vue');
 const rankCache = reactive(/* @__PURE__ */ new Map());
@@ -5256,7 +5481,7 @@ function prefetchCards(api, movies, n = PREFETCH_N) {
 
 const {defineComponent:_defineComponent$5} = await importShared('vue');
 
-const {openBlock:_openBlock$5,createElementBlock:_createElementBlock$5,createCommentVNode:_createCommentVNode$5,renderList:_renderList$4,Fragment:_Fragment$4,toDisplayString:_toDisplayString$5,normalizeClass:_normalizeClass$3,createElementVNode:_createElementVNode$5,createTextVNode:_createTextVNode$4,resolveComponent:_resolveComponent$5,withCtx:_withCtx$5,createBlock:_createBlock$5} = await importShared('vue');
+const {openBlock:_openBlock$5,createElementBlock:_createElementBlock$5,createCommentVNode:_createCommentVNode$5,renderList:_renderList$4,Fragment:_Fragment$4,toDisplayString:_toDisplayString$5,normalizeClass:_normalizeClass$3,createElementVNode:_createElementVNode$5,createTextVNode:_createTextVNode$4,resolveComponent:_resolveComponent$5,withCtx:_withCtx$5,createBlock:_createBlock$5,createVNode:_createVNode$4} = await importShared('vue');
 
 const _hoisted_1$5 = { class: "avh-discover" };
 const _hoisted_2$5 = {
@@ -5474,13 +5699,14 @@ const _sfc_main$5 = /* @__PURE__ */ _defineComponent$5({
               }), 128))
             ]))
           ], 64))
-        ], 64))
+        ], 64)),
+        _createVNode$4(BackToTop)
       ]);
     };
   }
 });
 
-const DiscoverView = /* @__PURE__ */ _export_sfc(_sfc_main$5, [["__scopeId", "data-v-29ff5987"]]);
+const DiscoverView = /* @__PURE__ */ _export_sfc(_sfc_main$5, [["__scopeId", "data-v-18d36688"]]);
 
 const {defineComponent:_defineComponent$4} = await importShared('vue');
 

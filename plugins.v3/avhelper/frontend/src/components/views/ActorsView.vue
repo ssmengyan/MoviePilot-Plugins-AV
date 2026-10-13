@@ -31,6 +31,8 @@
  * | **作品史服务端分页**（老 `#btnMoreFilms`）：首屏 `page=1&limit=30`，`.morebar` 里一颗「加载更多（已显示 n / 共 m 部）」，续拉下一页按 `id|番号` 去重后追加；`hasMore` 为假且不止一页时显示 `已加载全部 n 部` | `loadMoreFilms()` 同一套（页码存进页内缓存，切走只更新缓存不重绘），按钮 `:loading` 转圈 |
  * | 年份收敛：`years.length > 1` 才画 `.filmyears`，按钮 `全部 n`（还有下一页时带 `+`）+ 每年 `2025 6`（`opacity:.65` 的数字）；点击 `S.actorYear=y` | 同（保留 `全部 ` 后面那个空格与弱化数字）；筛选只作用于**已加载**的那几页，`hasMore` 时年份空态会提示「继续加载试试」 |
  * | 作品史接口 `apiGet('/actor', {name, page, limit:30})`（服务端分页；后端 `ACTOR_PAGE=30`、单页硬上限 50） | `api.get('plugin/actor', { params: { name, page, limit: FILM_PAGE } })`（契约 `GET /actor?name=&page=&limit=`，回 `page/limit/total/hasMore`） |
+ * | ——（老实现**没有**，2026-10-13 加）「加载全部」 | `loadAllFilms()`：50/页（站点单页上限）、最多连拉 20 页 = 1000 部（对齐 javdb-cli `--all` 的口径）；每拉完一页就写回缓存、列表**当场**变长；在飞时同一颗按钮变「⏹ 停止」。翻页口径与偏移实测见 `ALL_LIMIT` / `ALL_MAX_PAGES` 的注释 |
+ * | ——（老实现**没有**，2026-10-13 加）「回到顶部」 | 作品史里挂 `common/BackToTop.vue`：往下滑过 260px 才浮出（不默认显示），点一下平滑回顶；榜单栏挂同一颗 |
  * | 演员榜接口 `apiGet('/actors')` → `r.data.actors` | `api.get('plugin/actors')`，同样认 `{success, actors}` 与 `{success,data:{actors}}` 两种信封 |
  * | 页内缓存 `CACHE['page:actor:'+name]` / `CACHE['actors']`（跨栏目切换仍在，来回看演员不重抓） | 同名的模块级缓存（`Map` + `reactive`），组件卸载/重挂不掉 |
  *
@@ -62,6 +64,7 @@
  */
 import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import ActorRow from '../common/ActorRow.vue'
+import BackToTop from '../common/BackToTop.vue'
 import EmptyState from '../common/EmptyState.vue'
 import ErrorState from '../common/ErrorState.vue'
 import Thumb from '../common/Thumb.vue'
@@ -363,6 +366,7 @@ function openActor(name: string): void {
   if (!target) return
   actor.value = target
   actorYear.value = ''
+  allCapped.value = false        // 换了人，"一次拉满上限"那句提示是上一位的，收掉
   void loadPage(target)
   // 老实现 `const m = $('#main'); if (m) m.scrollTop = 0;` —— 壳的内容区就是滚动容器。
   void nextTick(() => rootEl.value?.scrollIntoView({ block: 'start' }))
@@ -378,6 +382,7 @@ async function retryPage(): Promise<void> {
   const name = actor.value
   if (!name) return
   pageRetrying.value = true
+  allCapped.value = false        // 重抓回第 1 页，「一次拉满上限」那句提示作废
   try {
     pageCache.delete(`page:actor:${name}`)
     await loadPage(name, true)
@@ -406,29 +411,36 @@ function yearCountOf(items: ActorMovie[], target: string): number {
 async function loadMoreFilms(): Promise<void> {
   const name = actor.value
   const entry = pageEntry.value
-  if (!name || !entry || loadingMore.value) return
+  if (!name || !entry || loadingMore.value || allLoading.value) return
   const data = entry.data || {}
+  // 页号必须配**同一页尺寸**（服务端偏移分页）：全量拉过之后 limit 是 50，接着就得用 50 翻
+  const limit = Number(data.limit) || FILM_PAGE
   const page = (Number(data.page) || 1) + 1
   const before = year.value ? yearCountOf(movies.value, year.value) : 0
   loadingMore.value = true
   try {
-    const res = await apiGet('actor', { name, page, limit: FILM_PAGE })
+    const res = await apiGet('actor', { name, page, limit })
     if (!res.ok) {
       t.warning('加载更多失败')
       t.info(res.message || '请稍后重试')
       return
     }
     const next = (res.payload || {}) as ActorPageData
+    // 基准取缓存里那份列表（不是 `movies.value`）：请求在飞时用户可能已经换了演员或返回列表，
+    // 那时 `movies.value` 已经是别人的列表，concat 会把两个人的作品混进同一条缓存。
+    const base: ActorMovie[] = Array.isArray(data.movies) ? (data.movies as ActorMovie[]) : []
     const seen: Record<string, boolean> = {}
-    movies.value.forEach(x => {
+    base.forEach((x: ActorMovie) => {
       seen[`${x.id || ''}|${x.number || ''}`] = true
     })
     const add = (next.movies || []).filter(x => !seen[`${x.id || ''}|${x.number || ''}`])
-    data.movies = movies.value.concat(add)
+    data.movies = base.concat(add)
     data.page = page
     data.hasMore = !!next.hasMore
     data.total = next.total || data.total
     data.entity = next.entity || data.entity
+    // 换了续拉方式（手动一页页来），"一次拉满上限"那句提示就该收了
+    allCapped.value = false
     if (actor.value !== name) return      // 已经切走了：只更新缓存
     if (year.value && yearCountOf(data.movies, year.value) === before) {
       t.warning('继续加载')
@@ -436,6 +448,126 @@ async function loadMoreFilms(): Promise<void> {
     }
   } finally {
     loadingMore.value = false
+  }
+}
+
+// ---------- 「加载全部」：从最新一部一路拉到最旧一部（2026-10-13 加） ----------
+
+/**
+ * 全量模式每页条数 = 站点单页硬上限（后端 `ACTOR_PAGE_MAX = 50`，实测 50 条）。
+ *
+ * 为什么不沿用首屏那 30：站点是**服务端偏移分页**，`page` 与 `limit` 一起决定取哪一段。
+ * 2026-10-13 实测（三上悠亜，站点记录 323 部）：`p1 l30` 正好是 `p1 l50` 的前 30 条，
+ * 而 `p2 l50` 从第 51 条开始 —— 拿 `p1 l30` 去接 `p2 l50` 会**丢掉第 31–50 条**。
+ * 所以全量一律 50/页、并且从第 1 页重来（首屏那 30 条本来就是它的前 30 条，等于原地加长）。
+ */
+const ALL_LIMIT = 50
+
+/**
+ * 一次「加载全部」最多连拉多少页 = 1000 部。
+ *
+ * 对齐 javdb-cli 自己 `--all` 的口径（`AllEntityMovies`：上限 50 页 × 20/页，官方注释写明
+ * "上千部的大牌演员只能拿到 1000 部"）。不设上限的话，4000+ 部的演员会变成几分钟不停的请求。
+ * 触顶不是失败：已拉到的留在界面上，给一句话，再点一次接着拉。
+ */
+const ALL_MAX_PAGES = 20
+
+/** 「加载全部」在飞 / 用户按了停止（当前这一页回来就收工）。 */
+const allLoading = ref(false)
+const allStop = ref(false)
+/** 本次连拉了第几页（只用于触顶判定）。 */
+const allPages = ref(0)
+/** 触到一次连拉的上限停下来了（界面补一句"再点一次继续"）。 */
+const allCapped = ref(false)
+
+/** 「加载全部」按钮文案：在飞时是进度 + 停止。 */
+const allLabel = computed(() => {
+  const loaded = movies.value.length
+  const total = totalCount.value
+  if (allLoading.value) {
+    return total > loaded ? `⏹ 停止（已加载 ${loaded} / ${total} 部）` : `⏹ 停止（已加载 ${loaded} 部）`
+  }
+  if (total > loaded) return `⏬ 加载全部（还有 ${total - loaded} 部）`
+  return '⏬ 加载全部'
+})
+
+/**
+ * 「加载全部」：从第 1 页（或上次停下的下一页）一页页拉到站点说没有为止。
+ *
+ * 与「加载更多」共用同一份页内缓存（`page:actor:<name>`），于是：
+ * - 拉到第几页、每页多少条都记在缓存条目里，切走再回来接着拉，不重头再来；
+ * - 每拉完一页就写回缓存 → 列表当场变长（不是等全部拉完才画）；
+ * - 切走这位演员就停（`actor.value !== name`），已拉的留在他的缓存条目里，不污染别人的。
+ */
+async function loadAllFilms(): Promise<void> {
+  const name = actor.value
+  const entry = pageEntry.value
+  if (!name || !entry || loadingMore.value) return
+  if (allLoading.value) {
+    allStop.value = true                 // 在飞时再点一次 = 停止
+    return
+  }
+  const data = entry.data || {}
+  const loadedLimit = Number(data.limit) || FILM_PAGE
+  const loadedPage = Number(data.page) || 1
+  // 上次已经是全量口径（50/页）就接着下一页拉；否则从第 1 页重来（理由见 ALL_LIMIT）
+  const resume = loadedLimit === ALL_LIMIT && loadedPage >= 1 && movies.value.length > 0
+  let page = resume ? loadedPage + 1 : 1
+  // 基准一律取"现在画出来的那一份"（重来时也一样）：新拉的页与它按 `id|番号` 求并集，
+  // 于是**重来的那一瞬间列表不会变短**（先用 30/页拉到 60 部再点全量，头 50 部落地时仍是 60 部）。
+  const acc: ActorMovie[] = movies.value.slice()
+  const seen: Record<string, boolean> = {}
+  acc.forEach(mv => {
+    seen[`${mv.id || ''}|${mv.number || ''}`] = true
+  })
+
+  let stopped = false
+  allLoading.value = true
+  allStop.value = false
+  allCapped.value = false
+  allPages.value = 0
+  try {
+    for (let i = 0; i < ALL_MAX_PAGES; i++) {
+      const res = await apiGet('actor', { name, page, limit: ALL_LIMIT })
+      if (!res.ok) {
+        t.warning(allPages.value ? '「加载全部」中断' : '「加载全部」失败')
+        t.info(res.message || '请稍后重试')
+        break
+      }
+      const next = (res.payload || {}) as ActorPageData
+      const items = Array.isArray(next.movies) ? next.movies : []
+      items.forEach(mv => {
+        const key = `${mv.id || ''}|${mv.number || ''}`
+        if (!seen[key]) {
+          seen[key] = true
+          acc.push(mv)
+        }
+      })
+      // 每页都写回缓存（写的是**这位演员自己**的条目，与此刻在看谁无关）
+      data.movies = acc.slice()
+      data.limit = ALL_LIMIT
+      data.page = page
+      data.total = Number(next.total || 0) || data.total
+      data.entity = next.entity || data.entity
+      data.hasMore = !!next.hasMore
+      allPages.value = i + 1
+      if (!items.length || !next.hasMore) break     // 站点说没有了：到底了
+      if (allStop.value) { stopped = true; break }  // 用户按了停止
+      if (actor.value !== name) break               // 切走演员 / 返回列表
+      if (allPages.value >= ALL_MAX_PAGES) {
+        allCapped.value = true
+        break
+      }
+      page += 1
+    }
+  } finally {
+    allLoading.value = false
+    allStop.value = false
+  }
+  if (actor.value !== name) return
+  if (stopped) t.info(`已停止，共加载 ${acc.length} 部`)
+  if (allCapped.value) {
+    t.info(`已一次拉满 ${ALL_MAX_PAGES * ALL_LIMIT} 部（与 javdb-cli 的 --all 同口径），再点「加载全部」可以继续`)
   }
 }
 
@@ -860,13 +992,35 @@ watch(
             </div>
           </div>
 
-          <!-- 加载更多（老 `.morebar`）：还有下一页给按钮，否则在加载过不止一页时报个「已全部加载」 -->
+          <!-- 加载更多（老 `.morebar`）+ 加载全部（2026-10-13 加）：还有下一页才画 -->
           <div v-if="hasMore" class="avh-morebar">
-            <v-btn variant="outlined" size="small" :loading="loadingMore" @click="loadMoreFilms">
+            <v-btn
+              variant="outlined"
+              size="small"
+              :loading="loadingMore"
+              :disabled="allLoading"
+              @click="loadMoreFilms"
+            >
               {{ moreLabel }}
             </v-btn>
+            <!-- 全量拉：一次 50/页、最多 20 页（1000 部）；在飞时这颗按钮就是「停止」 -->
+            <v-btn
+              :variant="allLoading ? 'outlined' : 'tonal'"
+              :color="allLoading ? 'warning' : 'primary'"
+              size="small"
+              :disabled="loadingMore"
+              @click="loadAllFilms"
+            >
+              {{ allLabel }}
+            </v-btn>
           </div>
-          <div v-else-if="movies.length > FILM_PAGE" class="avh-morebar">
+          <div v-if="allCapped" class="avh-morebar">
+            <span class="avh-hint avh-morebar__tip">
+              已一次拉满 {{ ALL_MAX_PAGES * ALL_LIMIT }} 部（与 javdb-cli 的 --all 同口径），
+              再点一次「加载全部」可以接着往下拉。
+            </span>
+          </div>
+          <div v-else-if="!hasMore && movies.length > FILM_PAGE" class="avh-morebar">
             <span class="avh-hint">已加载全部 {{ movies.length }} 部</span>
           </div>
         </template>
@@ -942,6 +1096,9 @@ watch(
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- 回到顶部：只在作品史（长列表）里出现，滚下去才浮出来（见 common/BackToTop.vue） -->
+    <BackToTop v-if="actor" />
   </div>
 </template>
 
@@ -1187,10 +1344,20 @@ watch(
   color: rgb(var(--v-theme-on-surface));
 }
 
-/* 对齐 `.morebar` */
+/* 对齐 `.morebar`（现在是两颗按钮：加载更多 / 加载全部） */
 .avh-morebar {
   display: flex;
+  align-items: center;
   justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
   margin-top: 16px;
+}
+
+/* 触到一次连拉上限那句提示：独占一行、居中，别把两颗按钮挤变形 */
+.avh-morebar__tip {
+  flex: 1 1 100%;
+  text-align: center;
+  line-height: 1.7;
 }
 </style>
