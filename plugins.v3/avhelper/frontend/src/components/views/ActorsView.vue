@@ -255,6 +255,61 @@ function favAvatar(item: FavActor): string {
   return String(item.avatar || actorAvatarOf(String(item.name || '')))
 }
 
+// ---------- 演员自定义备注 ----------
+
+/**
+ * 备注表（`{演员原名: 备注}`）：来自 `/bootstrap` 的 `aliases`，与收藏是两张表
+ * （没收藏的演员也能有备注），所以这里**只读 `store.aliases`**，不从 `favs` 派生。
+ */
+const aliases = computed<Record<string, string>>(() =>
+  props.store.aliases && typeof props.store.aliases.value === 'object' && props.store.aliases.value
+    ? props.store.aliases.value
+    : {},
+)
+
+/** 查一位演员的备注；后端只回非空项，所以查不到就是没备注。 */
+function aliasOf(name: string): string {
+  return aliases.value[String(name || '')] || ''
+}
+
+/** 备注编辑弹窗（`null` = 没打开；值就是草稿，取消即丢弃，不写库）。 */
+const aliasDraft = ref<string | null>(null)
+const aliasSaving = ref(false)
+
+function openAliasDialog(): void {
+  if (!actor.value) return
+  aliasDraft.value = aliasOf(actor.value)
+}
+
+async function saveAlias(): Promise<void> {
+  const name = actor.value
+  if (!name || aliasDraft.value === null || aliasSaving.value) return
+  aliasSaving.value = true
+  try {
+    const res = await props.store.setAlias(name, aliasDraft.value)
+    if (!res.ok) {
+      t.warning('保存备注失败')
+      t.info(res.message || '请稍后重试')
+      return
+    }
+    // 用后端那句话：保存回「已保存备注 X」、清除回「已清除备注 X」，两条路径文案不同
+    t.success(res.message || '已保存备注')
+    t.info(name)
+    aliasDraft.value = null
+    // 不 emit('refreshSide')：右栏概况不显示备注，本地表已由响应里的 aliases 同步，不必整份刷新
+  } finally {
+    aliasSaving.value = false
+  }
+}
+
+/** 「清除」= 存空串（后端删行）。草稿一并置空，弹窗接着显示"已无备注"的实况。 */
+async function clearAlias(): Promise<void> {
+  const name = actor.value
+  if (!name || aliasSaving.value) return
+  aliasDraft.value = ''
+  await saveAlias()
+}
+
 // ---------- 收藏列表 / 作品史：数据 ----------
 
 /** 当前演员页的缓存条目；`null` = 还在抓（老实现 `if (!entry)` 那一支）。 */
@@ -376,6 +431,22 @@ function openActor(name: string): void {
 function backToList(): void {
   actor.value = ''
 }
+
+/**
+ * 作品史切人 / 拉到新档案时把备注草稿跟上去（弹窗开着换演员，草稿不能还停在上一人）。
+ *
+ * `flush:'sync'` 且**不**停用：`actor` 是同步改的，而备注可能在详情抽屉里刚被改过
+ * （`store.aliases` 变了、`actor` 没变），只挂在 `actor` 上的 watch 不会触发。同步刷新
+ * 才能保证渲染读草稿时它已经是当前人的值（异步刷新会先画一帧上一个人的备注）。
+ */
+watch(
+  [actor, aliases],
+  () => {
+    if (aliasDraft.value === null) return
+    aliasDraft.value = aliasOf(actor.value)
+  },
+  { flush: 'sync' },
+)
 
 /** 错误态「重试」：老 `actor-retry` → `delete CACHE['page:actor:'+S.actor]; render()`。 */
 async function retryPage(): Promise<void> {
@@ -908,6 +979,8 @@ watch(
               {{ entity.name || actor }}
               <span v-if="entity.zh" class="avh-profile__zh">/ {{ entity.zh }}</span>
             </h2>
+            <!-- 备注另起一行、排在原名下面（用户口径：原名显示位置不变） -->
+            <div v-if="aliasOf(actor)" class="avh-profile__alias">{{ aliasOf(actor) }}</div>
             <div class="avh-kv">
               <span v-if="entity.videos_count"><b>作品</b> {{ entity.videos_count }}</span>
               <span v-if="entity.age"><b>年龄</b> {{ entity.age }}</span>
@@ -936,6 +1009,7 @@ watch(
               <v-btn variant="outlined" size="small" :loading="checking" @click="checkActor">
                 ⚡ 检查她的新片
               </v-btn>
+              <v-btn variant="outlined" size="small" @click="openAliasDialog">✎ 备注</v-btn>
             </div>
           </div>
         </div>
@@ -1046,6 +1120,7 @@ watch(
             :zh="item.zh || ''"
             :avatar="favAvatar(item)"
             :plugin-id="pluginId"
+            :alias="aliasOf(String(item.name || ''))"
             @select="openActor"
           />
         </div>
@@ -1099,6 +1174,44 @@ watch(
 
     <!-- 回到顶部：只在作品史（长列表）里出现，滚下去才浮出来（见 common/BackToTop.vue） -->
     <BackToTop v-if="actor" />
+
+    <!-- 备注编辑：只改显示名，键仍是演员原名；对没收藏的演员同样可写 -->
+    <v-dialog
+      :model-value="aliasDraft !== null"
+      max-width="460"
+      attach="body"
+      @update:model-value="value => { if (!value) aliasDraft = null }"
+    >
+      <v-card>
+        <v-card-title class="d-flex align-center">备注：{{ actor }}</v-card-title>
+        <v-card-text>
+          <v-text-field
+            :model-value="aliasDraft ?? ''"
+            label="备注名"
+            placeholder="例如：桥本有菜"
+            variant="outlined"
+            density="comfortable"
+            autofocus
+            hide-details
+            @update:model-value="value => (aliasDraft = String(value ?? ''))"
+          />
+          <div class="avh-hint" style="margin-top: 8px">
+            只影响界面显示，原名不变；清空后保存即等于清除备注。
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-btn
+            variant="outlined"
+            size="small"
+            :disabled="aliasSaving || !aliasOf(actor)"
+            @click="clearAlias"
+          >清除</v-btn>
+          <v-spacer />
+          <v-btn variant="outlined" @click="aliasDraft = null">取消</v-btn>
+          <v-btn color="primary" variant="flat" :loading="aliasSaving" @click="saveAlias">保存</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -1180,6 +1293,13 @@ watch(
 .avh-profile__zh {
   font-size: 14px;
   font-weight: 400;
+  color: rgba(var(--v-theme-on-surface), 0.5);
+}
+
+/* 备注：比 `zh` 还小一号的浅色小字，排在原名块下面（用户要求「浅色、小字体」） */
+.avh-profile__alias {
+  margin-top: 2px;
+  font-size: 11px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
 
