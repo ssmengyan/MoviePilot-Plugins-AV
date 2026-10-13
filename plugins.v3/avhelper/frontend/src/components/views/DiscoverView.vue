@@ -69,7 +69,9 @@ export type { RankMovie, RankEntry } from '../../composables/discoverCache'
  * - 不做图片 `preload()`：老 `renderDiscover` 也没预热图片（`preload` 只服务于演员页与详情页）；
  * - 不把 `period`/`kind` 落到 `localStorage`：老实现只在内存里（`S`），刷新页面照样回到 周榜/有码；
  * - 不加「点击卡片时的 loading 遮罩」：老实现点下去就开抽屉，没有中间态；
- * - 不改 `.grid` 的列宽策略：照抄 `repeat(auto-fill, minmax(172px, 1fr))`。
+ * - 不改 `.grid` 的列宽策略：照抄 `repeat(auto-fill, minmax(172px, 1fr))`；
+ * - **「回到顶部」是 2026-10-13 新加的**（老实现没有）：榜单滑到几十张卡之后要回顶部只能手工拨，
+ *   现在视图末行挂了 `common/BackToTop.vue` —— 往下滑过 260px 才浮出来（不是常显），点一下平滑回顶。
  *
  * 与老实现的差异（都在下面各自位置有注释）：
  * 1. **点卡片只发事件**：老实现 `openMovie()` 直接开抽屉，抽屉下一轮才做 → 这里
@@ -83,6 +85,7 @@ export type { RankMovie, RankEntry } from '../../composables/discoverCache'
  * 5. `NumCard` 自带 `:title`（悬停显示片名）是 S6 地基里就有的通用件行为，老 `card()` 没有这个属性 —— 多一个 tooltip，不改文案与布局。
  */
 import { computed, ref, watch } from 'vue'
+import BackToTop from '../common/BackToTop.vue'
 import EmptyState from '../common/EmptyState.vue'
 import ErrorState from '../common/ErrorState.vue'
 import NumCard from '../common/NumCard.vue'
@@ -391,6 +394,9 @@ watch(movies, list => prefetchCards(props.api, list), { immediate: true })
         </div>
       </template>
     </template>
+
+    <!-- 回到顶部：滚下去才浮出来（放视图根元素最后一行，见 common/BackToTop.vue） -->
+    <BackToTop />
   </div>
 </template>
 
