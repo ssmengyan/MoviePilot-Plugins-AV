@@ -105,7 +105,8 @@ const id = () => String(props.movie.id || '')
  * 1× 屏就已经放大 1.28×，125%/150%/200% 缩放的屏上要放大 1.6–2.6 倍，糊是必然的。
  * `cover` 是 800×538 / 约 150 KB 的**封套展开图**（左半边封底、右半边封面），配盒子上的
  * `object-fit: cover` + `object-position: 100%`（贴右，见 `Thumb.vue`）取回的就是封面那半边，
- * 约 403×538，2× 屏下几乎 1:1，清晰度约是原来的 2.7 倍 —— 画面与老实现那张竖图同源，只是更清楚。
+ * 约 384×538，2× 屏下几乎 1:1，清晰度约是原来的 2.7 倍 —— 画面与老实现那张竖图同源，只是更清楚。
+ * 盒子比例同时要收到 5:7（`--spread`），否则窗口比封面宽、左边会漏一条封底，见下面的样式注释。
  *
  * 代价（用户 2026-10-13 明确选定此方案，知道并接受）：单图流量从约 11 KB 涨到约 150 KB
  * （60 张首屏约 9 MB，之后走浏览器 30 天缓存 + NAS 图片缓存，只付一次）。
@@ -145,7 +146,7 @@ const watchUrl = () => String(props.movie.lib?.url || '')
     @click="emit('select', { number: number(), id: id() })"
     @mouseenter="emit('hover', { number: number(), id: id() })"
   >
-    <div class="avh-card__thumb">
+    <div class="avh-card__thumb" :class="{ 'avh-card__thumb--spread': !!movie.cover }">
       <Thumb variant="thumb" :src="cardCover()" :alt="number()" :plugin-id="pluginId" />
       <div class="avh-card__badges">
         <span v-if="movie.cnsub" class="avh-badge avh-badge--cn">中字</span>
@@ -221,13 +222,32 @@ const watchUrl = () => String(props.movie.lib?.url || '')
 }
 
 /*
- * 让内层 `Thumb` 撑满这 3:4 的盒子。
+ * 图源是 javdb 的「封套展开图」时，盒子比例要收到 **5:7**（≈0.714），不能是 3:4。
+ *
+ * 为什么（2026-10-13 实测 61 张）：展开图里封面那半幅稳定只占图像宽度的 **48%**，
+ * 比例 w/h 中位 0.7138（60/61 张都窄于 3:4）。盒子比例决定裁切窗口的宽度
+ * —— `cover` 的窗口宽 = 图高 × 盒子比例 —— 用 3:4 时窗口 538×0.75 = 403px，
+ * 而封面只有 384px，贴右之后左边必然多出约 19px 的封底（卡片上约 9px 的一条边，
+ * 用户 2026-10-13 就是这样看到"每张都露一条左边"的）。
+ *
+ * 5:7 → 窗口 538×5/7 = 384.3px，正好等于封面那半幅；实测各图在 382–386px 之间，
+ * 误差 0–2px（卡片上不到 1px），左边那条就没了。
+ *
+ * 只在真有 `cover` 时才收窄：「已入库的番号」栏的行只有 147×200 竖图（比例 0.735，
+ * 比 5:7 宽），照 5:7 的盒子会被横向裁掉左边约 5px，没必要为一个不存在的封底付这个代价。
+ */
+.avh-card__thumb.avh-card__thumb--spread {
+  aspect-ratio: 5 / 7;
+}
+
+/*
+ * 让内层 `Thumb` 撑满这个盒子（3:4 或 `--spread` 的 5:7）。
  *
  * 老实现的 `.thumb img{width:100%;height:100%;object-fit:cover}` 与
- * `.thumb .noimg{position:absolute;inset:0;...}` 都挂在**同一个** 3:4 容器上；
+ * `.thumb .noimg{position:absolute;inset:0;...}` 都挂在**同一个**封面容器上；
  * 通用件 `Thumb` 自己不带高度（形态由使用方决定），不补这一条就会出现两个偏差：
  *   1. 封面按自身比例渲染（竖图 2:3 比盒子高、横图 3:2 比盒子矮），
- *      `object-fit:cover` 形同虚设 —— 老实现是"永远铺满 3:4 并裁切"；
+ *      `object-fit:cover` 形同虚设 —— 老实现是"永远铺满盒子并裁切"；
  *   2. 缺图时 `.noimg` 是 `inset:0` 的绝对定位盒，父级零高 → 番号占位**看不见**
  *      （老实现会把番号画在封面位置上）。
  */

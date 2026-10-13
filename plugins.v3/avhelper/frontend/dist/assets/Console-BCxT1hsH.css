@@ -743,7 +743,7 @@
 }
 
 /* 对齐 `app.css` 的 `.card`（网格列由父级 `.grid` 提供） */
-.avh-card[data-v-57bee529] {
+.avh-card[data-v-78f1229c] {
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -753,33 +753,52 @@
   background: rgb(var(--v-theme-surface));
   transition: 0.15s;
 }
-.avh-card[data-v-57bee529]:hover {
+.avh-card[data-v-78f1229c]:hover {
   border-color: rgb(var(--v-theme-primary));
   transform: translateY(-2px);
 }
 
 /* `.thumb`：3:4 竖版封面 + 渐变底（缺图时不至于一片死黑） */
-.avh-card__thumb[data-v-57bee529] {
+.avh-card__thumb[data-v-78f1229c] {
   position: relative;
   aspect-ratio: 3 / 4;
   overflow: hidden;
 }
 
 /*
- * 让内层 `Thumb` 撑满这 3:4 的盒子。
+ * 图源是 javdb 的「封套展开图」时，盒子比例要收到 **5:7**（≈0.714），不能是 3:4。
+ *
+ * 为什么（2026-10-13 实测 61 张）：展开图里封面那半幅稳定只占图像宽度的 **48%**，
+ * 比例 w/h 中位 0.7138（60/61 张都窄于 3:4）。盒子比例决定裁切窗口的宽度
+ * —— `cover` 的窗口宽 = 图高 × 盒子比例 —— 用 3:4 时窗口 538×0.75 = 403px，
+ * 而封面只有 384px，贴右之后左边必然多出约 19px 的封底（卡片上约 9px 的一条边，
+ * 用户 2026-10-13 就是这样看到"每张都露一条左边"的）。
+ *
+ * 5:7 → 窗口 538×5/7 = 384.3px，正好等于封面那半幅；实测各图在 382–386px 之间，
+ * 误差 0–2px（卡片上不到 1px），左边那条就没了。
+ *
+ * 只在真有 `cover` 时才收窄：「已入库的番号」栏的行只有 147×200 竖图（比例 0.735，
+ * 比 5:7 宽），照 5:7 的盒子会被横向裁掉左边约 5px，没必要为一个不存在的封底付这个代价。
+ */
+.avh-card__thumb.avh-card__thumb--spread[data-v-78f1229c] {
+  aspect-ratio: 5 / 7;
+}
+
+/*
+ * 让内层 `Thumb` 撑满这个盒子（3:4 或 `--spread` 的 5:7）。
  *
  * 老实现的 `.thumb img{width:100%;height:100%;object-fit:cover}` 与
- * `.thumb .noimg{position:absolute;inset:0;...}` 都挂在**同一个** 3:4 容器上；
+ * `.thumb .noimg{position:absolute;inset:0;...}` 都挂在**同一个**封面容器上；
  * 通用件 `Thumb` 自己不带高度（形态由使用方决定），不补这一条就会出现两个偏差：
  *   1. 封面按自身比例渲染（竖图 2:3 比盒子高、横图 3:2 比盒子矮），
- *      `object-fit:cover` 形同虚设 —— 老实现是"永远铺满 3:4 并裁切"；
+ *      `object-fit:cover` 形同虚设 —— 老实现是"永远铺满盒子并裁切"；
  *   2. 缺图时 `.noimg` 是 `inset:0` 的绝对定位盒，父级零高 → 番号占位**看不见**
  *      （老实现会把番号画在封面位置上）。
  */
-.avh-card__thumb[data-v-57bee529] .avh-thumb {
+.avh-card__thumb[data-v-78f1229c] .avh-thumb {
   height: 100%;
 }
-.avh-card__badges[data-v-57bee529] {
+.avh-card__badges[data-v-78f1229c] {
   position: absolute;
   left: 6px;
   top: 6px;
@@ -789,7 +808,7 @@
 }
 
 /* `.badge` 系列：底色走主题语义色 + 半透明，不写死深色值 */
-.avh-badge[data-v-57bee529] {
+.avh-badge[data-v-78f1229c] {
   padding: 1px 6px;
   font-size: 10px;
   border-radius: 4px;
@@ -797,16 +816,16 @@
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(0, 0, 0, 0.6);
 }
-.avh-badge--cn[data-v-57bee529] {
+.avh-badge--cn[data-v-78f1229c] {
   background: rgba(var(--v-theme-success), 0.85);
 }
-.avh-badge--uc[data-v-57bee529] {
+.avh-badge--uc[data-v-78f1229c] {
   background: rgba(var(--v-theme-secondary), 0.85);
 }
-.avh-badge--new[data-v-57bee529] {
+.avh-badge--new[data-v-78f1229c] {
   background: rgba(var(--v-theme-warning), 0.85);
 }
-.avh-badge--lib[data-v-57bee529] {
+.avh-badge--lib[data-v-78f1229c] {
   background: rgba(var(--v-theme-primary), 0.85);
 }
 
@@ -818,17 +837,17 @@
  * 取 `info`：与 `primary` 同属冷色、明度接近，落在同一批卡片上既不抢眼又能区分；
  * 其余四颗已占用 success / secondary / warning / primary，`info` 是唯一没被用掉的语义色。
  */
-.avh-badge--dl[data-v-57bee529] {
+.avh-badge--dl[data-v-78f1229c] {
   background: rgba(var(--v-theme-info), 0.85);
 }
-.avh-card__meta[data-v-57bee529] {
+.avh-card__meta[data-v-78f1229c] {
   padding: 8px 9px 10px;
 }
-.avh-card__num[data-v-57bee529] {
+.avh-card__num[data-v-78f1229c] {
   font-size: 13px;
   font-weight: 700;
 }
-.avh-card__sub[data-v-57bee529] {
+.avh-card__sub[data-v-78f1229c] {
   display: flex;
   justify-content: space-between;
   gap: 6px;
@@ -836,7 +855,7 @@
   font-size: 11px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-card__sub span[data-v-57bee529] {
+.avh-card__sub span[data-v-78f1229c] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -847,14 +866,14 @@
  * 它**不**继承 `.avh-card__sub span` 的省略号（那条只管 `span`）：链接要整体可见、
  * 不许被压缩，所以 `flex: none`；文件名那一格才吃剩余宽度。
  */
-.avh-card__watch[data-v-57bee529] {
+.avh-card__watch[data-v-78f1229c] {
   flex: none;
   font-size: 11px;
   color: rgb(var(--v-theme-primary));
   text-decoration: none;
   white-space: nowrap;
 }
-.avh-card__watch[data-v-57bee529]:hover {
+.avh-card__watch[data-v-78f1229c]:hover {
   text-decoration: underline;
 }
 
