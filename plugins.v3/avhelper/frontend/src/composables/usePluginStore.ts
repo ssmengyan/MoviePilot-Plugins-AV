@@ -88,6 +88,22 @@ function listOf<T>(value: unknown): T[] | null {
   return Array.isArray(value) ? (value as T[]) : null
 }
 
+/**
+ * 映射类字段（`aliases`）原样取：只认纯对象，值统一成字符串。
+ *
+ * 与 `listOf` 分开是因为 `Array.isArray({})` 是 false、`typeof [] === 'object'` 也为真，
+ * 两者混用会把数组当成映射去遍历。空对象 `{}` 是**合法值**（表示一条备注都没有），
+ * 所以这里只对"非对象"返回 `null`，不像 `listOf` 那样顺带把空当作缺失。
+ */
+function mapOf(value: unknown): Record<string, string> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const out: Record<string, string> = {}
+  Object.keys(value as Record<string, unknown>).forEach(key => {
+    out[key] = String((value as Record<string, unknown>)[key] ?? '')
+  })
+  return out
+}
+
 export function usePluginStore(api: PluginApi) {
   const client: PluginApi = api && typeof api.get === 'function' ? api : NOOP_API
 
@@ -95,6 +111,13 @@ export function usePluginStore(api: PluginApi) {
   const enabled = ref(true)
   const sites: Ref<SiteOption[]> = ref([])
   const favs: Ref<FavActor[]> = ref([])
+  /**
+   * 演员自定义备注（`{演员原名: 备注}`）。
+   *
+   * 与 `favs` **分开存**：备注挂在演员原名上，没收藏的演员也能有备注，所以不能只从
+   * `favs` 派生。只含非空项（后端 `alias_map()` 已把清除掉的行滤掉），查不到就是没备注。
+   */
+  const aliases: Ref<Record<string, string>> = ref({})
   const subs: Ref<Subscription[]> = ref([])
   /** 已知番号：`Set` 便于判断，老实现同款（`new Set(d.known)`）。 */
   const known = shallowRef<Set<string>>(new Set())
@@ -236,6 +259,8 @@ export function usePluginStore(api: PluginApi) {
     if (nextNotices) notices.value = nextNotices
     const nextKnown = listOf<string>(data.known)
     if (nextKnown) known.value = new Set(nextKnown.map(item => String(item)))
+    const nextAliases = mapOf(data.aliases)
+    if (nextAliases) aliases.value = nextAliases
     if (data.defaultRule && typeof data.defaultRule === 'object') {
       ruleRaw.value = data.defaultRule
       rule.value = toRule(data.defaultRule)
@@ -378,6 +403,39 @@ export function usePluginStore(api: PluginApi) {
         ok: true,
         kind: 'ok' as ActionResultKind,
         message: textOf(outcome.res) || `已取消收藏 ${target}`,
+      }
+    })
+  }
+
+  /**
+   * `POST plugin/aliases`：写一位演员的自定义备注（`alias` 空串 = 清除）。
+   *
+   * 本动作与 `favs` **无关**：键是演员原名，没收藏的演员也能写（后端两张表）。
+   * 成功后**就地**更新本地表（空串删键），不整表覆盖 —— 照 `addFav`/`delFav` 的纪律；
+   * 若响应里带了 `aliases` 快照也顺手合并进来（后端每次都回，等于顺带对齐一次）。
+   * 名字为空在本地就拦掉，不发请求（与后端同一句文案）。
+   */
+  function setAlias(name: string, alias: string): Promise<ActionResult<Record<string, string>>> {
+    return guarded('alias', async () => {
+      const target = String(name ?? '').trim()
+      if (!target) return { ok: false, kind: 'error' as ActionResultKind, message: '缺少演员名' }
+      const text = String(alias ?? '').trim()
+      const outcome = await send('post', 'aliases', { name: target, alias: text })
+      if (!outcome.ok) return { ok: false, kind: 'error' as ActionResultKind, message: outcome.message }
+      if (outcome.res.success !== true) {
+        return { ok: false, kind: 'error' as ActionResultKind, message: textOf(outcome.res) || '请稍后重试' }
+      }
+      const next = { ...aliases.value }
+      if (text) next[target] = text
+      else delete next[target]
+      aliases.value = next
+      const synced = mapOf(outcome.res.aliases)
+      if (synced) aliases.value = synced
+      return {
+        ok: true,
+        kind: 'ok' as ActionResultKind,
+        message: textOf(outcome.res) || (text ? `已保存备注 ${text}` : `已清除备注 ${target}`),
+        data: aliases.value,
       }
     })
   }
@@ -609,6 +667,7 @@ export function usePluginStore(api: PluginApi) {
     enabled,
     sites,
     favs,
+    aliases,
     subs,
     known,
     notices,
@@ -634,6 +693,7 @@ export function usePluginStore(api: PluginApi) {
     unsubscribe,
     addFav,
     delFav,
+    setAlias,
     subscribeNumber,
     searchKeyword,
     startDownload,

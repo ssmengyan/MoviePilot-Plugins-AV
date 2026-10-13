@@ -173,6 +173,78 @@ class TestNotices:
         assert notices[0]["title"] == "n204"
 
 
+class TestActorAlias:
+    """演员自定义备注（0.6.1 加）：与收藏**解耦**的两张表。
+
+    钉住的规矩：键是演员原名（与 `actor_fav.name` 同口径）、空备注 = **删行**而不是留一条空串、
+    `alias_map()` 只回非空项。
+    """
+
+    def test_set_and_read(self, store_mod, tmp_path):
+        store = make_store(store_mod, tmp_path)
+        assert store.alias_map() == {}
+        store.alias_set("桃園怜奈", "桃子")
+        assert store.alias_map() == {"桃園怜奈": "桃子"}
+
+    def test_set_is_idempotent(self, store_mod, tmp_path):
+        store = make_store(store_mod, tmp_path)
+        store.alias_set("A", "甲")
+        store.alias_set("A", "甲2")
+        assert store.alias_map() == {"A": "甲2"}
+
+    def test_empty_alias_deletes_row(self, store_mod, tmp_path):
+        """「清除备注」= 删行：库里的行必须真的没了，否则下次读还要靠空串兜。"""
+        store = make_store(store_mod, tmp_path)
+        store.alias_set("A", "甲")
+        store.alias_set("B", "乙")
+        store.alias_set("A", "")
+        assert store.alias_map() == {"B": "乙"}
+        with store_mod.sqlite3.connect(store.db_path) as conn:
+            assert conn.execute("SELECT COUNT(*) FROM actor_alias").fetchone()[0] == 1
+
+    def test_whitespace_is_normalised(self, store_mod, tmp_path):
+        """名字与备注都裁掉首尾空白：不裁的话「  相泽南  」会与「相泽南」存成两行，
+        界面按原名查永远查不到（看着像"存了没生效"）。"""
+        store = make_store(store_mod, tmp_path)
+        store.alias_set("  相泽南  ", "  南南  ")
+        assert store.alias_map() == {"相泽南": "南南"}
+        store.alias_set("相泽南", "   ")      # 纯空格也算清除
+        assert store.alias_map() == {}
+
+    def test_independent_of_favorites(self, store_mod, tmp_path):
+        """没收藏的演员也能有备注；取消收藏不该把备注一起带走。"""
+        store = make_store(store_mod, tmp_path)
+        store.alias_set("桃園怜奈", "桃子")
+        assert store.fav_list() == []
+        store.fav_add("桃園怜奈", "桃園憐奈", "/img/a.jpg")
+        assert store.alias_map() == {"桃園怜奈": "桃子"}
+        store.fav_del("桃園怜奈")
+        assert store.fav_list() == [] and store.alias_map() == {"桃園怜奈": "桃子"}
+
+    def test_survives_reopen(self, store_mod, tmp_path):
+        """落盘：重开一个 Store（插件 reload / 容器重启）后备注仍在。"""
+        db = tmp_path / "avhelper.db"
+        first = store_mod.Store(db_path=db)
+        first.init()
+        first.alias_set("桃園怜奈", "桃子")
+        second = store_mod.Store(db_path=db)
+        second.init()
+        assert second.alias_map() == {"桃園怜奈": "桃子"}
+
+    def test_legacy_db_gets_new_table(self, store_mod, tmp_path):
+        """向后兼容：老库没有 `actor_alias` 表，`init()` 直接补建（无需 ALTER），老数据不动。"""
+        db = tmp_path / "avhelper.db"
+        with store_mod.sqlite3.connect(db) as conn:
+            conn.execute("CREATE TABLE actor_fav(name TEXT PRIMARY KEY, zh TEXT, avatar TEXT, added_at TEXT)")
+            conn.execute("INSERT INTO actor_fav VALUES('旧用户','','','2026-01-01 00:00:00')")
+        store = store_mod.Store(db_path=db)
+        store.init()
+        assert [f["name"] for f in store.fav_list()] == ["旧用户"]
+        assert store.alias_map() == {}
+        store.alias_set("旧用户", "老粉")
+        assert store.alias_map() == {"旧用户": "老粉"}
+
+
 class TestKv:
     """限流计数用的键值存储。"""
 

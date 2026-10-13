@@ -39,6 +39,8 @@ PLUGIN_SOURCES: List[str] = ["plugin", "queue"]
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS actor_fav(
   name TEXT PRIMARY KEY, zh TEXT, avatar TEXT, added_at TEXT);
+CREATE TABLE IF NOT EXISTS actor_alias(
+  name TEXT PRIMARY KEY, alias TEXT, updated_at TEXT);
 CREATE TABLE IF NOT EXISTS sub(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   type TEXT NOT NULL, name TEXT NOT NULL, rule TEXT NOT NULL,
@@ -246,6 +248,41 @@ class Store:
     def fav_del(self, name: str) -> None:
         """取消收藏。"""
         self._exec("DELETE FROM actor_fav WHERE name=?", (name,))
+
+    # ---------- 演员备注 ----------
+    # 与 `actor_fav` **刻意分成两张表**（不 JOIN、不设外键）：备注是"我给这个演员起的称呼"，
+    # 与"有没有收藏"是两件事 —— 没收藏的演员（详情页/搜索里点进来的）也必须能写备注；
+    # 取消收藏不该顺手把备注删掉，反过来也一样。
+
+    def alias_map(self) -> Dict[str, str]:
+        """返回全部非空备注：`{演员原名: 备注}`，前端拿它直接查表。
+
+        空的（清除备注留下的行）**不返回**：调用方一律按"查不到就是没备注"处理，
+        省得每个显示点都得再判一次空串。
+        """
+        rows = self._exec(
+            "SELECT name, alias FROM actor_alias WHERE IFNULL(alias, '') <> ''", fetch=True
+        ) or []
+        return {str(r[0]): str(r[1]) for r in rows if str(r[0])}
+
+    def alias_set(self, name: str, alias: str) -> None:
+        """写入或更新一位演员的备注；`alias` 为空串 = 清除（删行）。"""
+        # 键也过一遍 strip：写进来的名字带空白，就会与 `alias_map()` 的键（读回时按演员原名查）
+        # 对不上 —— 界面上看着"存了没生效"，其实是同一人被存成了两行。没名字直接不写。
+        key = str(name or "").strip()
+        if not key:
+            return
+        # 存的与判空用的是同一个值：只判不裁的话，「  」（纯空格）会落库成一条
+        # 看着有备注、`alias_map()` 却查不到的行。
+        text = str(alias or "").strip()
+        if not text:
+            self._exec("DELETE FROM actor_alias WHERE name=?", (key,))
+            return
+        self._exec(
+            "INSERT INTO actor_alias(name, alias, updated_at) VALUES(?,?,?) "
+            "ON CONFLICT(name) DO UPDATE SET alias=excluded.alias, updated_at=excluded.updated_at",
+            (key, text, _now()),
+        )
 
     # ---------- 订阅 ----------
 

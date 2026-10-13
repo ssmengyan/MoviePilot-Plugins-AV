@@ -151,6 +151,8 @@ export interface BootstrapPayload {
   enabled?: boolean
   sites?: SiteOption[]
   favs?: FavActor[]
+  /** 演员自定义备注：`{演员原名: 备注}`（`store.alias_map()`，只含非空项）。与收藏无关。 */
+  aliases?: Record<string, string>
   subs?: Subscription[]
   /** 已知番号（订阅快照/已下载）。 */
   known?: string[]

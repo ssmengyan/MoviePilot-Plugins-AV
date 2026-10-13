@@ -127,6 +127,54 @@ const bodyEl = ref<HTMLElement | null>(null)
 /** 灯箱（老 `window.AVH.openLb`）。 */
 const lightbox = ref<InstanceType<typeof Lightbox> | null>(null)
 
+/**
+ * 往上找**真正在滚**的那个祖先（含自己），但**绝不越过抽屉根**。
+ *
+ * 为什么不能直接写 `bodyEl.scrollTop = 0`：抽屉的真实 DOM 是 Vuetify 给的
+ * `.v-navigation-drawer > .v-navigation-drawer__content > [我们的 head + body]`，
+ * 而 `.v-navigation-drawer__content` 自带 `overflow-y:auto; height:100%`、又是 **block**
+ * 容器（`frontend/node_modules/vuetify/lib/components/VNavigationDrawer/VNavigationDrawer.css:71-77`）
+ * —— 于是 `.avh-detail__body` 既不是 flex 子项、高度也等于内容高度，**永远不溢出**，
+ * 写它的 `scrollTop` 是空操作（真机实测：把 A 片滚到底再打开 B 片仍停在底部，
+ * 而 `__content.scrollTop` 一直是 5278、`body.scrollHeight == body.clientHeight == 6121`）。
+ *
+ * **必须止步于抽屉根**：抽屉外层还有宿主的一堆容器（数据台的 `.v-card` 实测就是可滚的，
+ * `scrollHeight 2251 / clientHeight 880`）。不设边界时，冷缓存那一帧我们的内容还没长高，
+ * 循环会一路往上命中宿主的滚动容器，把用户身后的榜单页顶回顶部 —— 点开一部片却把背景滚乱。
+ *
+ * 顺带：这里按"谁溢出就复位谁"来找、不写死类名，将来 Vuetify 改结构或我们改回单层滚动
+ * 都不用跟着改。找不到就退回自身（那时写自身是安全的值）。
+ */
+function scrollHostOf(el: HTMLElement | null): HTMLElement | null {
+  if (!el) return null
+  const root = el.closest('.v-navigation-drawer') || el.closest('.avh-detail')
+  let node: HTMLElement | null = el
+  while (node) {
+    if (node.scrollHeight - node.clientHeight > 1) return node
+    if (node === root) break
+    node = node.parentElement
+  }
+  return el
+}
+
+/**
+ * 刚打开的那一部：首帧画完把抽屉滚回顶部（老 `detailTopIfFresh`）。
+ *
+ * 浏览器有「滚动锚定」，只换内容它可能又把上一部的偏移找回来，所以打开时多调一次。
+ * 两个容器都写：改样式后 `.avh-detail__body` 会变成真正的滚动容器，
+ * 但换片那一帧它可能还没溢出（内容比视口矮），这时真正的偏移仍在旧的
+ * `__content` 上 —— 两处都归零才不会漏。
+ */
+function scrollTopIfFresh(): void {
+  if (freshNumber !== activeNumber.value) return
+  freshNumber = ''
+  const el = bodyEl.value
+  if (!el) return
+  el.scrollTop = 0
+  const host = scrollHostOf(el)
+  if (host && host !== el) host.scrollTop = 0
+}
+
 /** 当前番号（老 `CURSOR.number`）。 */
 const activeNumber = computed(() => String(props.number || ''))
 /** 当前 javdb id（老 `CURSOR.id`）：同一部片重开时复用，换片才清。 */
@@ -205,6 +253,8 @@ interface ActorChip {
   name: string
   zh: string
   avatar: string
+  /** 自定义备注（BRIEF §3）：空串 = 不画那一行。 */
+  alias: string
 }
 
 const actorChips = computed<ActorChip[]>(() => {
@@ -213,11 +263,12 @@ const actorChips = computed<ActorChip[]>(() => {
       name: String(item?.name || ''),
       zh: String(item?.zh || ''),
       avatar: String(item?.avatar || ''),
+      alias: aliasOf(String(item?.name || '')),
     }))
   }
   const single = String(movie.value.actor || '')
   if (single) {
-    return [{ name: single, zh: '', avatar: String(movie.value.actor_avatar || '') }]
+    return [{ name: single, zh: '', avatar: String(movie.value.actor_avatar || ''), alias: aliasOf(single) }]
   }
   return []
 })
@@ -225,18 +276,23 @@ const actorChips = computed<ActorChip[]>(() => {
 /** 抽屉标题（老 `openDrawer('影片详情 · ' + number, '')`）。 */
 const title = computed(() => `影片详情 · ${activeNumber.value}`)
 
-// ---------- 抽屉滚动（老 `detailTopIfFresh`） ----------
-
 /**
- * 刚打开的那一部：首帧画完把抽屉滚回顶部（老 `detailTopIfFresh`）。
- * 浏览器有「滚动锚定」，只换内容它可能又把上一部的偏移找回来，所以打开时多调一次。
+ * 演员自定义备注（BRIEF §3 的冻结接口）：`props.store.aliases.value[name]`。
+ *
+ * 为什么包成函数而不是在模板里直接写 `store.aliases.value[...]`：
+ * ① 取法集中在一处，将来改口径（比如回落到中文名）只动这里；
+ * ② 模板里裸取 ref 在字段缺失时是硬报错（`aliases` 未定义 → 渲染直接炸），
+ *    这里保留运行时判空 —— 真机与工装的装配顺序不完全一致，断言只做编译期的事。
  */
-function scrollTopIfFresh(): void {
-  if (freshNumber !== activeNumber.value) return
-  freshNumber = ''
-  const el = bodyEl.value
-  if (el) el.scrollTop = 0
+function aliasOf(name: string): string {
+  const key = String(name || '')
+  if (!key) return ''
+  return String(props.store?.aliases?.value?.[key] || '')
 }
+
+// ---------- 抽屉滚动（老 `detailTopIfFresh`） ----------
+// `scrollTopIfFresh()` 与它依赖的 `scrollHostOf()` 定义在 `bodyEl` 旁边（见上），
+// 不在这里重复定义 —— 曾经留下过一份旧的单容器版本，两块一起看会误判成"改好了"。
 
 /** 拿封面地址：直连 → 后端真源 `thumb` → data-URI 兜底（老实现直接 `onerror` 上兜底图）。 */
 const coverSrc = ref('')
@@ -500,6 +556,42 @@ const longUseProxy = ref(false)
 /** `null` = 还没失败；字符串 = 给 `longFail` 的正文。 */
 const longError = ref<string | null>(null)
 
+/**
+ * 「当前这一次加载还在飞」＋它的令牌。
+ *
+ * 为什么要令牌：换片/重抓时我们会把 `longSrc` 清空、地址换新，但**旧那次请求的回调还在**。
+ * 不认令牌的话，旧图的 load/error 会落到新一部片上（典型症状：切到 B 片后 A 片的失败
+ * 把 B 片打成失败态）。令牌只增不减，回调只认自己那一次。
+ *
+ * 为什么要有这个标志：`longSrc` 只在 `paintLong()` 里被设上，而 `paintLong()` 是
+ * **在 `new Image()` 预载成功之后**才调的（见下），所以 `longSrc` 非空 = 图上已经有像素。
+ * 模板因此可以放心用 `v-if="longSrc"` 画 `<img>`，不必再猜"设了 src 但还没 load"。
+ */
+const longLoading = ref(false)
+let longLoadId = 0
+
+/**
+ * load 成功后才写进 DOM 的固有尺寸（`<img width height>`）。
+ *
+ * 为什么不用 `naturalWidth` 直接读：模板里不能读 DOM，而这里本来就是 onload 回调，
+ * 天然拿得到。写上这两个属性有实际作用 —— 长图高达 5817px，浏览器在 load 之后要重排
+ * 整篇内容；显式尺寸让这一帧之后**布局不再依赖"图片解码进度"**，也就不会出现
+ * "load 已经触发、盒子却还是 0 高"的中间态。
+ */
+const longNaturalW = ref(0)
+const longNaturalH = ref(0)
+
+/** 清掉"这一次加载"的全部状态（换片 / 重抓 / 地址变化时调）。 */
+function resetLongLoad(): void {
+  longLoadId++
+  longLoading.value = false
+  longError.value = null
+  longSrc.value = ''
+  longUseProxy.value = false
+  longNaturalW.value = 0
+  longNaturalH.value = 0
+}
+
 /** 代理地址（老 `apiUrl('/img', {url})`）。 */
 const longProxySrc = computed(() => {
   const raw = String(long.value?.url || '')
@@ -517,44 +609,107 @@ const longSrcAttr = computed(() => (longUseProxy.value ? longProxySrc.value : lo
  * **同一个地址不会重新写 DOM** → 那次失败不再触发 `error`，回落链就断在第一跳
  * （实测症状：直连失败后卡在"已切代理"但既不报错也不出失败态）。
  * 换 key 强制重建，等价于老实现的"新元素 + 新 src"。
+ *
+ * key 里**必须带番号**：不带的话，换片后如果新旧两部的长图地址恰好相同
+ * （同一图床同一路径、或两次都是同一个代理串），Vue 会判定"同一个元素"而**不重建**，
+ * 于是新片的长图不重新加载、也不重新触发 load。带上番号就没有这个复用口子。
  */
-const longImgKey = computed(() => `${longUseProxy.value ? 'p' : 'd'}#${longSrc.value}`)
+const longImgKey = computed(
+  () => `${activeNumber.value}|${longUseProxy.value ? 'p' : 'd'}#${longSrc.value}`,
+)
 
-/** 老 `paintLong()`：新图 → load 成功才换上、失败逐级回落。 */
+/**
+ * 老 `paintLong()`：新图 → **预载成功之后**才换上、失败逐级回落。
+ *
+ * 为什么改成"离屏预载成功才挂进 DOM"（老实现其实是"边下边画"，这一步比老实现更严）：
+ * 长图是详情里最后一个元素、动辄 1224×5817，而图床直连要 2.5~6.5 秒、插件代理冷缓存
+ * 要 5~20 秒。原写法一点 `paintLong` 就把 `<img src=…>` 挂上去，于是那 5~20 秒里：
+ * `longSrc` 已非空 → 提示分支被 `v-else-if="longSrc"` 挡掉；图又还没像素 → 元素恒为
+ * 0 高。用户看到的是**一块什么都没有的空位**（实测：0~4.5s 全是
+ * `complete=false nw=0 nh=0 rectH=0`，卡片文字为空，只有高度 0 的 `<img>`）。
+ * 改成本函数后，"`longSrc` 非空 ⇒ 像素已经在手"成为结构性保证：
+ * 要么画着 `⏳ 正在加载长缩略图…`，要么画着图，不再有第三种可能。
+ *
+ * 顺带恢复了老实现的一个副作用：预载用的是同一个 `Image()`，浏览器的解码缓存因此
+ * 是热的，`loadLong(true)` 重画时不会又等一遍网络。
+ */
 function paintLong(url: string): void {
   const src = String(url || '')
   if (!src) return
-  longSrc.value = src
+  const token = ++longLoadId
+  longSrc.value = ''
   longUseProxy.value = false
   longError.value = null
+  longNaturalW.value = 0
+  longNaturalH.value = 0
+  longLoading.value = true
+  const probe = new Image()
+  probe.decoding = 'async'
+  probe.referrerPolicy = 'no-referrer'        // 关键：带 Referer 图床直接 403
+  probe.onload = () => {
+    if (token !== longLoadId) return          // 已经换片/换地址，这一次作废
+    longNaturalW.value = probe.naturalWidth
+    longNaturalH.value = probe.naturalHeight
+    longLoading.value = false
+    longSrc.value = src
+  }
+  probe.onerror = () => {
+    if (token !== longLoadId) return
+    // 直连失败 → 换插件代理地址再预载一次（**只回落一次**，与老 `im.onerror` 同序）。
+    if (!longUseProxy.value && longProxySrc.value) {
+      longUseProxy.value = true
+      paintLong(String(long.value?.url || ''))
+      return
+    }
+    longLoading.value = false
+    longFail('长缩略图加载失败：浏览器直连与插件代理都没取到。')
+  }
+  probe.src = src
 }
 
 /** 老 `longFail(text, url)`。 */
 function longFail(text: string): void {
   longError.value = text
+  // 失败态不画 `<img>`（模板里是 `v-if="longError"` 那一支），所以清掉地址更不容易误判。
+  longSrc.value = ''
 }
 
 /**
  * 长图区域的提示文案（老 `paintLong` 的「⏳ 正在加载长缩略图…」与 `loadLong` 的
- * 「⏳ 正在获取长缩略图…」两句）：
- * - 正在解析地址（`longState = {loading:true}`）→ 老 `loadLong` 那句；
- * - 地址已知但图还在下（`paintLong` 已设 `longSrc`）→ 老 `paintLong` 那句；
- * - 失败条目（`{err}`，且没有在飞的请求）→ 交给 `longError` 画失败态。
+ * 「⏳ 正在获取长缩略图…」两句，一字不改）：
+ * - 地址已知、像素还没到（`longLoading`）→ 老 `paintLong` 那句；
+ * - 还在问后端要地址 → 老 `loadLong` 那句；
+ * - 失败态 → 交给 `longError`（返回空串，模板那一支不会画）。
  */
 const longHint = computed(() => {
-  const state = long.value
-  if (longError.value && !longSrc.value && !(state && state.loading)) return ''
-  if (longSrc.value) return '⏳ 正在加载长缩略图…'
-  return '⏳ 正在获取长缩略图…'
+  if (longError.value) return ''
+  if (longLoading.value) return '⏳ 正在加载长缩略图…'
+  if (!longSrc.value && long.value && long.value.loading) return '⏳ 正在获取长缩略图…'
+  return ''
 })
 
-/** `<img>` 的 onerror：老 `im.onerror` 的逐级回落（**只回落一次**）。 */
-function onLongError(): void {
+/** 老 `loadLong` 里"地址还没解析出来"那句的兜底：详情在飞、地址也没在飞时也要有反馈。 */
+const longFetching = computed(() => !longSrc.value && !longError.value && !longLoading.value)
+
+/**
+ * `<img>` 的 onerror：老 `im.onerror` 的逐级回落（**只回落一次**）。
+ *
+ * 换片令牌：元素换 key 重建后，旧元素的 error 仍可能在途（`longLoadId` 每次
+ * `paintLong`/`resetLongLoad` 都会 +1），认令牌才不会把新一部片打成失败态。
+ */
+function onLongError(token: number): void {
+  if (token !== longLoadId) return
+  longLoading.value = false
   if (!longUseProxy.value && longProxySrc.value) {
     longUseProxy.value = true
     return
   }
   longFail('长缩略图加载失败：浏览器直连与插件代理都没取到。')
+}
+
+/** 给模板用的令牌快照（`longLoadId` 是 `let`，模板拿不到）。 */
+function currentLongToken(): number {
+  return longLoadId
 }
 
 /** 老 `loadLong(number, knownUrl, force)`。 */
@@ -593,9 +748,16 @@ async function loadLong(force = false): Promise<void> {
   }
 }
 
-/** 长图加载完成：清掉失败态（老实现成功后 `w.innerHTML=''; appendChild(im)`）。 */
+/**
+ * 长图加载完成（老实现成功后 `w.innerHTML=''; appendChild(im)`）。
+ *
+ * 这里同时做一次"以真实元素为准"的尺寸回写：`paintLong()` 的离屏预载已经保证了
+ * 图有像素才会挂进 DOM，所以这只是一层冗余保险（元素真正解码完成时把尺寸再对齐一次），
+ * 代价是零 —— 却把"资源已 load ⇒ 一定看得见"从"依赖预载那一次"变成"两道都成立"。
+ */
 function onLongLoad(): void {
   longError.value = null
+  longLoading.value = false
 }
 
 /** 点长图开灯箱：老 `im.onclick = () => openLb([im.src], 0)`。 */
@@ -620,9 +782,9 @@ watch(
     focusFresh()
     syncCover()
     dlState.value = {}
-    longSrc.value = ''
-    longUseProxy.value = false
-    longError.value = null
+    // 换片：用 resetLongLoad 一次清干净（含"加载中"与换片令牌），别只清三个 ref —— 漏掉
+    // `longLoading` 会让新一部片一直显示「⏳ 正在加载长缩略图…」而实际什么都没在加载。
+    resetLongLoad()
     if (!entry.value) void fetchDetail()
     else void loadLong(false)
   },
@@ -653,9 +815,43 @@ async function retryDetail(): Promise<void> {
   }
 }
 
-/** 标题栏「↻ 重新抓取」：老 `#drawerReload` → 删缓存 + `paintDetail(number)`。 */
+/**
+ * 标题栏「↻ 重新抓取」：老 `#drawerReload` → 删缓存 + `paintDetail(number)`。
+ *
+ * **这里故意不再 `dropDetail()`**（老实现会删）：删掉缓存条目会让模板立刻走骨架分支，
+ * 内容一塌，浏览器把滚动位置从头夹到 0 —— 实测 `2639 → 0`，用户被顶回顶部，
+ * 而"重绘不许动用户的滚动位置"是写进契约的。改成"先请求、成功后整条覆盖"：
+ * 期间继续渲染旧内容（不闪屏、不塌），`putDetail()` 写进去后 Vue 原地重绘。
+ * 失败就保留旧内容 + toast —— 拿一次刷新失败去换一页错误态不划算，用户还能再点一次。
+ */
+const refreshing = ref(false)
+async function refreshDetail(): Promise<void> {
+  const number = activeNumber.value
+  if (!number || refreshing.value) return
+  refreshing.value = true
+  try {
+    const res = await fetchDetailRaw(number, number === activeNumber.value ? lastId.value : '')
+    if (!res.ok) {
+      t.warning('详情抓取失败')
+      t.info(res.message || '抓取失败，请稍后重试')
+      return
+    }
+    putDetail(number, res.data)
+    // 重抓成功后长图地址可能变了：清掉这一部解析出来的地址与"加载中"，让新详情重新驱动。
+    longState.delete(number)
+    if (number === activeNumber.value) {
+      resetLongLoad()
+      void loadLong(false)
+    }
+  } finally {
+    refreshing.value = false
+    void nextTick(() => scrollTopIfFresh())
+  }
+}
+
+/** 标题栏那颗按钮的落点（名字保留 `reloadDetail`：模板与 `defineExpose` 都在用）。 */
 async function reloadDetail(): Promise<void> {
-  await retryDetail()
+  await refreshDetail()
 }
 
 /** 长图「重试」：老 `longFail` 里那颗按钮 → `loadLong(number, '', true)`（连后端缓存一起绕过）。 */
@@ -750,7 +946,11 @@ defineExpose({ syncCursor, focusFresh, reloadDetail, retryDetail })
                   @click="pickActor(actor.name)"
                 >
                   <Thumb class="avh-actorchip__av" variant="av" :src="actor.avatar" :alt="actor.name" :plugin-id="pluginId" />
-                  <span>{{ actor.name }}{{ actor.zh ? ` / ${actor.zh}` : '' }}</span>
+                  <span class="avh-actorchip__body">
+                    <span class="avh-actorchip__nm">{{ actor.name }}{{ actor.zh ? ` / ${actor.zh}` : '' }}</span>
+                    <!-- 自定义备注（BRIEF §3）：只在非空时另起一行画，浅色小一号，不加图标不加前缀 -->
+                    <span v-if="actor.alias" class="avh-actorchip__alias">{{ actor.alias }}</span>
+                  </span>
                   <span class="avh-hint">看全部作品 ›</span>
                 </div>
               </template>
@@ -852,14 +1052,22 @@ defineExpose({ syncCursor, focusFresh, reloadDetail, retryDetail })
             :key="longImgKey"
             class="avh-longimg"
             :src="longSrcAttr"
+            :width="longNaturalW || undefined"
+            :height="longNaturalH || undefined"
             alt="长缩略图"
             referrerpolicy="no-referrer"
             decoding="async"
             @load="onLongLoad"
-            @error="onLongError"
+            @error="onLongError(currentLongToken())"
             @click="openLong"
           >
+          <!--
+            占位提示：`longSrc` 非空 ⇒ 像素已在手（见 `paintLong()`），所以这两句只会在
+            "还没图"时出现 —— 修的就是原来那 5~20 秒"既没图也没提示"的空白（那时
+            `longSrc` 已被设上、`v-else-if="longSrc"` 把提示挡掉了）。
+          -->
           <div v-else-if="longHint" class="avh-hint">{{ longHint }}</div>
+          <div v-else-if="longFetching" class="avh-hint">⏳ 正在获取长缩略图…</div>
         </div>
       </template>
 
@@ -905,6 +1113,26 @@ defineExpose({ syncCursor, focusFresh, reloadDetail, retryDetail })
 </template>
 
 <style scoped>
+/*
+ * 把 Vuetify 的滚动槽改成 flex 列、并**收掉它自己的滚动**。
+ *
+ * 不加这段时：`.v-navigation-drawer__content` 是 `overflow-y:auto; height:100%` 的 block
+ * 容器（VNavigationDrawer.css:71-77），滚的是**它**，于是 ① 我们的 `.avh-detail__head`
+ * （含「↻ 重新抓取 / 关闭」两颗按钮）跟着内容一起被滚走 —— 而契约要的是标题栏常驻；
+ * ② `.avh-detail__body` 的 `flex:1 1 auto; min-height:0; overflow:auto` 全是死代码
+ * （它不是 flex 子项、高度=内容高度、永不溢出），往它写 `scrollTop` 是空操作。
+ *
+ * 收掉 `__content` 的滚动之后，`.avh-detail__body` 才真的成为唯一滚动容器：
+ * head 是 `flex:none` 的行、body 吃掉剩余高度并自己滚。
+ * （`scrollTopIfFresh()` 仍两个容器都归零：换片那一帧 body 可能还没溢出，
+ *  偏移会短暂留在 `__content` 上。）
+ */
+.avh-detail :deep(.v-navigation-drawer__content) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .avh-detail__head {
   display: flex;
   align-items: center;
@@ -1030,6 +1258,30 @@ defineExpose({ syncCursor, focusFresh, reloadDetail, retryDetail })
 
 .avh-actorchip:hover {
   border-color: rgb(var(--v-theme-secondary));
+}
+
+/*
+ * 名字 / 备注两行的容器。
+ *
+ * `line-height: 0` 是必须的：内部两个 `<span>` 各自是 inline 盒子，父级行高会在它们
+ * 基线周围再撑出空档（没有备注时胶囊会突然变高）。归零后由子元素自己定行高，
+ * 有备注两行、没备注一行，都不会多出空白。
+ */
+.avh-actorchip__body {
+  display: flex;
+  flex-direction: column;
+  line-height: 0;
+}
+
+.avh-actorchip__nm {
+  line-height: 1.35;
+}
+
+/* 备注：浅色 + 小一号，与 `ActorRow` 的 `.avh-actor__zh` 同一口径（BRIEF §3） */
+.avh-actorchip__alias {
+  font-size: 11px;
+  line-height: 1.3;
+  color: rgba(var(--v-theme-on-surface), 0.5);
 }
 
 .avh-actorchip__av {

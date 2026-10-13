@@ -154,8 +154,8 @@ class AVHelper(_PluginBase):
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
     plugin_icon = ("https://raw.githubusercontent.com/ssmengyan/"
                    "MoviePilot-Plugins-AV/main/icons/avhelper.png")
-    # 版本：0.5.1 是 0.5.0 的补丁（在下载器里取消下载后队列那条假记录不消失）
-    plugin_version = "0.5.1"
+    # 版本：0.6.1 加演员自定义备注（显示名，`actor_alias` 表，与收藏解耦）
+    plugin_version = "0.6.1"
     plugin_label = "发现"
     plugin_author = "ssmengyan"
     plugin_config_prefix = "avhelper_"
@@ -457,6 +457,9 @@ class AVHelper(_PluginBase):
              "summary": "长缩略图 URL"},
             {"path": "/favs", "endpoint": self.api_favs, "methods": ["GET", "POST", "DELETE"],
              "auth": "bear", "summary": "收藏演员"},
+            {"path": "/aliases", "endpoint": self.api_aliases, "methods": ["GET", "POST"],
+             "auth": "bear", "summary": "演员自定义备注",
+             "description": "GET 列出全部非空备注；POST {name,alias} 写入，alias 空串 = 清除。与收藏解耦"},
             {"path": "/subs", "endpoint": self.api_subs, "methods": ["GET", "POST", "DELETE"],
              "auth": "bear", "summary": "订阅管理"},
             {"path": "/rule", "endpoint": self.api_rule, "methods": ["GET", "POST"],
@@ -1299,6 +1302,7 @@ class AVHelper(_PluginBase):
             "enabled": self._enabled,
             "sites": self.engine.site_options(),
             "favs": self.store.fav_list(),
+            "aliases": self.store.alias_map(),
             "subs": self.store.sub_list(),
             "known": self.store.known_all(),
             "notices": self.store.notice_list(),
@@ -1509,6 +1513,24 @@ class AVHelper(_PluginBase):
             await asyncio.to_thread(self.store.fav_del, name)
             return {"success": True, "favs": self.store.fav_list(), "message": f"已取消收藏 {name}"}
         return {"success": True, "favs": self.store.fav_list()}
+
+    async def api_aliases(self, request: Request) -> Dict[str, Any]:
+        """演员自定义备注：GET 全表、POST 写一位。
+
+        键是**演员原名**（与 `actor_fav.name`、`plugin/actor?name=` 同一个口径）—— 备注只影响显示，
+        不改任何按名字匹配的逻辑。名字为空时回 `success=False`（与 `api_favs` 同一句文案）。
+        写失败也一律回 `aliases`：前端拿它对齐本地表，不必再补一次 GET。
+        """
+        if request.method == "POST":
+            payload = await self._json_body(request)
+            name = str(payload.get("name") or "").strip()
+            if not name:
+                return {"success": False, "message": "缺少演员名", "aliases": self.store.alias_map()}
+            alias = str(payload.get("alias") or "").strip()
+            await asyncio.to_thread(self.store.alias_set, name, alias)
+            action = f"已保存备注 {alias}" if alias else f"已清除备注 {name}"
+            return {"success": True, "aliases": self.store.alias_map(), "message": action}
+        return {"success": True, "aliases": self.store.alias_map()}
 
     async def api_subs(self, request: Request) -> Dict[str, Any]:
         """订阅：GET 列表、POST 新增（含规则）、DELETE 删除。"""

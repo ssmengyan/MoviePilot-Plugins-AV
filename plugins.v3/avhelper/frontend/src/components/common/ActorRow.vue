@@ -27,6 +27,11 @@ const props = withDefaults(
     name: string
     /** 中文名（后端 `zh`，可能为空）。 */
     zh?: string
+    /**
+     * 自定义备注（后端 `/aliases` 的 `{演员原名: 备注}` 查出来的，不是后端字段）。
+     * 非空时在**原先那两行下面**另起一行显示，原名位置不变。
+     */
+    alias?: string
     /** 头像地址（后端 `avatar`，通常是插件图片代理地址）。 */
     avatar?: string
     /** 本插件实例 id（传给 Thumb 拼图片代理）。 */
@@ -40,6 +45,7 @@ const props = withDefaults(
   }>(),
   {
     zh: '',
+    alias: '',
     avatar: '',
     pluginId: '',
     favorited: false,
@@ -82,6 +88,8 @@ function onSelect(): void {
     />
     <div class="avh-actor__nm">{{ name }}</div>
     <div class="avh-actor__zh">{{ zh || '' }}</div>
+    <!-- 备注只在非空时画：空行会把没备注的卡片撑高，网格里两种卡片就对不齐了 -->
+    <div v-if="alias" class="avh-actor__alias">{{ alias }}</div>
     <div v-if="picker" class="avh-actor__tag">
       <span class="avh-tag" :class="favorited ? 'avh-tag--on' : ''">
         {{ favorited ? '✓ 已收藏' : '➕ 收藏' }}
@@ -136,6 +144,15 @@ function onSelect(): void {
   min-height: 16px;
   font-size: 11px;
   color: rgba(var(--v-theme-on-surface), 0.5);
+}
+
+/* 备注：与 `zh` 同一档字号/颜色（用户要求「浅色、小字体」），长备注按卡片宽度截断 */
+.avh-actor__alias {
+  font-size: 11px;
+  color: rgba(var(--v-theme-on-surface), 0.5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .avh-actor__tag {
