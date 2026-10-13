@@ -4885,7 +4885,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
       const loaded = movies.value.length;
       const total = totalCount.value;
       if (allLoading.value) {
-        return total > loaded ? `⏹ 停止（已加载 ${loaded} / ${total} 部）` : `⏹ 停止（已加载 ${loaded} 部）`;
+        return total > loaded ? `⏸ 停止（已加载 ${loaded} / ${total} 部）` : `⏸ 停止（已加载 ${loaded} 部）`;
       }
       if (total > loaded) return `⏬ 加载全部（还有 ${total - loaded} 部）`;
       return "⏬ 加载全部";
@@ -5460,7 +5460,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
   }
 });
 
-const ActorsView = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-5a6c17da"]]);
+const ActorsView = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-be9a663d"]]);
 
 const {reactive,ref: ref$7} = await importShared('vue');
 const rankCache = reactive(/* @__PURE__ */ new Map());

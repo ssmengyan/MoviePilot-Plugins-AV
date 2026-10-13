@@ -31,7 +31,7 @@
  * | **作品史服务端分页**（老 `#btnMoreFilms`）：首屏 `page=1&limit=30`，`.morebar` 里一颗「加载更多（已显示 n / 共 m 部）」，续拉下一页按 `id|番号` 去重后追加；`hasMore` 为假且不止一页时显示 `已加载全部 n 部` | `loadMoreFilms()` 同一套（页码存进页内缓存，切走只更新缓存不重绘），按钮 `:loading` 转圈 |
  * | 年份收敛：`years.length > 1` 才画 `.filmyears`，按钮 `全部 n`（还有下一页时带 `+`）+ 每年 `2025 6`（`opacity:.65` 的数字）；点击 `S.actorYear=y` | 同（保留 `全部 ` 后面那个空格与弱化数字）；筛选只作用于**已加载**的那几页，`hasMore` 时年份空态会提示「继续加载试试」 |
  * | 作品史接口 `apiGet('/actor', {name, page, limit:30})`（服务端分页；后端 `ACTOR_PAGE=30`、单页硬上限 50） | `api.get('plugin/actor', { params: { name, page, limit: FILM_PAGE } })`（契约 `GET /actor?name=&page=&limit=`，回 `page/limit/total/hasMore`） |
- * | ——（老实现**没有**，2026-10-13 加）「加载全部」 | `loadAllFilms()`：50/页（站点单页上限）、最多连拉 20 页 = 1000 部（对齐 javdb-cli `--all` 的口径）；每拉完一页就写回缓存、列表**当场**变长；在飞时同一颗按钮变「⏹ 停止」。翻页口径与偏移实测见 `ALL_LIMIT` / `ALL_MAX_PAGES` 的注释 |
+ * | ——（老实现**没有**，2026-10-13 加）「加载全部」 | `loadAllFilms()`：50/页（站点单页上限）、最多连拉 20 页 = 1000 部（对齐 javdb-cli `--all` 的口径）；每拉完一页就写回缓存、列表**当场**变长；在飞时同一颗按钮变「⏸ 停止」。翻页口径与偏移实测见 `ALL_LIMIT` / `ALL_MAX_PAGES` 的注释 |
  * | ——（老实现**没有**，2026-10-13 加）「回到顶部」 | 作品史里挂 `common/BackToTop.vue`：往下滑过 260px 才浮出（不默认显示），点一下平滑回顶；榜单栏挂同一颗 |
  * | 演员榜接口 `apiGet('/actors')` → `r.data.actors` | `api.get('plugin/actors')`，同样认 `{success, actors}` 与 `{success,data:{actors}}` 两种信封 |
  * | 页内缓存 `CACHE['page:actor:'+name]` / `CACHE['actors']`（跨栏目切换仍在，来回看演员不重抓） | 同名的模块级缓存（`Map` + `reactive`），组件卸载/重挂不掉 |
@@ -480,12 +480,12 @@ const allPages = ref(0)
 /** 触到一次连拉的上限停下来了（界面补一句"再点一次继续"）。 */
 const allCapped = ref(false)
 
-/** 「加载全部」按钮文案：在飞时是进度 + 停止。 */
+/** 「加载全部」按钮文案：在飞时是进度 + 停止（`⏸` 是实测能画出来的那个，`⏹` 在本机是空白方块）。 */
 const allLabel = computed(() => {
   const loaded = movies.value.length
   const total = totalCount.value
   if (allLoading.value) {
-    return total > loaded ? `⏹ 停止（已加载 ${loaded} / ${total} 部）` : `⏹ 停止（已加载 ${loaded} 部）`
+    return total > loaded ? `⏸ 停止（已加载 ${loaded} / ${total} 部）` : `⏸ 停止（已加载 ${loaded} 部）`
   }
   if (total > loaded) return `⏬ 加载全部（还有 ${total - loaded} 部）`
   return '⏬ 加载全部'
