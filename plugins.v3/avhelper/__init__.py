@@ -155,7 +155,7 @@ class AVHelper(_PluginBase):
     plugin_icon = ("https://raw.githubusercontent.com/ssmengyan/"
                    "MoviePilot-Plugins-AV/main/icons/avhelper.png")
     # 版本：0.6.1 = 演员自定义备注（`actor_alias` 表，与收藏解耦）+ 修详情抽屉滚动残留 / 长图加载期空白
-    plugin_version = "0.6.1"
+    plugin_version = "0.6.2"
     plugin_label = "发现"
     plugin_author = "ssmengyan"
     plugin_config_prefix = "avhelper_"

@@ -13,9 +13,17 @@
  * | ~~`dling` 提示行~~：v0.2.7 已去掉「⏬ n 个已提交，进度看「下载」页」那行（下载进度看「下载」栏角标） | 同样不画；`store.downloading` 仍供左栏「下载」角标用 |
  * | 右侧 `↻ 刷新任务` → `loadTasks(true)`（**非静默**：失败 toast「任务读取失败」）+ `toast('任务','正在刷新…')` | `store.refreshTasks(false)` + `t.info('正在刷新…')`；失败 `t.warning('任务读取失败：{原因}')`（写法照 S6-2 下载页对同一条 toast 的处理） |
  * | `'<div class="secttl">待确认（' + pend.length + '）</div>'` | 同一句文案的小标题（`.avh-tasks__secttl` 对齐 `app.css` 的 `.secttl`） |
- * | 每个待确认任务一块 `candTable(t, i)`；`bindDownloadButtons(m)` 事件委托 | `common/CandTable.vue`（`v-for`）+ `@download`；行内 loading 由它自持，动作结束后用 `defineExpose({ clearPending })` 清掉 |
- * | `startDownload` 失败 `toast('下载失败', r.message || '请稍后重试', 'warn')`，并把按钮 `disabled = false` | `t.warning(res.message || '下载失败，请稍后重试')`（写法照 S6-1 站点搜索对同一条 toast 的处理）+ 清转圈 |
- * | `startDownload` 成功 `toast('已提交下载', site + ' · 进度见「下载」页', 'ok')` + `loadTasks(true)` | `t.success('已提交下载')` + `t.info('{site} · 进度见「下载」页')` + 静默 `refreshTasks`（store 已把该任务标成 `pushed`，那一行立刻从待确认里消失） |
+ * | 每个待确认任务一块 `candTable(t, i)`；`bindDownloadButtons(m)` 事件委托 | `common/CandTable.vue`（`v-for`）+ `@download`；行内转圈由它自持，**只由这一行自己的结论结束**（见下） |
+ * | `startDownload` 失败 `toast('下载失败', r.message || '请稍后重试', 'warn')`，并把按钮 `disabled = false` | 底部提示条「{站点} 下载失败：{原因}」+ `clearRow(taskId, site)`（只解这一行） |
+ * | `startDownload` 成功 `toast('已提交下载', site + ' · 进度见「下载」页', 'ok')` + `loadTasks(true)` | 底部提示条「已提交下载：{站点} · 进度见「下载」页」+ 静默 `refreshTasks`；**不清转圈** —— store 已把该任务标成 `pushed`，卡片连同按钮一起消失 |
+ *
+ * **并发点击（2026-10-14 用户要求，别改回去）**：同一时间连点两三个任务的下载是高频正常操作，
+ * 不允许被拦。三条口径：① 闸门按行分（`usePluginStore.startDownload` 的 key 带任务 id + 站点）；
+ * ② 行内转圈只由这一行的结论结束（成功 = 卡片消失、失败 = `clearRow`），别的行完成、
+ * 手动「↻ 刷新任务」、5 秒轮询都不碰它；③ 结果提示走插件自带底部提示条（可叠 4 条），
+ * 一次结果一条 —— 宿主 toast 在右下角，并发时容易被看漏（用户原来那个"提示被吞掉"）。
+ * 老写法（全局 key + 按站点名在整页清）会：第二行被拒并弹「上一次操作还在进行中，请稍候」，
+ * 同时把第一行正在飞的转圈一起清掉。
  * | 空态 `'<div class="empty">没有待确认的任务</div>'` | `EmptyState`，文案逐字一致 |
  * | `queueMissingThumbs(pend)`（每轮最多补 3 个、补过的番号不再排队） | `common.queueMissingThumbs(api, pending)`，列表每次变化补一轮（补到的图由 `CandTable` 读共享的 `filledThumbs`） |
  * | 轮询：`startTaskPolling()` 每 5 秒 `loadTasks(false)`，靠 `S.view` 是 tasks 或 downloads 判断"只在任务/下载页" | 本视图挂载且 `document.visibilityState === 'visible'` 时每 5 秒 `store.refreshTasks(true)`；**卸载或不可见即停**（与 S6-2 下载页同一套规则） |
@@ -45,6 +53,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import CandTable from '../common/CandTable.vue'
 import EmptyState from '../common/EmptyState.vue'
 import { queueMissingThumbs } from '../common/common'
+import { pushBottomToast } from '../../composables/bottomToast'
 import { hostToast, type PluginApi } from '../../composables/usePluginApi'
 import { normKey } from '../../composables/downloadHistory'
 import type { PluginStore } from '../../composables/usePluginStore'
@@ -72,7 +81,7 @@ const t = hostToast(props.toast as any)
 /** 轮询间隔：与老 `startTaskPolling()` 的 5000ms 一致（后端搜种/下载状态本身就变得慢）。 */
 const POLL_MS = 5000
 
-/** 每张候选表的实例：`clearPending(site?)` 由 `CandTable` 通过 `defineExpose` 暴露。 */
+/** 每张候选表的实例：`clearRow / clearAllPending` 由 `CandTable` 通过 `defineExpose` 暴露。 */
 const tables = ref<Array<InstanceType<typeof CandTable> | null>>([])
 
 /**
@@ -114,17 +123,20 @@ function subscribeStateOf(task: SearchTask): 'hidden' | 'ready' | 'done' {
   return subscribedKeys.value.has(key) ? 'done' : 'ready'
 }
 
-/** 清掉所有候选表的行内 loading（老实现是整块重绘，所有按钮都回到初始态）。 */
-function clearAllPending(): void {
-  tables.value.forEach(table => table?.clearPending())
+/**
+ * 只清被点的那一行（表内 key 是 `任务id|站点`，跨卡也不会误伤同站点的别的行）。
+ *
+ * 成功**不调**它：成功时卡片会随任务转 `pushed` 消失，转圈跟着没；
+ * 只有失败（和超时安全阀）才需要把那一行的转圈解下来。
+ */
+function clearRow(taskId: string, site: string): void {
+  tables.value.forEach(table => table?.clearRow(taskId, site))
 }
 
-/**
- * 只清被点的那一行（表内 key 是 `任务id|站点`，每张表按自己的 id 匹配，不会误伤别的行）。
- * 成功失败都要清，否则那一行的按钮永远转圈。
- */
-function clearSitePending(site: string): void {
-  tables.value.forEach(table => table?.clearPending(site))
+/** 行内提示的站点前缀（并发时一眼分得清是哪一行；站点为空就不带前缀）。 */
+function sitePrefix(site: string): string {
+  const clean = String(site || '').trim()
+  return clean ? `${clean} · ` : ''
 }
 
 /**
@@ -132,6 +144,9 @@ function clearSitePending(site: string): void {
  *
  * 这一条走非静默（老实现传的就是 `loadTasks(true)`），失败时给 toast；
  * 后台轮询一律静默，不把界面打成错误态。
+ *
+ * **不再顺手清行内转圈**：请求还在飞的行（任务在服务端仍是 `await`）必须继续转，
+ * 否则用户以为失败了又点一次，等于重复下单。
  */
 async function refreshTasks(): Promise<void> {
   const inflight = props.store.refreshTasks(false)
@@ -139,27 +154,40 @@ async function refreshTasks(): Promise<void> {
   if (!(await inflight)) {
     t.warning(`任务读取失败：${props.store.error.value || '请稍后重试'}`)
   }
-  clearAllPending()
 }
 
-/** 行内「下载 / 仍要下载」：老 `bindDownloadButtons` → `startDownload(id, site, btn, force)`。 */
+/**
+ * 行内「下载 / 仍要下载」：老 `bindDownloadButtons` → `startDownload(id, site, btn, force)`。
+ *
+ * 并发口径（2026-10-14）：每行各发各的请求、各转各的圈，互不阻塞也不互相清；
+ * 结果提示走插件自带底部提示条，一次结果一条，两条同时回来也都在。
+ */
 async function onDownload(payload: { taskId: string; site: string; force: boolean }): Promise<void> {
   const res = await props.store.startDownload(payload.taskId, payload.site, payload.force)
+  // 同一行重复触发被 store 合并掉（正常点不出来）：静默，绝不能动那一行的转圈 ——
+  // 它属于还在飞的那一次请求。
+  if (res.kind === 'busy') return
   if (!res.ok) {
-    t.warning(res.message || '下载失败，请稍后重试')
-  } else {
-    t.success('已提交下载')
-    t.info(`${payload.site} · 进度见「下载」页`)
-    // 老实现在这里 `loadTasks(true)`：store 已就地标成 `pushed`（那一行消失），再静默对齐一次服务端。
-    void props.store.refreshTasks(false)
+    clearRow(payload.taskId, payload.site)
+    pushBottomToast('warning', `${sitePrefix(payload.site)}下载失败：${res.message || '请稍后重试'}`)
+    return
   }
-  clearSitePending(payload.site)
+  // 成功不清转圈：store 已就地标成 `pushed`（卡片与按钮一起消失），再静默对齐一次服务端。
+  pushBottomToast('success', `已提交下载：${sitePrefix(payload.site)}进度见「下载」页`)
+  void props.store.refreshTasks(false)
+}
+
+/** 某一行等太久还没结论（`CandTable` 的安全阀）：只提示，不碰别的行、不取消请求。 */
+function onDownloadTimeout(payload: { taskId: string; site: string }): void {
+  pushBottomToast('warning', `${sitePrefix(payload.site)}下载提交超时：请刷新任务后重试`)
 }
 
 /** 行内「取消任务」：老 `cancelTask(tid, btn)`（后端置 `canceled`，任务与角标都不再算它）。 */
 async function onCancel(payload: { taskId: string }): Promise<void> {
   const num = pending.value.filter(item => String(item.id ?? '') === payload.taskId)[0]?.number || ''
   const res = await props.store.cancelTask(payload.taskId)
+  // 同一张卡重复触发被合并：静默，别解掉在飞那一次的转圈。
+  if (res.kind === 'busy') return
   if (!res.ok) {
     t.warning('取消任务失败')
     t.info(res.message || '请稍后重试')
@@ -169,7 +197,8 @@ async function onCancel(payload: { taskId: string }): Promise<void> {
     // store 已用后端回传的任务表刷新（那条卡片消失），这里只解掉按钮的进行中态。
     void props.store.refreshTasks(false)
   }
-  tables.value.forEach(table => table?.clearCanceling())
+  // 只解被点的那张卡（连点两张卡时，先回来的那张不会把后一张的转圈清掉）。
+  tables.value.forEach(table => table?.clearCanceling(payload.taskId))
 }
 
 /**
@@ -186,6 +215,7 @@ async function onSubscribe(payload: { taskId: string }): Promise<void> {
     t.info('这条任务缺少番号')
   } else {
     const res = await props.store.subscribeNumber(number, 'number', String(task?.actor || ''))
+    if (res.kind === 'busy') return
     if (!res.ok) {
       t.warning('订阅失败')
       t.info(res.message || '请稍后重试')
@@ -194,7 +224,7 @@ async function onSubscribe(payload: { taskId: string }): Promise<void> {
       t.info(`${number} · 有资源时自动下载`)
     }
   }
-  tables.value.forEach(table => table?.clearSubscribing())
+  tables.value.forEach(table => table?.clearSubscribing(payload.taskId))
 }
 
 /** 每轮列表变化补一轮缺图：老实现是在 `renderTasks` 末尾调一次 `queueMissingThumbs(pend)`。 */
@@ -262,6 +292,7 @@ onBeforeUnmount(() => {
         :subscribe-state="subscribeStateOf(task)"
         cancelable
         @download="onDownload"
+        @timeout="onDownloadTimeout"
         @cancel="onCancel"
         @subscribe="onSubscribe"
       />

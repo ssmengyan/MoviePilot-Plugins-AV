@@ -42,8 +42,17 @@
  * 行为差异：老实现用 `data-dl` / `data-task` / `data-force` 属性 + `bindDownloadButtons()`
  * 事件委托，并在点击时把按钮 `disabled`；Vue 里改成 `download` 事件 + 组件内
  * 按站点记 in-flight（按钮转圈禁用），点击语义（含「仍要下载」的 `force`）不变。
+ *
+ * **行内转圈的生死（2026-10-14 修，用户要求）**：转圈从点击起一直转到**这一行自己的结论**——
+ * - 成功：卡片随任务转 `pushed` 从「待确认」里消失，组件卸载，转圈跟着没了（父组件**不**出手清）；
+ * - 失败：父组件调 `clearRow(taskId, site)`，**只**解这一行；
+ * - 别的行完成 / 手动「刷新任务」/ 5 秒轮询：一律不碰它；
+ * - 兜底：超过 `WATCHDOG_MS` 还没有结论（宿主那条请求挂了又没超时）只解这一行并发 `timeout`，
+ *   免得那颗按钮永久点不动。
+ * `clearRow` 只认 `任务id|站点` 这一个 key；老写法按站点名在**整页**清，点第二张卡的「馒头」
+ * 会把第一张卡正在飞的「馒头」一起解掉（用户报的"只转几秒就停止"）。
  */
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import Thumb from './Thumb.vue'
 import { filledThumbs, scoreLevel } from './common'
 import type { Candidate, SearchTask } from '../../composables/storeTypes'
@@ -68,6 +77,8 @@ const props = withDefaults(
 const emit = defineEmits<{
   /** 点「下载」/「仍要下载」：`force=true` 表示下载被规则淘汰的候选。 */
   (event: 'download', payload: { taskId: string; site: string; force: boolean }): void
+  /** 某一行等太久还没有结论（`WATCHDOG_MS`）：父组件提示一句，别的行不受影响。 */
+  (event: 'timeout', payload: { taskId: string; site: string }): void
   /** 点「取消任务」：把这条待确认任务从任务页与角标里去掉。 */
   (event: 'cancel', payload: { taskId: string }): void
   /** 点「📌 订阅该影片」：由任务页去建一条番号订阅（组件自己不碰 store）。 */
@@ -165,11 +176,47 @@ function siteKey(cand: Candidate): string {
   return `${taskId.value}|${String(cand.site || '')}`
 }
 
+/**
+ * 行内转圈的安全阀：这么久还没有结论就只解这一行（**不取消请求**，真结果后到照样由父组件处理）。
+ *
+ * 正常情况走不到这里：请求落地（成功→卡片消失 / 失败→`clearRow`）或者卡片因轮询消失，
+ * 都会先把定时器收掉。留着它只为"宿主那条请求永远不落地"时那颗按钮不会变成死按钮。
+ */
+const WATCHDOG_MS = 180_000
+
+/** 行 key → 看门狗句柄。 */
+const watchdogs = new Map<string, number>()
+
+function disarmWatchdog(key: string): void {
+  const timer = watchdogs.get(key)
+  if (timer === undefined) return
+  window.clearTimeout(timer)
+  watchdogs.delete(key)
+}
+
+function armWatchdog(key: string, payload: { taskId: string; site: string }): void {
+  disarmWatchdog(key)
+  watchdogs.set(
+    key,
+    window.setTimeout(() => {
+      watchdogs.delete(key)
+      if (!pending.value[key]) return
+      const next = { ...pending.value }
+      delete next[key]
+      pending.value = next
+      emit('timeout', payload)
+    }, WATCHDOG_MS),
+  )
+}
+
 function onDownload(cand: Candidate): void {
   const key = siteKey(cand)
+  // 同一行重复点击（连点/`loading` 期间按钮仍可点）合并掉：一次点击只发一个请求。
   if (pending.value[key]) return
   pending.value = { ...pending.value, [key]: true }
-  emit('download', { taskId: taskId.value, site: String(cand.site || ''), force: !isPass(cand) })
+  const payload = { taskId: taskId.value, site: String(cand.site || ''), force: !isPass(cand) }
+  armWatchdog(key, { taskId: payload.taskId, site: payload.site })
+  emit('download', payload)
 }
 
 /** 「取消任务」在飞（老实现只把按钮置灰，见 `cancelTask` 里的 `btn.disabled = true`）。 */
@@ -182,8 +229,9 @@ function onCancel(): void {
   emit('cancel', { taskId: taskId.value })
 }
 
-/** 解除「取消任务」的进行中态（成功或失败都要调，否则按钮永远转圈）。 */
-function clearCanceling(): void {
+/** 解除「取消任务」的进行中态（成功失败都要调，否则按钮永远转圈）；只认本卡。 */
+function clearCanceling(id?: string): void {
+  if (id !== undefined && String(id) !== taskId.value) return
   canceling.value = false
 }
 
@@ -212,28 +260,40 @@ function onSubscribe(): void {
   emit('subscribe', { taskId: taskId.value })
 }
 
-/** 解除「订阅该影片」的进行中态（成功失败都要调）。 */
-function clearSubscribing(): void {
+/** 解除「订阅该影片」的进行中态（成功失败都要调）；只认本卡。 */
+function clearSubscribing(id?: string): void {
+  if (id !== undefined && String(id) !== taskId.value) return
   subscribing.value = false
 }
 
 /**
- * 解除按钮的进行中态（成功或失败都要调，否则按钮永远转圈）。
- * 不传 `site` 表示整表解锁（常用于「刷新任务」之后）。
+ * 解除**指定那一行**的进行中态（失败时由父组件调；成功不用调 —— 卡片会随任务消失）。
+ *
+ * 只认 `任务id|站点` 这一个 key：别的行（哪怕站点名一模一样）不受影响。
  */
-function clearPending(site?: string): void {
+function clearRow(id: string, site: string): void {
+  const key = `${String(id ?? '')}|${String(site ?? '')}`
+  disarmWatchdog(key)
+  if (!pending.value[key]) return
   const next = { ...pending.value }
-  if (site === undefined) {
-    Object.keys(next).forEach(key => delete next[key])
-  } else {
-    Object.keys(next).forEach(key => {
-      if (key === `${taskId.value}|${site}`) delete next[key]
-    })
-  }
+  delete next[key]
   pending.value = next
 }
 
-defineExpose({ clearPending, clearCanceling, clearSubscribing })
+/** 整表解锁（站点搜索页重搜一次时用：那一页的整块结果都要换新）。 */
+function clearAllPending(): void {
+  watchdogs.forEach(timer => window.clearTimeout(timer))
+  watchdogs.clear()
+  pending.value = {}
+}
+
+defineExpose({ clearRow, clearAllPending, clearCanceling, clearSubscribing })
+
+/** 卸载（卡片消失、切栏目）：把看门狗收干净，别让定时器挂在已销毁的组件上。 */
+onBeforeUnmount(() => {
+  watchdogs.forEach(timer => window.clearTimeout(timer))
+  watchdogs.clear()
+})
 
 /**
  * 封面地址：任务自带优先，其次用 `queueThumb` 后台补回来的那张。

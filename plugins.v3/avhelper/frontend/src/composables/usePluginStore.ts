@@ -162,7 +162,18 @@ export function usePluginStore(api: PluginApi) {
   const updatedAt = ref('')
   const booted = ref(false)
 
-  /** 每个动作一份 in-flight 标记：重复点击合并，不并发打同一端点。 */
+  /**
+   * in-flight 标记：**同一个 key** 的重复触发被合并，不同 key 互不阻塞。
+   *
+   * key 的粒度就是"要不要挡"的粒度（2026-10-14 修）：
+   * - 行内动作（下载 / 磁力 / 取消任务 / 建订阅）按**行或目标**细分（`download:<id>|<站点>` 等），
+   *   所以连点两张卡的下载各下各的，谁也不挡谁；
+   * - 全局动作（搜索 / 检查订阅 / 保存规则）保持粗粒度：那几条本来就受限流或被用户要求串行，
+   *   并发只会互相打架。
+   *
+   * 早先下载用的是全局 key `'download'`：第一行在飞时点第二行会被直接拒掉、回一句
+   * 「上一次操作还在进行中，请稍候」——用户 2026-10-14 明确不要这个限制。
+   */
   const busy = ref<Record<string, boolean>>({})
 
   // ---------- 派生值（角标与空态） ----------
@@ -487,8 +498,9 @@ export function usePluginStore(api: PluginApi) {
     actor = '',
     rule?: RuleValue | null,
   ): Promise<ActionResult> {
-    return guarded('subscribe', async () => {
-      const target = String(name ?? '').trim()
+    // 闸门按"目标"分：不同番号/演员各建各的订阅，互不阻塞；同一目标重复点才合并。
+    const target = String(name ?? '').trim()
+    return guarded(`subscribe:${kind}:${target}`, async () => {
       if (!target) return { ok: false, kind: 'error' as ActionResultKind, message: '订阅参数不完整' }
       const body: Record<string, unknown> = { type: kind, name: target }
       if (kind === 'number' && actor) body.actor = actor
@@ -588,6 +600,10 @@ export function usePluginStore(api: PluginApi) {
   /**
    * `POST plugin/tasks/download`：提交下载（按任务 id + 站点）。
    *
+   * 闸门是**按行**的（`download:<任务id>|<站点>`）：连点不同任务的下载互不阻塞，
+   * 各自等各自的结论；只有同一行（同一候选）被重复触发时才合并掉，防重复下单。
+   * 行的转圈由 `CandTable` 自己持有，成功随卡片消失、失败才由视图调 `clearRow()` 解下来。
+   *
    * :param force: `true` = 「仍要下载」（允许下载被规则淘汰的候选）。
    */
   function startDownload(
@@ -595,8 +611,8 @@ export function usePluginStore(api: PluginApi) {
     site: string,
     force = false,
   ): Promise<ActionResult<TaskDownloadResult>> {
-    return guarded('download', async () => {
-      const id = String(taskId ?? '').trim()
+    const id = String(taskId ?? '').trim()
+    return guarded(`download:${id}|${String(site ?? '')}`, async () => {
       if (!id) return { ok: false, kind: 'error' as ActionResultKind, message: '缺少任务 id' }
       const body: Record<string, unknown> = { id, site: site || '' }
       if (force) body.force = true
@@ -630,8 +646,9 @@ export function usePluginStore(api: PluginApi) {
     name = '',
     number = '',
   ): Promise<ActionResult<MagnetDownloadResult>> {
-    return guarded('magnet', async () => {
-      const digest = String(hash ?? '').trim()
+    // 闸门按 hash 分：详情页不同磁力各下各的，同一颗按钮重复点才合并。
+    const digest = String(hash ?? '').trim()
+    return guarded(`magnet:${digest}`, async () => {
       if (!digest) return { ok: false, kind: 'error' as ActionResultKind, message: '缺少磁力 Hash' }
       const body: Record<string, unknown> = { hash: digest, name: name || '' }
       if (number) body.number = number
@@ -658,8 +675,9 @@ export function usePluginStore(api: PluginApi) {
    *  已推进下载器的种子要在下载器里停，后端会直接回失败文案。
    */
   function cancelTask(taskId: string | number): Promise<ActionResult<{ tasks?: SearchTask[] }>> {
-    return guarded('cancel', async () => {
-      const id = String(taskId ?? '').trim()
+    // 闸门按任务分：连点两张卡的「取消任务」互不阻塞（全局 key 时第二张会被误报"取消失败"）。
+    const id = String(taskId ?? '').trim()
+    return guarded(`cancel:${id}`, async () => {
       if (!id) return { ok: false, kind: 'error' as ActionResultKind, message: '这条任务缺少 id，无法取消' }
       const outcome = await send('post', 'tasks/cancel', { id })
       if (!outcome.ok) return { ok: false, kind: 'error' as ActionResultKind, message: outcome.message }

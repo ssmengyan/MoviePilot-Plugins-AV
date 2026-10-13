@@ -2359,7 +2359,8 @@ const _hoisted_14$8 = { class: "avh-cand__act" };
 const _hoisted_15$7 = { colspan: "7" };
 const _hoisted_16$4 = ["title"];
 const _hoisted_17$4 = { key: 0 };
-const {computed: computed$d,ref: ref$h} = await importShared('vue');
+const {computed: computed$d,onBeforeUnmount: onBeforeUnmount$8,ref: ref$h} = await importShared('vue');
+const WATCHDOG_MS = 18e4;
 const _sfc_main$j = /* @__PURE__ */ _defineComponent$j({
   __name: "CandTable",
   props: {
@@ -2368,7 +2369,7 @@ const _sfc_main$j = /* @__PURE__ */ _defineComponent$j({
     cancelable: { type: Boolean, default: false },
     subscribeState: { default: "hidden" }
   },
-  emits: ["download", "cancel", "subscribe"],
+  emits: ["download", "timeout", "cancel", "subscribe"],
   setup(__props, { expose: __expose, emit: __emit }) {
     const props = __props;
     const emit = __emit;
@@ -2424,11 +2425,34 @@ const _sfc_main$j = /* @__PURE__ */ _defineComponent$j({
     function siteKey(cand) {
       return `${taskId.value}|${String(cand.site || "")}`;
     }
+    const watchdogs = /* @__PURE__ */ new Map();
+    function disarmWatchdog(key) {
+      const timer = watchdogs.get(key);
+      if (timer === void 0) return;
+      window.clearTimeout(timer);
+      watchdogs.delete(key);
+    }
+    function armWatchdog(key, payload) {
+      disarmWatchdog(key);
+      watchdogs.set(
+        key,
+        window.setTimeout(() => {
+          watchdogs.delete(key);
+          if (!pending.value[key]) return;
+          const next = { ...pending.value };
+          delete next[key];
+          pending.value = next;
+          emit("timeout", payload);
+        }, WATCHDOG_MS)
+      );
+    }
     function onDownload(cand) {
       const key = siteKey(cand);
       if (pending.value[key]) return;
       pending.value = { ...pending.value, [key]: true };
-      emit("download", { taskId: taskId.value, site: String(cand.site || ""), force: !isPass(cand) });
+      const payload = { taskId: taskId.value, site: String(cand.site || ""), force: !isPass(cand) };
+      armWatchdog(key, { taskId: payload.taskId, site: payload.site });
+      emit("download", payload);
     }
     const canceling = ref$h(false);
     function onCancel() {
@@ -2436,7 +2460,8 @@ const _sfc_main$j = /* @__PURE__ */ _defineComponent$j({
       canceling.value = true;
       emit("cancel", { taskId: taskId.value });
     }
-    function clearCanceling() {
+    function clearCanceling(id) {
+      if (id !== void 0 && String(id) !== taskId.value) return;
       canceling.value = false;
     }
     const pendingMark = computed$d(() => {
@@ -2455,21 +2480,28 @@ const _sfc_main$j = /* @__PURE__ */ _defineComponent$j({
       subscribing.value = true;
       emit("subscribe", { taskId: taskId.value });
     }
-    function clearSubscribing() {
+    function clearSubscribing(id) {
+      if (id !== void 0 && String(id) !== taskId.value) return;
       subscribing.value = false;
     }
-    function clearPending(site) {
+    function clearRow(id, site) {
+      const key = `${String(id ?? "")}|${String(site ?? "")}`;
+      disarmWatchdog(key);
+      if (!pending.value[key]) return;
       const next = { ...pending.value };
-      if (site === void 0) {
-        Object.keys(next).forEach((key) => delete next[key]);
-      } else {
-        Object.keys(next).forEach((key) => {
-          if (key === `${taskId.value}|${site}`) delete next[key];
-        });
-      }
+      delete next[key];
       pending.value = next;
     }
-    __expose({ clearPending, clearCanceling, clearSubscribing });
+    function clearAllPending() {
+      watchdogs.forEach((timer) => window.clearTimeout(timer));
+      watchdogs.clear();
+      pending.value = {};
+    }
+    __expose({ clearRow, clearAllPending, clearCanceling, clearSubscribing });
+    onBeforeUnmount$8(() => {
+      watchdogs.forEach((timer) => window.clearTimeout(timer));
+      watchdogs.clear();
+    });
     const poster = computed$d(() => {
       const own = String(props.task?.thumb || "");
       if (own) return own;
@@ -2655,7 +2687,7 @@ const _sfc_main$j = /* @__PURE__ */ _defineComponent$j({
   }
 });
 
-const CandTable = /* @__PURE__ */ _export_sfc(_sfc_main$j, [["__scopeId", "data-v-bb4356f9"]]);
+const CandTable = /* @__PURE__ */ _export_sfc(_sfc_main$j, [["__scopeId", "data-v-291287ca"]]);
 
 const {defineComponent:_defineComponent$i} = await importShared('vue');
 
@@ -2744,6 +2776,54 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
 
 const ErrorState = /* @__PURE__ */ _export_sfc(_sfc_main$h, [["__scopeId", "data-v-8f8a571b"]]);
 
+const {ref: ref$g} = await importShared('vue');
+
+const BOTTOM_TOAST_MS = 4e3;
+const BOTTOM_TOAST_STAGGER_MS = 320;
+const bottomToasts = ref$g([]);
+let seq = 0;
+const timers = /* @__PURE__ */ new Map();
+function dismissBottomToast(id) {
+  const timer = timers.get(id);
+  if (timer !== void 0) {
+    window.clearTimeout(timer);
+    timers.delete(id);
+  }
+  bottomToasts.value = bottomToasts.value.filter((item) => item.id !== id);
+}
+function pushBottomToast(level, text, timeout = BOTTOM_TOAST_MS) {
+  const clean = String(text ?? "").trim();
+  if (!clean) return 0;
+  seq += 1;
+  const id = seq;
+  bottomToasts.value = [...bottomToasts.value, { id, level, text: clean }].slice(-4);
+  if (timeout > 0) {
+    timers.set(id, window.setTimeout(() => dismissBottomToast(id), timeout));
+  }
+  return id;
+}
+function normalizeLevel(raw) {
+  const level = String(raw ?? "info");
+  if (level === "success" || level === "warning" || level === "error") return level;
+  return "info";
+}
+function playBottomToasts(raw, timeout = BOTTOM_TOAST_MS) {
+  if (!Array.isArray(raw)) return;
+  raw.forEach((item, index) => {
+    const record = item || {};
+    const level = normalizeLevel(record.level);
+    const text = String(record.text ?? "");
+    if (index === 0) {
+      pushBottomToast(level, text, timeout);
+      return;
+    }
+    window.setTimeout(
+      () => pushBottomToast(level, text, timeout),
+      index * BOTTOM_TOAST_STAGGER_MS
+    );
+  });
+}
+
 const KEY = "avhnext.pendingSettingsSection";
 function requestSettingsSection(key) {
   try {
@@ -2807,7 +2887,7 @@ const _hoisted_2$f = { class: "avh-sitesearch__toolbar" };
 const _hoisted_3$d = { class: "avh-sitesearch__hint" };
 const _hoisted_4$c = { class: "avh-sitesearch__range" };
 const _hoisted_5$c = ["title"];
-const {computed: computed$c,nextTick: nextTick$4,ref: ref$g,watch: watch$9} = await importShared('vue');
+const {computed: computed$c,nextTick: nextTick$4,ref: ref$f,watch: watch$9} = await importShared('vue');
 const _sfc_main$g = /* @__PURE__ */ _defineComponent$g({
   __name: "SiteSearchView",
   props: {
@@ -2821,13 +2901,13 @@ const _sfc_main$g = /* @__PURE__ */ _defineComponent$g({
     const props = __props;
     const emit = __emit;
     const t = hostToast(props.toast);
-    const candTableRef = ref$g(null);
-    const keyword = ref$g("");
-    const searching = ref$g(false);
-    const searchedAt = ref$g("");
-    const task = ref$g(null);
-    const errorText = ref$g("");
-    const retrying = ref$g(false);
+    const candTableRef = ref$f(null);
+    const keyword = ref$f("");
+    const searching = ref$f(false);
+    const searchedAt = ref$f("");
+    const task = ref$f(null);
+    const errorText = ref$f("");
+    const retrying = ref$f(false);
     const siteNames = computed$c(
       () => props.store.sites.value.map((item) => String(item?.name || "")).filter(Boolean)
     );
@@ -2850,13 +2930,13 @@ const _sfc_main$g = /* @__PURE__ */ _defineComponent$g({
     const hasResult = computed$c(() => !!task.value && cands.value.length > 0);
     const searchLabel = computed$c(() => searching.value ? "搜索中…" : "搜索站点");
     watch$9(task, async () => {
-      candTableRef.value?.clearPending();
+      candTableRef.value?.clearAllPending();
       await nextTick$4();
-      candTableRef.value?.clearPending();
+      candTableRef.value?.clearAllPending();
     });
     function clearPending() {
-      candTableRef.value?.clearPending();
-      void nextTick$4(() => candTableRef.value?.clearPending());
+      candTableRef.value?.clearAllPending();
+      void nextTick$4(() => candTableRef.value?.clearAllPending());
     }
     async function doSearch() {
       const kw = keyword.value.trim();
@@ -2908,14 +2988,18 @@ const _sfc_main$g = /* @__PURE__ */ _defineComponent$g({
     }
     async function onDownload(payload) {
       const res = await props.store.startDownload(payload.taskId, payload.site, payload.force);
+      if (res.kind === "busy") return;
+      const site = String(payload.site || "").trim();
+      clearRow(payload.taskId, payload.site);
       if (!res.ok) {
-        t.warning(res.message || "下载失败，请稍后重试");
-      } else {
-        t.success("已提交下载");
-        t.info(`${payload.site} · 进度见「下载」页`);
-        void props.store.refreshTasks(false);
+        pushBottomToast("warning", `${site ? site + " · " : ""}下载失败：${res.message || "请稍后重试"}`);
+        return;
       }
-      clearPending();
+      pushBottomToast("success", `已提交下载：${site ? site + " · " : ""}进度见「下载」页`);
+      void props.store.refreshTasks(false);
+    }
+    function clearRow(taskId, site) {
+      candTableRef.value?.clearRow(taskId, site);
     }
     function changeScope() {
       t.info("搜索范围在「设置台 → 搜索站点」栏里改，保存后本页立即生效");
@@ -2998,7 +3082,7 @@ const _sfc_main$g = /* @__PURE__ */ _defineComponent$g({
   }
 });
 
-const SiteSearchView = /* @__PURE__ */ _export_sfc(_sfc_main$g, [["__scopeId", "data-v-bf4e56fe"]]);
+const SiteSearchView = /* @__PURE__ */ _export_sfc(_sfc_main$g, [["__scopeId", "data-v-1636ca0e"]]);
 
 function asItems(value) {
   return Array.isArray(value) ? value : null;
@@ -3096,7 +3180,7 @@ const _hoisted_12$7 = ["title"];
 const _hoisted_13$7 = ["title"];
 const _hoisted_14$7 = ["title"];
 const _hoisted_15$6 = { class: "avh-history__act" };
-const {computed: computed$b,onMounted: onMounted$7,ref: ref$f} = await importShared('vue');
+const {computed: computed$b,onMounted: onMounted$7,ref: ref$e} = await importShared('vue');
 const ENDPOINT$1 = "plugin/downloads";
 const SKELETON_ROWS = 6;
 const _sfc_main$f = /* @__PURE__ */ _defineComponent$f({
@@ -3110,14 +3194,14 @@ const _sfc_main$f = /* @__PURE__ */ _defineComponent$f({
     const props = __props;
     const t = hostToast(props.toast);
     const confirm = useHostConfirm();
-    const items = ref$f([]);
-    const serverCounts = ref$f(null);
-    const loading = ref$f(false);
-    const error = ref$f("");
-    const loaded = ref$f(false);
-    const query = ref$f("");
-    const onlyMissing = ref$f(false);
-    const deletingKey = ref$f("");
+    const items = ref$e([]);
+    const serverCounts = ref$e(null);
+    const loading = ref$e(false);
+    const error = ref$e("");
+    const loaded = ref$e(false);
+    const query = ref$e("");
+    const onlyMissing = ref$e(false);
+    const deletingKey = ref$e("");
     const rows = computed$b(
       () => filterRecords(items.value, query.value, onlyMissing.value)
     );
@@ -3474,7 +3558,7 @@ const _hoisted_22$2 = {
   key: 3,
   class: "avh-downloads__hint"
 };
-const {computed: computed$a,onBeforeUnmount: onBeforeUnmount$7,onMounted: onMounted$6,ref: ref$e,watch: watch$8} = await importShared('vue');
+const {computed: computed$a,onBeforeUnmount: onBeforeUnmount$7,onMounted: onMounted$6,ref: ref$d,watch: watch$8} = await importShared('vue');
 const POLL_MS$1 = 5e3;
 const _sfc_main$e = /* @__PURE__ */ _defineComponent$e({
   __name: "DownloadsView",
@@ -3491,8 +3575,8 @@ const _sfc_main$e = /* @__PURE__ */ _defineComponent$e({
       { key: "active", name: "下载中" },
       { key: "history", name: "下载历史" }
     ];
-    const tab = ref$e("active");
-    const historyMounted = ref$e(false);
+    const tab = ref$d("active");
+    const historyMounted = ref$d(false);
     function pickTab(key) {
       tab.value = key;
       if (key === "history") historyMounted.value = true;
@@ -3959,7 +4043,7 @@ const _hoisted_6$8 = {
   key: 6,
   class: "avh-library__grid"
 };
-const {computed: computed$9,onBeforeUnmount: onBeforeUnmount$6,ref: ref$d,watch: watch$7} = await importShared('vue');
+const {computed: computed$9,onBeforeUnmount: onBeforeUnmount$6,ref: ref$c,watch: watch$7} = await importShared('vue');
 const ENDPOINT = "plugin/library";
 const _sfc_main$c = /* @__PURE__ */ _defineComponent$c({
   __name: "LibraryView",
@@ -3973,13 +4057,13 @@ const _sfc_main$c = /* @__PURE__ */ _defineComponent$c({
     const props = __props;
     const emit = __emit;
     const t = hostToast(props.toast);
-    const items = ref$d([]);
-    const total = ref$d(0);
-    const libraryReady = ref$d(true);
-    const loading = ref$d(false);
-    const error = ref$d("");
-    const loaded = ref$d(false);
-    const query = ref$d("");
+    const items = ref$c([]);
+    const total = ref$c(0);
+    const libraryReady = ref$c(true);
+    const loading = ref$c(false);
+    const error = ref$c("");
+    const loaded = ref$c(false);
+    const query = ref$c("");
     const rows = computed$9(() => {
       const keyword = String(query.value || "").trim().toLowerCase();
       if (!keyword) return items.value;
@@ -4123,7 +4207,7 @@ const {createElementVNode:_createElementVNode$b,createTextVNode:_createTextVNode
 const _hoisted_1$a = { class: "avh-tasks" };
 const _hoisted_2$a = { class: "avh-tasks__toolbar" };
 const _hoisted_3$8 = { class: "avh-tasks__secttl" };
-const {computed: computed$8,onBeforeUnmount: onBeforeUnmount$5,onMounted: onMounted$5,ref: ref$c,watch: watch$6} = await importShared('vue');
+const {computed: computed$8,onBeforeUnmount: onBeforeUnmount$5,onMounted: onMounted$5,ref: ref$b,watch: watch$6} = await importShared('vue');
 const POLL_MS = 5e3;
 const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
   __name: "TasksView",
@@ -4136,7 +4220,7 @@ const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
   setup(__props) {
     const props = __props;
     const t = hostToast(props.toast);
-    const tables = ref$c([]);
+    const tables = ref$b([]);
     const pending = computed$8(() => {
       const all = Array.isArray(props.store.tasks.value) ? props.store.tasks.value : [];
       return all.filter((item) => item.state === "await");
@@ -4161,11 +4245,12 @@ const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
       if (!key) return "hidden";
       return subscribedKeys.value.has(key) ? "done" : "ready";
     }
-    function clearAllPending() {
-      tables.value.forEach((table) => table?.clearPending());
+    function clearRow(taskId, site) {
+      tables.value.forEach((table) => table?.clearRow(taskId, site));
     }
-    function clearSitePending(site) {
-      tables.value.forEach((table) => table?.clearPending(site));
+    function sitePrefix(site) {
+      const clean = String(site || "").trim();
+      return clean ? `${clean} · ` : "";
     }
     async function refreshTasks() {
       const inflight = props.store.refreshTasks(false);
@@ -4173,22 +4258,25 @@ const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
       if (!await inflight) {
         t.warning(`任务读取失败：${props.store.error.value || "请稍后重试"}`);
       }
-      clearAllPending();
     }
     async function onDownload(payload) {
       const res = await props.store.startDownload(payload.taskId, payload.site, payload.force);
+      if (res.kind === "busy") return;
       if (!res.ok) {
-        t.warning(res.message || "下载失败，请稍后重试");
-      } else {
-        t.success("已提交下载");
-        t.info(`${payload.site} · 进度见「下载」页`);
-        void props.store.refreshTasks(false);
+        clearRow(payload.taskId, payload.site);
+        pushBottomToast("warning", `${sitePrefix(payload.site)}下载失败：${res.message || "请稍后重试"}`);
+        return;
       }
-      clearSitePending(payload.site);
+      pushBottomToast("success", `已提交下载：${sitePrefix(payload.site)}进度见「下载」页`);
+      void props.store.refreshTasks(false);
+    }
+    function onDownloadTimeout(payload) {
+      pushBottomToast("warning", `${sitePrefix(payload.site)}下载提交超时：请刷新任务后重试`);
     }
     async function onCancel(payload) {
       const num = pending.value.filter((item) => String(item.id ?? "") === payload.taskId)[0]?.number || "";
       const res = await props.store.cancelTask(payload.taskId);
+      if (res.kind === "busy") return;
       if (!res.ok) {
         t.warning("取消任务失败");
         t.info(res.message || "请稍后重试");
@@ -4197,7 +4285,7 @@ const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
         t.info(`${num ? num + " · " : ""}已从待确认里移除`);
         void props.store.refreshTasks(false);
       }
-      tables.value.forEach((table) => table?.clearCanceling());
+      tables.value.forEach((table) => table?.clearCanceling(payload.taskId));
     }
     async function onSubscribe(payload) {
       const task = pending.value.filter((item) => String(item.id ?? "") === payload.taskId)[0];
@@ -4207,6 +4295,7 @@ const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
         t.info("这条任务缺少番号");
       } else {
         const res = await props.store.subscribeNumber(number, "number", String(task?.actor || ""));
+        if (res.kind === "busy") return;
         if (!res.ok) {
           t.warning("订阅失败");
           t.info(res.message || "请稍后重试");
@@ -4215,7 +4304,7 @@ const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
           t.info(`${number} · 有资源时自动下载`);
         }
       }
-      tables.value.forEach((table) => table?.clearSubscribing());
+      tables.value.forEach((table) => table?.clearSubscribing(payload.taskId));
     }
     watch$6(
       pending,
@@ -4278,6 +4367,7 @@ const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
               "subscribe-state": subscribeStateOf(task),
               cancelable: "",
               onDownload,
+              onTimeout: onDownloadTimeout,
               onCancel,
               onSubscribe
             }, null, 8, ["task", "plugin-id", "subscribe-state"]);
@@ -4291,7 +4381,7 @@ const _sfc_main$b = /* @__PURE__ */ _defineComponent$b({
   }
 });
 
-const TasksView = /* @__PURE__ */ _export_sfc(_sfc_main$b, [["__scopeId", "data-v-f4403cec"]]);
+const TasksView = /* @__PURE__ */ _export_sfc(_sfc_main$b, [["__scopeId", "data-v-3735d1a3"]]);
 
 const {defineComponent:_defineComponent$a} = await importShared('vue');
 
@@ -4312,7 +4402,7 @@ const _hoisted_12$4 = { class: "avh-sub__name" };
 const _hoisted_13$4 = { class: "avh-subs__hint avh-sub__rule" };
 const _hoisted_14$4 = { class: "avh-subs__hint avh-sub__stat" };
 const _hoisted_15$3 = { class: "avh-sub__right" };
-const {computed: computed$7,ref: ref$b} = await importShared('vue');
+const {computed: computed$7,ref: ref$a} = await importShared('vue');
 const ALL = "";
 const _sfc_main$a = /* @__PURE__ */ _defineComponent$a({
   __name: "SubsView",
@@ -4328,7 +4418,7 @@ const _sfc_main$a = /* @__PURE__ */ _defineComponent$a({
     const emit = __emit;
     const t = hostToast(props.toast);
     const confirm = useHostConfirm();
-    const checking = ref$b("");
+    const checking = ref$a("");
     const subs = computed$7(
       () => Array.isArray(props.store.subs.value) ? props.store.subs.value : []
     );
@@ -4624,7 +4714,7 @@ const {defineComponent:_defineComponent$8} = await importShared('vue');
 
 const {createElementVNode:_createElementVNode$8,normalizeClass:_normalizeClass$5,normalizeStyle:_normalizeStyle$2,openBlock:_openBlock$8,createElementBlock:_createElementBlock$8} = await importShared('vue');
 
-const {nextTick: nextTick$3,onBeforeUnmount: onBeforeUnmount$4,onMounted: onMounted$4,ref: ref$a} = await importShared('vue');
+const {nextTick: nextTick$3,onBeforeUnmount: onBeforeUnmount$4,onMounted: onMounted$4,ref: ref$9} = await importShared('vue');
 
 const _sfc_main$8 = /* @__PURE__ */ _defineComponent$8({
   __name: "BackToTop",
@@ -4634,8 +4724,8 @@ const _sfc_main$8 = /* @__PURE__ */ _defineComponent$8({
   },
   setup(__props) {
     const props = __props;
-    const hostEl = ref$a(null);
-    const show = ref$a(false);
+    const hostEl = ref$9(null);
+    const show = ref$9(false);
     let scroller = null;
     let frame = 0;
     function findScroller(start) {
@@ -4814,7 +4904,7 @@ const _hoisted_38$1 = {
   class: "avh-hint"
 };
 const _hoisted_39$1 = { class: "avh-actors avh-actors--pick" };
-const {computed: computed$6,nextTick: nextTick$2,onUnmounted,reactive: reactive$1,ref: ref$9,watch: watch$5} = await importShared('vue');
+const {computed: computed$6,nextTick: nextTick$2,onUnmounted,reactive: reactive$1,ref: ref$8,watch: watch$5} = await importShared('vue');
 const FILM_PAGE = 30;
 const ALL_LIMIT = 50;
 const ALL_MAX_PAGES = 20;
@@ -4848,11 +4938,11 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
         return { ok: false, message: errorText(err) };
       }
     }
-    const rootEl = ref$9(null);
-    const actor = ref$9("");
-    const actorYear = ref$9("");
-    const loadingMore = ref$9(false);
-    const pageRetrying = ref$9(false);
+    const rootEl = ref$8(null);
+    const actor = ref$8("");
+    const actorYear = ref$8("");
+    const loadingMore = ref$8(false);
+    const pageRetrying = ref$8(false);
     const year = computed$6(() => actorYear.value);
     const favs = computed$6(
       () => Array.isArray(props.store.favs.value) ? props.store.favs.value : []
@@ -4882,8 +4972,8 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
     function aliasOf(name) {
       return aliases.value[String(name || "")] || "";
     }
-    const aliasDraft = ref$9(null);
-    const aliasSaving = ref$9(false);
+    const aliasDraft = ref$8(null);
+    const aliasSaving = ref$8(false);
     function openAliasDialog() {
       if (!actor.value) return;
       aliasDraft.value = aliasOf(actor.value);
@@ -5052,10 +5142,10 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
         loadingMore.value = false;
       }
     }
-    const allLoading = ref$9(false);
-    const allStop = ref$9(false);
-    const allPages = ref$9(0);
-    const allCapped = ref$9(false);
+    const allLoading = ref$8(false);
+    const allStop = ref$8(false);
+    const allPages = ref$8(0);
+    const allCapped = ref$8(false);
     const allLabel = computed$6(() => {
       const loaded = movies.value.length;
       const total = totalCount.value;
@@ -5165,7 +5255,7 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
       const avatar = String(entity.value.avatar || "") || actorAvatarOf(name);
       await setFav(name, String(entity.value.zh || ""), avatar, !wasFav);
     }
-    const subscribing = ref$9(false);
+    const subscribing = ref$8(false);
     async function subscribeActor() {
       const name = actor.value;
       if (!name || sub.value || subscribing.value) return;
@@ -5188,7 +5278,7 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
         subscribing.value = false;
       }
     }
-    const checking = ref$9(false);
+    const checking = ref$8(false);
     async function checkActor() {
       const name = actor.value;
       if (!name || checking.value) return;
@@ -5239,12 +5329,12 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
       () => favs.value.forEach((item) => warmImage(favAvatar(item))),
       { immediate: true }
     );
-    const pickerOpen = ref$9(false);
-    const pickerLoading = ref$9(false);
-    const pickerError = ref$9("");
-    const pickerRows = ref$9([]);
-    const pickerAdded = ref$9([]);
-    const addingName = ref$9("");
+    const pickerOpen = ref$8(false);
+    const pickerLoading = ref$8(false);
+    const pickerError = ref$8("");
+    const pickerRows = ref$8([]);
+    const pickerAdded = ref$8([]);
+    const addingName = ref$8("");
     function pickerFaved(name) {
       return pickerAdded.value.indexOf(name) >= 0 || !!findFav(name);
     }
@@ -5729,10 +5819,10 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
 
 const ActorsView = /* @__PURE__ */ _export_sfc(_sfc_main$7, [["__scopeId", "data-v-ca27d06f"]]);
 
-const {reactive,ref: ref$8} = await importShared('vue');
+const {reactive,ref: ref$7} = await importShared('vue');
 const rankCache = reactive(/* @__PURE__ */ new Map());
-const periodState = ref$8("week");
-const kindState = ref$8("censored");
+const periodState = ref$7("week");
+const kindState = ref$7("censored");
 const rankPrefetcher = createDetailPrefetcher(() => hostApi);
 let hostApi = null;
 function prefetchDetail(api, number, id) {
@@ -5772,7 +5862,7 @@ const _hoisted_10$3 = {
   key: 3,
   class: "avh-discover__grid"
 };
-const {computed: computed$5,ref: ref$7,watch: watch$4} = await importShared('vue');
+const {computed: computed$5,ref: ref$6,watch: watch$4} = await importShared('vue');
 const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
   __name: "DiscoverView",
   props: {
@@ -5811,7 +5901,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
     const movies = computed$5(() => entry.value && entry.value.data || []);
     const rankError = computed$5(() => String(entry.value && entry.value.error || ""));
     const inflight = /* @__PURE__ */ new Set();
-    const retrying = ref$7(false);
+    const retrying = ref$6(false);
     async function loadRank(p, k, force) {
       const key = `rank:${p}:${k}`;
       if (!force && rankCache.has(key)) return;
@@ -5981,16 +6071,16 @@ const {createElementVNode:_createElementVNode$5,toDisplayString:_toDisplayString
 
 const _hoisted_1$5 = ["src"];
 const _hoisted_2$5 = { class: "avh-lb__ctr" };
-const {onBeforeUnmount: onBeforeUnmount$3,onMounted: onMounted$3,ref: ref$6} = await importShared('vue');
+const {onBeforeUnmount: onBeforeUnmount$3,onMounted: onMounted$3,ref: ref$5} = await importShared('vue');
 
 const _sfc_main$5 = /* @__PURE__ */ _defineComponent$5({
   __name: "Lightbox",
   emits: ["closed"],
   setup(__props, { expose: __expose, emit: __emit }) {
-    const open = ref$6(false);
-    const list = ref$6([]);
-    const idx = ref$6(0);
-    const failed = ref$6(false);
+    const open = ref$5(false);
+    const list = ref$5([]);
+    const idx = ref$5(0);
+    const failed = ref$5(false);
     const emit = __emit;
     function show(index) {
       idx.value = index;
@@ -6091,54 +6181,6 @@ const _sfc_main$5 = /* @__PURE__ */ _defineComponent$5({
 });
 
 const Lightbox = /* @__PURE__ */ _export_sfc(_sfc_main$5, [["__scopeId", "data-v-174e2165"]]);
-
-const {ref: ref$5} = await importShared('vue');
-
-const BOTTOM_TOAST_MS = 4e3;
-const BOTTOM_TOAST_STAGGER_MS = 320;
-const bottomToasts = ref$5([]);
-let seq = 0;
-const timers = /* @__PURE__ */ new Map();
-function dismissBottomToast(id) {
-  const timer = timers.get(id);
-  if (timer !== void 0) {
-    window.clearTimeout(timer);
-    timers.delete(id);
-  }
-  bottomToasts.value = bottomToasts.value.filter((item) => item.id !== id);
-}
-function pushBottomToast(level, text, timeout = BOTTOM_TOAST_MS) {
-  const clean = String(text ?? "").trim();
-  if (!clean) return 0;
-  seq += 1;
-  const id = seq;
-  bottomToasts.value = [...bottomToasts.value, { id, level, text: clean }].slice(-4);
-  if (timeout > 0) {
-    timers.set(id, window.setTimeout(() => dismissBottomToast(id), timeout));
-  }
-  return id;
-}
-function normalizeLevel(raw) {
-  const level = String(raw ?? "info");
-  if (level === "success" || level === "warning" || level === "error") return level;
-  return "info";
-}
-function playBottomToasts(raw, timeout = BOTTOM_TOAST_MS) {
-  if (!Array.isArray(raw)) return;
-  raw.forEach((item, index) => {
-    const record = item || {};
-    const level = normalizeLevel(record.level);
-    const text = String(record.text ?? "");
-    if (index === 0) {
-      pushBottomToast(level, text, timeout);
-      return;
-    }
-    window.setTimeout(
-      () => pushBottomToast(level, text, timeout),
-      index * BOTTOM_TOAST_STAGGER_MS
-    );
-  });
-}
 
 const {defineComponent:_defineComponent$4} = await importShared('vue');
 
@@ -7778,8 +7820,8 @@ function usePluginStore(api) {
     });
   }
   function subscribeNumber(name, kind = "number", actor = "", rule2) {
-    return guarded("subscribe", async () => {
-      const target = String(name ?? "").trim();
+    const target = String(name ?? "").trim();
+    return guarded(`subscribe:${kind}:${target}`, async () => {
       if (!target) return { ok: false, kind: "error", message: "订阅参数不完整" };
       const body = { type: kind, name: target };
       if (kind === "number" && actor) body.actor = actor;
@@ -7849,8 +7891,8 @@ function usePluginStore(api) {
     });
   }
   function startDownload(taskId, site, force = false) {
-    return guarded("download", async () => {
-      const id = String(taskId ?? "").trim();
+    const id = String(taskId ?? "").trim();
+    return guarded(`download:${id}|${String(site ?? "")}`, async () => {
       if (!id) return { ok: false, kind: "error", message: "缺少任务 id" };
       const body = { id, site: site || "" };
       if (force) body.force = true;
@@ -7876,8 +7918,8 @@ function usePluginStore(api) {
     });
   }
   function downloadMagnet(hash, name = "", number = "") {
-    return guarded("magnet", async () => {
-      const digest = String(hash ?? "").trim();
+    const digest = String(hash ?? "").trim();
+    return guarded(`magnet:${digest}`, async () => {
       if (!digest) return { ok: false, kind: "error", message: "缺少磁力 Hash" };
       const body = { hash: digest, name: name || "" };
       if (number) body.number = number;
@@ -7898,8 +7940,8 @@ function usePluginStore(api) {
     });
   }
   function cancelTask(taskId) {
-    return guarded("cancel", async () => {
-      const id = String(taskId ?? "").trim();
+    const id = String(taskId ?? "").trim();
+    return guarded(`cancel:${id}`, async () => {
       if (!id) return { ok: false, kind: "error", message: "这条任务缺少 id，无法取消" };
       const outcome = await send("post", "tasks/cancel", { id });
       if (!outcome.ok) return { ok: false, kind: "error", message: outcome.message };

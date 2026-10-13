@@ -24,6 +24,7 @@ import CandTable from '../common/CandTable.vue'
 import EmptyState from '../common/EmptyState.vue'
 import ErrorState from '../common/ErrorState.vue'
 import { queueThumb } from '../common/common'
+import { pushBottomToast } from '../../composables/bottomToast'
 import { hostToast, type PluginApi } from '../../composables/usePluginApi'
 import { requestSettingsSection } from '../../composables/settingsJump'
 import { nowStr } from '../../composables/storeTypes'
@@ -109,15 +110,15 @@ const searchLabel = computed(() => (searching.value ? '搜索中…' : '搜索�
 
 /** 计数不等于 0 时先解挂行内 loading，再换表（老实现是整块 innerHTML 重建）。 */
 watch(task, async () => {
-  candTableRef.value?.clearPending()
+  candTableRef.value?.clearAllPending()
   await nextTick()
-  candTableRef.value?.clearPending()
+  candTableRef.value?.clearAllPending()
 })
 
-/** 把可能残留的行内 loading 清掉（失败/结束时也要清，否则按钮永远转圈）。 */
+/** 整表解锁：整块结果都要换新时才用（重搜 / 结果被替换）。 */
 function clearPending(): void {
-  candTableRef.value?.clearPending()
-  void nextTick(() => candTableRef.value?.clearPending())
+  candTableRef.value?.clearAllPending()
+  void nextTick(() => candTableRef.value?.clearAllPending())
 }
 
 /** 搜索（老 `doSiteSearch()`）：空关键词只提示、不发请求。 */
@@ -175,18 +176,30 @@ async function retry(): Promise<void> {
   }
 }
 
-/** 行内「下载 / 仍要下载」：老 `bindDownloadButtons` → `startDownload(id, site, btn, force)`。 */
+/**
+ * 行内「下载 / 仍要下载」：老 `bindDownloadButtons` → `startDownload(id, site, btn, force)`。
+ *
+ * 与任务页的唯一差别：这张卡片本身就是"搜索结果"，下完**不会消失**，所以成功时也要把
+ * 那一行的转圈解下来（否则那一行会一直转到卡片被换掉）。转圈仍然只由**这一行**的结论结束：
+ * 别的行完成、重搜之外的任何动作都不碰它。
+ */
 async function onDownload(payload: { taskId: string; site: string; force: boolean }): Promise<void> {
   const res = await props.store.startDownload(payload.taskId, payload.site, payload.force)
+  // 同一行重复触发被 store 合并（正常点不出来）：静默，别动在飞那一次的转圈。
+  if (res.kind === 'busy') return
+  const site = String(payload.site || '').trim()
+  clearRow(payload.taskId, payload.site)
   if (!res.ok) {
-    t.warning(res.message || '下载失败，请稍后重试')
-  } else {
-    t.success('已提交下载')
-    t.info(`${payload.site} · 进度见「下载」页`)
-    void props.store.refreshTasks(false)
+    pushBottomToast('warning', `${site ? site + ' · ' : ''}下载失败：${res.message || '请稍后重试'}`)
+    return
   }
-  // 成功失败都要解锁，否则那一行的按钮永远转圈。
-  clearPending()
+  pushBottomToast('success', `已提交下载：${site ? site + ' · ' : ''}进度见「下载」页`)
+  void props.store.refreshTasks(false)
+}
+
+/** 只解这一行（`任务id|站点`），同站点的别的行不受影响。 */
+function clearRow(taskId: string, site: string): void {
+  candTableRef.value?.clearRow(taskId, site)
 }
 
 /** 「改范围」：本视图不改规则，去设置台改（先告诉用户去哪儿改，避免"点了没反应"）。 */

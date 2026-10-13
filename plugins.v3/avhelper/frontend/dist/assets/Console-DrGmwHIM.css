@@ -153,14 +153,14 @@
 }
 
 /* 对齐老 `.q`（调用方内联 `padding:0;overflow:hidden`） */
-.avh-cand[data-v-bb4356f9] {
+.avh-cand[data-v-291287ca] {
   overflow: hidden;
   margin-bottom: 10px;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
   border-radius: 10px;
   background: rgb(var(--v-theme-surface));
 }
-.avh-cand__head[data-v-bb4356f9] {
+.avh-cand__head[data-v-291287ca] {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -170,26 +170,26 @@
 }
 
 /* `.tposter`：48×64 小封面 */
-.avh-cand__poster[data-v-bb4356f9] {
+.avh-cand__poster[data-v-291287ca] {
   width: 48px;
   height: 64px;
   flex: none;
   border-radius: 6px;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
 }
-.avh-cand__no[data-v-bb4356f9] {
+.avh-cand__no[data-v-291287ca] {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.2px;
 }
-.avh-cand__hint[data-v-bb4356f9] {
+.avh-cand__hint[data-v-291287ca] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-cand__origin[data-v-bb4356f9] {
+.avh-cand__origin[data-v-291287ca] {
   margin-top: 3px;
 }
-.avh-cand__spacer[data-v-bb4356f9] {
+.avh-cand__spacer[data-v-291287ca] {
   flex: 1;
 }
 
@@ -199,7 +199,7 @@
  * 卡片 `.avh-cand{overflow:hidden}` 不会再裁掉右半张表——这是本次要修的真实缺陷。
  * 代价：所有单元格必须自己 `overflow:hidden` + 省略号，否则内容会溢到相邻列上。
  */
-.avh-cand__table[data-v-bb4356f9] {
+.avh-cand__table[data-v-291287ca] {
   table-layout: fixed;
   width: 100%;
   border-collapse: collapse;
@@ -213,43 +213,43 @@
    基准值决定；窄屏时反向等比收缩，且因为布局是 fixed，**永远不会把「操作」列挤出卡片**。
    （曾经把「标记」列写成 `auto`：宽屏下它一个人吃掉 632px，中间空出一大片，
    改为全列显式后同一行里最宽的一列是 287px。） */
-.avh-cand__col-site[data-v-bb4356f9] {
+.avh-cand__col-site[data-v-291287ca] {
   width: 96px;
 }
-.avh-cand__col-mark[data-v-bb4356f9] {
+.avh-cand__col-mark[data-v-291287ca] {
   width: 180px;
 }
-.avh-cand__col-spec[data-v-bb4356f9] {
+.avh-cand__col-spec[data-v-291287ca] {
   width: 120px;
 }
-.avh-cand__col-size[data-v-bb4356f9] {
+.avh-cand__col-size[data-v-291287ca] {
   width: 88px;
 }
-.avh-cand__col-seed[data-v-bb4356f9] {
+.avh-cand__col-seed[data-v-291287ca] {
   width: 72px;
 }
-.avh-cand__col-score[data-v-bb4356f9] {
+.avh-cand__col-score[data-v-291287ca] {
   width: 80px;
 }
-.avh-cand__col-act[data-v-bb4356f9] {
+.avh-cand__col-act[data-v-291287ca] {
   width: 92px;
 }
 
 /* 单元格截断：fixed 布局下不给省略号就会溢到邻列 */
-.avh-cand__table th[data-v-bb4356f9],
-.avh-cand__table td[data-v-bb4356f9] {
+.avh-cand__table th[data-v-291287ca],
+.avh-cand__table td[data-v-291287ca] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.avh-cand__table th[data-v-bb4356f9] {
+.avh-cand__table th[data-v-291287ca] {
   padding: 8px;
   text-align: left;
   font-weight: 500;
   color: rgba(var(--v-theme-on-surface), 0.5);
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.12);
 }
-.avh-cand__table td[data-v-bb4356f9] {
+.avh-cand__table td[data-v-291287ca] {
   /* 定高（约一行文字 + 上下 9px）配合上面的 overflow:hidden，给行高一个上限，
      内容按单行省略号处理而不是把行撑高 */
   height: 38px;
@@ -259,57 +259,57 @@
 }
 
 /* 「操作」列：右对齐 + 按钮不换行，保证按钮完整贴右边界显示 */
-.avh-cand__table th.avh-cand__act[data-v-bb4356f9],
-.avh-cand__table td.avh-cand__act[data-v-bb4356f9] {
+.avh-cand__table th.avh-cand__act[data-v-291287ca],
+.avh-cand__table td.avh-cand__act[data-v-291287ca] {
   text-align: right;
 }
-.avh-cand__table td.avh-cand__act[data-v-bb4356f9] {
+.avh-cand__table td.avh-cand__act[data-v-291287ca] {
   white-space: nowrap;
 }
 
 /* 「标记」列：标签排列不换行（宽度靠 auto 列吸收，标签少也不会撑宽表格） */
-.avh-cand__marks[data-v-bb4356f9] {
+.avh-cand__marks[data-v-291287ca] {
   white-space: nowrap;
 }
 
 /* 「规格」列：信息密度低，视觉弱化一档，长串走省略号（全文看 `title`） */
-.avh-cand__spec[data-v-bb4356f9] {
+.avh-cand__spec[data-v-291287ca] {
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
 
 /* 行语义：best 绿底、dead 淡化、bt 深一档（老 `tr.best/tr.dead/tr.bt`） */
-.avh-cand__table tr.best td[data-v-bb4356f9] {
+.avh-cand__table tr.best td[data-v-291287ca] {
   background: rgba(var(--v-theme-success), 0.14);
 }
-.avh-cand__table tr.dead td[data-v-bb4356f9] {
+.avh-cand__table tr.dead td[data-v-291287ca] {
   opacity: 0.42;
 }
-.avh-cand__table tr.bt td[data-v-bb4356f9] {
+.avh-cand__table tr.bt td[data-v-291287ca] {
   background: rgba(var(--v-theme-on-surface), 0.05);
 }
-.avh-cand__table tr.has-sub td[data-v-bb4356f9] {
+.avh-cand__table tr.has-sub td[data-v-291287ca] {
   border-bottom: 0;
 }
-.avh-cand__sub td[data-v-bb4356f9] {
+.avh-cand__sub td[data-v-291287ca] {
   /* 种子原名整行横跨 7 列：左右内边距与数据单元格统一取 8px（本次从 10px 收紧） */
   padding: 0 8px 9px;
 }
-.avh-cand__ttl[data-v-bb4356f9] {
+.avh-cand__ttl[data-v-291287ca] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 11.5px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-cand__btnote[data-v-bb4356f9] {
+.avh-cand__btnote[data-v-291287ca] {
   padding: 6px 10px;
 }
-.avh-cand__empty[data-v-bb4356f9] {
+.avh-cand__empty[data-v-291287ca] {
   padding: 10px;
 }
 
 /* `.tag` 系列（老 `app.css` 同名规则；底色走主题语义色） */
-.avh-tag[data-v-bb4356f9] {
+.avh-tag[data-v-291287ca] {
   display: inline-block;
   margin-right: 4px;
   padding: 1px 6px;
@@ -318,42 +318,42 @@
   border: 1px solid rgba(var(--v-theme-on-surface), 0.16);
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-tag--on[data-v-bb4356f9] {
+.avh-tag--on[data-v-291287ca] {
   border-color: rgba(var(--v-theme-success), 0.45);
   background: rgba(var(--v-theme-success), 0.18);
   color: rgb(var(--v-theme-on-surface));
 }
-.avh-tag--uc[data-v-bb4356f9] {
+.avh-tag--uc[data-v-291287ca] {
   border-color: rgba(var(--v-theme-secondary), 0.5);
   background: rgba(var(--v-theme-secondary), 0.2);
   color: rgb(var(--v-theme-on-surface));
 }
-.avh-tag--free[data-v-bb4356f9] {
+.avh-tag--free[data-v-291287ca] {
   border-color: rgba(var(--v-theme-warning), 0.5);
   background: rgba(var(--v-theme-warning), 0.18);
   color: rgb(var(--v-theme-on-surface));
 }
-.avh-tag--pref[data-v-bb4356f9] {
+.avh-tag--pref[data-v-291287ca] {
   border-color: rgba(var(--v-theme-primary), 0.5);
   background: rgba(var(--v-theme-primary), 0.22);
   color: rgb(var(--v-theme-on-surface));
 }
 
 /* `.score` 档位色（hi=成功、mid=警告、lo=中性） */
-.avh-score[data-v-bb4356f9] {
+.avh-score[data-v-291287ca] {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-.avh-score--hi[data-v-bb4356f9] {
+.avh-score--hi[data-v-291287ca] {
   color: rgb(var(--v-theme-success));
 }
-.avh-score--mid[data-v-bb4356f9] {
+.avh-score--mid[data-v-291287ca] {
   color: rgb(var(--v-theme-warning));
 }
-.avh-score--lo[data-v-bb4356f9] {
+.avh-score--lo[data-v-291287ca] {
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-cand__dl[data-v-bb4356f9] {
+.avh-cand__dl[data-v-291287ca] {
   white-space: nowrap;
 }
 
@@ -392,38 +392,38 @@
   margin-top: 12px;
 }
 
-.avh-sitesearch__toolbar[data-v-bf4e56fe] {
+.avh-sitesearch__toolbar[data-v-1636ca0e] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 12px;
 }
-.avh-sitesearch__input[data-v-bf4e56fe] {
+.avh-sitesearch__input[data-v-1636ca0e] {
   min-width: 280px;
   flex: 0 1 360px;
 }
-.avh-sitesearch__spacer[data-v-bf4e56fe] {
+.avh-sitesearch__spacer[data-v-1636ca0e] {
   flex: 1;
 }
-.avh-sitesearch__hint[data-v-bf4e56fe] {
+.avh-sitesearch__hint[data-v-1636ca0e] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
 
 /* 老实现是 `.fld > label + .chips`；这里只回显一行文本（站点不平铺成可点 chips）。 */
-.avh-sitesearch__range[data-v-bf4e56fe] {
+.avh-sitesearch__range[data-v-1636ca0e] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 14px;
 }
-.avh-sitesearch__label[data-v-bf4e56fe] {
+.avh-sitesearch__label[data-v-1636ca0e] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-sitesearch__scope[data-v-bf4e56fe] {
+.avh-sitesearch__scope[data-v-1636ca0e] {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -929,23 +929,23 @@
 }
 
 /* 对齐 `app.css` 的 `.toolbar` / `.hint` / `.spacer` */
-.avh-tasks__toolbar[data-v-f4403cec] {
+.avh-tasks__toolbar[data-v-3735d1a3] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 14px;
 }
-.avh-tasks__hint[data-v-f4403cec] {
+.avh-tasks__hint[data-v-3735d1a3] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-tasks__spacer[data-v-f4403cec] {
+.avh-tasks__spacer[data-v-3735d1a3] {
   flex: 1;
 }
 
 /* 对齐 `.secttl`：12px、弱化色、字距 .4px（`margin-top` 与工具条的 margin-bottom 相叠） */
-.avh-tasks__secttl[data-v-f4403cec] {
+.avh-tasks__secttl[data-v-3735d1a3] {
   margin: 20px 0 8px;
   font-size: 12px;
   letter-spacing: 0.4px;
