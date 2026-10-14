@@ -21,17 +21,14 @@
  * | `queueMissingThumbs(S.queue)`（每轮最多 3 个、补过的番号不再排队） | 同（`common.queueMissingThumbs`），队列每次变化补一轮 |
  * | 轮询：`startTaskPolling()` 每 5 秒 `loadTasks(false)`，靠 `S.view` 是 tasks 或 downloads 判断"只在任务/下载页" | 本视图挂载且 `document.visibilityState === 'visible'` 时每 5 秒 `store.refreshTasks(true)`；**卸载或不可见即停**（不会在别的栏目里偷偷轮询） |
  *
- * **按 `state` 拆两节（下载历史契约 §5.3，本轮新增，用户诉求①）**：
- * 「已完成下载不再显示进度，直接当历史停住」——所以队列拆成「下载中」（`state !== 'done'`，
- * 照旧进度/百分比/封面）与「已完成」（`state === 'done'`：番号/标题/大小/完成时间/库状态，
- * **没有进度条、没有任何"进行中"交互**，就是一条静态历史行）。
+ * **按 `state` 拆节（下载历史契约 §5.3）**：
+ * 队列只剩两类要画的 —— 「下载中」（`state !== 'done' && state !== 'failed'`：封面/进度/百分比）
+ * 与「下载失败」（`state === 'failed'`：红色徽标 + 失败原因，没有进度条）。
  *
- * 为什么「已完成」这一节通常**是空的**：契约 §3 起，条目一旦变成 `done`，后端就把它写进下载台账
- * 并**从队列里删掉**（历史归台账，队列只留下载中）。留着这一节是为了兼容两种过渡情形 ——
- * ① 升级前留下的旧快照里那些 `done` 条目（后端删得掉队列，删不掉已经取到的快照）；
- * ② 轮询间隙：下载器刚报完成、后端这一轮还没清掉的那几秒。
- * 完成清单的权威位置是同一栏的「下载历史」页签，所以小节标题右侧写了那句指路。
- * 真机 2026-10-11 探针：队列 19 条里 17 条是 `done`（旧快照），这一节眼下反而是满的。
+ * **2026-10-15 起「已完成」整节删除**（用户明确要求）：条目一变 `done` 后端就把它写进台账
+ * 并**从队列摘掉**，所以那一节按设计就该是空的；以前留着它只为兼容旧快照与刷新间隙，
+ * 结果是一屏里同一件事说两遍（页签 + 小节标题 + 一节永远为空的列表）。完成清单的权威位置
+ * 就是同一栏的「下载历史」页签。
  *
  * **2026-10-12 起本栏分两个页签（用户要求的"下载历史与下载界面融合"）**：
  * 「下载中」= 上面这套（队列 + 旧快照的完成节），「下载历史」= 原第七栏 `HistoryView`
@@ -121,25 +118,22 @@ const rows = computed<QueueItem[]>(() =>
 )
 
 /**
- * 完成行比队列项多出来的**可选**字段（契约 §5.3 要求「已完成」列出 标题/完成时间/库状态）。
+ * 队列项之外**可选读**的字段（后端 `_film_extra()` / `_merge_queue()` 什么时候给了就能用）。
  *
- * 为什么要单独声明：契约 §4 的台账条目（`GET /downloads`）才有 `title` / `completedAt` / `lib`，
- * 而真机实测（2026-10-11 探针：队列 19 条、17 条 `done`）队列条目的**全部键**只有
- * `id/number/thumb/site/spec/size/hash/downloader/category/savePath/state/progress/added`。
- * 所以这里按可选读：后端哪天把台账字段并进旧队列行（或直接给队列项带上），界面自动就能显示；
- * 拿不到就退回 `added`／留空，**绝不编造**「不在库」这种结论（那是台账 + Emby 实时命中的口径）。
+ * 队列条目的必给键只有
+ * `id/number/thumb/site/spec/size/hash/downloader/category/savePath/state/progress/added`；
+ * 所以这里一律按可选读：拿不到就**不画那一行**，绝不编造结论（例如"不在库"）。
+ *
+ * 「已完成」那一节 2026-10-15 已按用户要求整节删除（条目一变 `done` 就被后端写进台账并摘队列，
+ * 留着只是同一件事在两处说），所以这个类型现在只服务**失败行**。
  */
-type DoneRow = QueueItem & {
-  /** 片名（台账口径）。 */
+type RowExtra = QueueItem & {
+  /** 片名（台账/投影口径；队列行目前拿不到，有才画）。 */
   title?: string
-  /** 完成时间（台账的 `completed_at`；旧队列快照没有）。 */
-  completedAt?: string
-  /** 实时 Emby 命中（`null` = 不在库），与契约 §4 的 `lib` 同名同形。 */
-  lib?: { id?: string; name?: string; path?: string; url?: string } | null
-  /** 失败原因（v4.1 §9.2-1：`state === 'failed'` 时后端记的那个字段）。 */
+  /** 失败原因（`state === 'failed'` 时后端记的那个字段）。 */
   failed_reason?: string
   failedReason?: string
-  /** 版本角标数据（v4.1 §9.2-6；老后端没有这两个字段时什么都不画）。 */
+  /** 版本角标数据（后端没有这两个字段时什么都不画）。 */
   version_tags?: unknown
   versionTags?: unknown
   badge?: string
@@ -168,13 +162,10 @@ const activeRows = computed<QueueItem[]>(() =>
 )
 
 /** 「失败」：`state === 'failed'`，红色徽标 + 悬浮/正文给出 `failed_reason`。 */
-const failedRows = computed<DoneRow[]>(() => rows.value.filter(item => isFailed(item)) as DoneRow[])
-
-/** 「已完成」：`state === 'done'` —— 静态历史行，没有进度条与一切"进行中"交互（契约 §5.3）。 */
-const doneRows = computed<DoneRow[]>(() => rows.value.filter(item => isDone(item)) as DoneRow[])
+const failedRows = computed<RowExtra[]>(() => rows.value.filter(item => isFailed(item)) as RowExtra[])
 
 /** 失败原因（两种写法都认；都没有就写「原因未知」，不编造）。 */
-function failReasonOf(item: DoneRow): string {
+function failReasonOf(item: RowExtra): string {
   return String(item.failed_reason || item.failedReason || '').trim() || '原因未知'
 }
 
@@ -229,23 +220,6 @@ function metaOf(item: QueueItem): string {
 /** 保存路径 ＋（有 `added` 时）` · 加入时间`；老实现无条件渲染这一行，空串也占位。 */
 function pathOf(item: QueueItem): string {
   return String(item.savePath || '') + (item.added ? ` · ${item.added}` : '')
-}
-
-/**
- * 完成行的「大小 · 完成时间 · 库状态」一行（契约 §5.3 的列）。
- *
- * 三个字段都按"拿得到才画"处理：
- * - 完成时间：台账的 `completedAt` 优先；旧队列快照只有 `added`（提交下载那一刻），
- *   就照实写「加入 …」而不是硬写成"完成"（两种情形差着整段下载时间，别骗用户）；
- * - 库状态：`lib` 键存在才画（`null` = 不在库）；键都没有就整段不出现 —— 凭一个拿不到的字段
- *   写「不在库」是编造，也会让用户以为台账在说这部片已经没了。
- */
-function doneInfoOf(item: DoneRow): string {
-  const completed = String(item.completedAt || '')
-  const added = String(item.added || '')
-  const when = completed ? `完成 ${completed}` : added ? `加入 ${added}` : ''
-  const lib = 'lib' in item ? (item.lib ? '在库' : '不在库') : ''
-  return [item.size, when, lib].filter(Boolean).join(' · ') || '—'
 }
 
 /** 行 key：老实现按数组顺序画、没有 key 概念；这里优先用队列里唯一的 hash / id。 */
@@ -355,12 +329,9 @@ onBeforeUnmount(() => {
       </div>
 
       <!--
-        那句"进度取自下载器"只对「下载中」成立：看历史时**整句不画**。
-        历史页签自己有同一口径的说明（`HistoryView` 的工具条那句），外面再来一句一模一样的
-        就是同一句话在一屏里说两遍 —— 真机上看着就像出了 bug（0.5.0 真机验收发现）。
+        顶部**不画任何说明句**（用户 2026-10-15 明确要求）：「进度取自下载器，每 5 秒自动刷新」
+        这类话既不专业也占位置，工具条只留"数据 + 操作"。同理历史页与库页的那两句也一并删了。
       -->
-      <span v-if="tab === 'active'" class="avh-downloads__hint">进度取自下载器，每 5 秒自动刷新</span>
-
       <div class="avh-downloads__spacer" />
 
       <v-btn v-if="tab === 'active'" variant="outlined" size="small" @click="refreshQueue">↻ 刷新进度</v-btn>
@@ -371,9 +342,10 @@ onBeforeUnmount(() => {
     -->
     <template v-if="tab === 'active'">
       <template v-if="rows.length">
-        <!-- ===== 下载中：老实现的全套（封面 / 元信息 / 路径 / 百分比 / 进度条） ===== -->
-        <div class="avh-downloads__secttl">下载中（{{ activeRows.length }}）</div>
-
+        <!--
+          「下载中」直接开画，**不再画小节标题**（用户 2026-10-15）：
+          页签那颗胶囊里已经有 `下载中（N）`，下面再来一行"下载中（N）"是同一屏同一份计数说两遍。
+        -->
         <template v-if="activeRows.length">
           <div
             v-for="(item, index) in activeRows"
@@ -449,55 +421,14 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </template>
-
-        <!--
-          ===== 已完成：静态历史行（契约 §5.3）=====
-          没有进度条、没有百分比、没有状态文案、没有任何"进行中"交互 —— 用户的诉求就是
-          「已完成下载不再显示进度，直接当历史停住」。这一节通常为空：契约 §3 起，条目一变 `done`
-          就被后端写进下载台账并从队列里删掉；留着它只为兼容旧快照与轮询间隙（见文件头注释）。
-        -->
-        <div class="avh-downloads__secttl">
-          <span>已完成（{{ doneRows.length }}）</span>
-          <span class="avh-downloads__secttl-note">完整清单见本页「下载历史」</span>
-        </div>
-
-        <template v-if="doneRows.length">
-          <div
-            v-for="(item, index) in doneRows"
-            :key="rowKey(item, index)"
-            class="avh-q avh-q--done"
-            :class="{ 'avh-q--vtag': hasBadge(item) }"
-          >
-            <span v-if="hasBadge(item)" class="avh-vbadge">{{ versionBadgeOf(item) }}</span>
-            <div class="avh-q__hd">
-              <Thumb
-                class="avh-q__poster"
-                variant="tposter"
-                :src="thumbOf(item)"
-                alt="无图"
-                :plugin-id="pluginId"
-              />
-              <div class="avh-q__main">
-                <div class="avh-q__no">{{ item.number || '' }}</div>
-                <!-- 标题是台账口径的可选字段（真机队列暂不携带），有才画这一行 -->
-                <div v-if="item.title" class="avh-q__ttl">{{ item.title }}</div>
-                <div class="avh-q__hint avh-q__meta">{{ doneInfoOf(item) }}</div>
-              </div>
-            </div>
-          </div>
-        </template>
-        <div v-else class="avh-downloads__hint">
-          暂无已完成条目<br>完成的下载会记入「下载历史」，这里只在旧快照与刷新间隙里短暂出现
-        </div>
       </template>
 
       <!--
-        队列整体为空时的空态：老实现那两句逐字保留，**末尾补一句指路**（0.3.4 加，2026-10-12
-        改成指向本页页签）。为什么必须补：完成条目现在会被后端写进台账并**从队列摘掉**
-        （设计文档 §3），于是「没有任何下载在进行」时这一页永远是空的 —— 不告诉用户
-        「完成的在下载历史里」，那个页签就等于藏起来了。
+        队列整体为空时的空态：**只留指路**（2026-10-15 精简）。
+        完成条目会被后端写进台账并**从队列摘掉**，所以"没有任何下载在进行"时这一页永远是空的
+        —— 不告诉用户"完成的在下载历史里"，那个页签就等于藏起来了，所以第三句保留。
       -->
-      <EmptyState v-else text="下载队列为空<br>在「任务」页挑好候选点「下载」，进度在这里看<br>完成的下载在「下载历史」页签，删了文件也还在" />
+      <EmptyState v-else text="下载队列为空<br>在「任务」页挑好候选点「下载」，进度在这里看<br>完成的下载在「下载历史」页签" />
     </template>
 
     <!--
@@ -663,13 +594,6 @@ onBeforeUnmount(() => {
   font-size: 12.5px;
   line-height: 1.5;
   color: rgba(var(--v-theme-on-surface), 0.7);
-}
-
-/*
- * 完成行没有进度条，`.avh-q__hd` 那 8px 的"给进度条留的"下边距就变成了行尾的空档，收掉。
- */
-.avh-q--done .avh-q__hd {
-  margin-bottom: 0;
 }
 
 /* 对齐 `.qhd .right` */

@@ -266,10 +266,8 @@ onMounted(() => {
 
 <template>
   <div class="avh-history">
-    <!-- 工具条：一句说明 + 搜索 + 只看不在库 + 刷新（设计文档 §5.1 的四件套） -->
+    <!-- 工具条：**不画说明句**（用户 2026-10-15 要求），只留搜索 + 只看不在库 + 刷新 -->
     <div class="avh-history__toolbar">
-      <span class="avh-history__hint">插件下载过的番号都在这里，文件删了也留着记录</span>
-
       <div class="avh-history__spacer" />
 
       <v-text-field
