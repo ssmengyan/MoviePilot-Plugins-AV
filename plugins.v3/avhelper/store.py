@@ -123,7 +123,8 @@ CREATE TABLE IF NOT EXISTS meta(
     retry_count INTEGER DEFAULT 0,
     next_retry_at TEXT DEFAULT '',
     last_scraped_at TEXT DEFAULT '',
-    updated_at TEXT DEFAULT ''
+    updated_at TEXT DEFAULT '',
+    field_sources_json TEXT DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS media_item(
@@ -287,7 +288,7 @@ _META_COLUMNS = (
     "translation_status", "actors_json", "tags_json", "studio", "series", "director",
     "release_date", "runtime_min", "rating", "cover_raw_url", "samples_json",
     "trailer_url", "raw_json", "completeness", "retry_count", "next_retry_at",
-    "last_scraped_at", "updated_at",
+    "last_scraped_at", "updated_at", "field_sources_json",
 )
 # 可写字段：主键与 updated_at 不能从外面传（updated_at 由 meta_upsert 自己写）
 _META_FIELDS = frozenset(_META_COLUMNS) - {"key", "updated_at"}
@@ -297,11 +298,19 @@ _META_DEFAULTS: Dict[str, Any] = {
     "studio": "", "series": "", "director": "", "release_date": "", "runtime_min": 0, "rating": 0,
     "cover_raw_url": "", "samples_json": "[]", "trailer_url": "", "raw_json": "{}",
     "completeness": "missing_core", "retry_count": 0, "next_retry_at": "", "last_scraped_at": "",
+    "field_sources_json": "{}",
 }
-_META_JSON_FIELDS = {"actors_json": "[]", "tags_json": "[]", "samples_json": "[]", "raw_json": "{}"}
+_META_JSON_FIELDS = {"actors_json": "[]", "tags_json": "[]", "samples_json": "[]", "raw_json": "{}",
+                     "field_sources_json": "{}"}
 _META_INT_FIELDS = frozenset({"runtime_min", "retry_count"})
 _META_FLOAT_FIELDS = frozenset({"rating"})
 _META_SELECT = ", ".join(_META_COLUMNS)
+
+#: `meta` 的后加列（老库走 ALTER 补；**追加在最后**，与新库 DDL 的顺序一致）。
+#: 0.8.0 / P0-1 加的 `field_sources_json` = 逐字段溯源（`{"plot_zh": "javtxt", …}`）。
+_META_ADD_COLUMNS = (
+    ("field_sources_json", "TEXT DEFAULT '{}'"),
+)
 
 _ITEM_COLUMNS = (
     "item_key", "key", "display_number", "emby_id", "file_path", "version_tags_json",
@@ -478,6 +487,8 @@ def _meta_row(row: Any) -> Dict[str, Any]:
     out["tags"] = _json_load(out.get("tags_json"), [])
     out["samples"] = _json_load(out.get("samples_json"), [])
     out["raw"] = _json_load(out.get("raw_json"), {})
+    # P0-1 溯源：另给解析副本 `field_sources`（`{"plot_zh": "javtxt", …}`）
+    out["field_sources"] = _json_load(out.get("field_sources_json"), {})
     return out
 
 
@@ -729,6 +740,15 @@ class Store:
                 continue
             try:
                 conn.execute(f"ALTER TABLE scrape_log ADD COLUMN {name} {decl}")
+            except sqlite3.OperationalError:
+                pass
+        # 兼容旧库：meta 的后加列（0.8.0 的 field_sources_json，见 `_META_ADD_COLUMNS`）。
+        meta_cols = {r[1] for r in conn.execute("PRAGMA table_info(meta)").fetchall()}
+        for name, decl in _META_ADD_COLUMNS:
+            if name in meta_cols:
+                continue
+            try:
+                conn.execute(f"ALTER TABLE meta ADD COLUMN {name} {decl}")
             except sqlite3.OperationalError:
                 pass
 

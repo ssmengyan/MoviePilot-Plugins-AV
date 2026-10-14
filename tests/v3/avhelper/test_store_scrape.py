@@ -189,6 +189,35 @@ class TestSchemaUpgrade:
         store = make_store(store_mod, tmp_path)
         assert {"version_tags", "emby_id", "failed_reason"} <= columns_of(store, "downloads")
 
+    def test_meta_and_scrape_log_v080_columns(self, store_mod, tmp_path):
+        """0.8.0 的两组后加列：`meta.field_sources_json`（P0-1 溯源）与
+        `scrape_log.reason/http_status/run_id`（P0-2 排障）。"""
+        store = make_store(store_mod, tmp_path)
+        assert "field_sources_json" in columns_of(store, "meta")
+        assert {"reason", "http_status", "run_id"} <= columns_of(store, "scrape_log")
+
+    def test_legacy_meta_gets_field_sources_column(self, store_mod, tmp_path):
+        """老库的 `meta` 没有这一列（0.7.x 建的）→ init() 必须补上，且老行不动。
+
+        模拟方式：用当前代码建一份完整库 → `DROP COLUMN` 掉新列 → 重新 init()。
+        比手写一份 0.7.x 的 DDL 更忠实（列清单只在一处维护）。
+        """
+        db = tmp_path / "legacy-meta.db"
+        store = store_mod.Store(db_path=db)
+        store.init()
+        store.meta_upsert("SNOS380", display_number="SNOS-380", title_zh="老中文标题",
+                          field_sources_json={"plot_zh": "javtxt"})
+        with sqlite3.connect(db) as conn:
+            conn.execute("ALTER TABLE meta DROP COLUMN field_sources_json")
+        assert "field_sources_json" not in columns_of(store, "meta")
+
+        again = store_mod.Store(db_path=db)      # 新进程/新版本加载老库
+        again.init()
+        assert "field_sources_json" in columns_of(again, "meta")
+        row = again.meta_get("SNOS380")
+        assert row["title_zh"] == "老中文标题"       # 老行一条不动
+        assert row["field_sources"] == {}            # 补列后是空表（不是 None、不抛）
+
     def test_legacy_db_gets_v4_columns_and_keeps_rows(self, store_mod, tmp_path):
         """老库（没有这三列 / 没有新表）跑一次 init()：补列、建表、老行一条不动。"""
         db = tmp_path / "legacy.db"
@@ -263,6 +292,24 @@ class TestMeta:
         row = store.meta_get("IPZZ912")
         assert row["title_jp"] == "原标题"
         assert "titlejj" not in row
+
+    def test_field_sources_round_trip(self, store_mod, tmp_path):
+        """P0-1 溯源列：给 dict → 落 JSON 串 → 读回来是 dict（`field_sources` 解析副本）。"""
+        store = make_store(store_mod, tmp_path)
+        store.meta_upsert("SNOS380", display_number="SNOS-380",
+                          field_sources_json={"plot_zh": "javtxt", "title_jp": "javdb"})
+        row = store.meta_get("SNOS380")
+        assert row["field_sources"] == {"plot_zh": "javtxt", "title_jp": "javdb"}
+        assert '"plot_zh"' in row["field_sources_json"]              # 原始串也在
+        store.meta_upsert("SNOS380", title_zh="中文标题")             # 没传 → 保住
+        assert store.meta_get("SNOS380")["field_sources"]["plot_zh"] == "javtxt"
+
+    def test_field_sources_bad_json_degrades(self, store_mod, tmp_path):
+        """列里是坏 JSON（手改过库）时读回空表，不抛异常。"""
+        store = make_store(store_mod, tmp_path)
+        store.meta_upsert("SNOS380", display_number="SNOS-380")
+        store._exec("UPDATE meta SET field_sources_json=? WHERE key=?", ("{不是 JSON", "SNOS380"))
+        assert store.meta_get("SNOS380")["field_sources"] == {}
 
     def test_meta_get_missing(self, store_mod, tmp_path):
         store = make_store(store_mod, tmp_path)

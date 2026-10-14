@@ -72,6 +72,7 @@ from app.sdk.logging import logger
 
 from . import emby
 from . import number_classify
+from . import scrape_graph
 
 # 延迟导入：S3 / S4 交付前本模块必须照常工作（降级见模块 docstring）。
 #
@@ -2258,6 +2259,32 @@ def translate_fields(*, display_number: str, title_jp: str, plot_jp: str,
 # 取数层总装：三源合并成一份「目标」（写侧与 preview 共用同一份，保证 diff 不会说谎）
 # ---------------------------------------------------------------------------
 
+#: `metatube_fill()` 填的是**骨架的键名**，这张表把它映射到取数图的字段名（只用于溯源）
+_FILL_TO_FIELD: Dict[str, str] = {
+    "summary_jp": "plot_jp", "maker": "studio", "title_jp": "title_jp",
+    "director": "director", "release_date": "release_date", "cover_url": "cover_url",
+    "thumb_url": "thumb_url", "preview_video_url": "preview_video_url",
+    "javdb_id": "javdb_id", "duration": "duration", "actors": "actors", "tags": "tags",
+}
+
+#: `build_overrides()` 的 **Emby 字段 → 取数图字段**（预览里那行"这条是谁给的"）。
+#: 候选**按取值顺序**给（与 `build_overrides()` 里的 `a or b` 一致），取第一个有来源的。
+#: 未登记的覆盖键回空串 —— **不猜**（将来新增字段时要同步这张表，另有一条单测盯着）。
+_OVERRIDE_SOURCES: Dict[str, Tuple[str, ...]] = {
+    "Name": ("title_zh", "title_jp"),
+    "OriginalTitle": ("title_jp", "origin_title"),
+    "Overview": ("plot_zh", "plot_jp"),
+    "PremiereDate": ("release_date",),
+    "ProductionYear": ("release_date",),
+    "Studios": ("studio",),
+    "SeriesName": ("series",),
+    "GenreItems": ("tags",),
+    "CommunityRating": ("score",),
+    "People": ("actors",),
+    "ProviderIds": ("javdb_id",),
+}
+
+
 def gather(cli: Any, store: Any, key: str, display_number: str, *,
            opts: Optional[Dict[str, Any]] = None, existing: Optional[Dict[str, Any]] = None,
            version_tags: Optional[Dict[str, Any]] = None,
@@ -2277,6 +2304,26 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
     # 排障时用 `store.scrape_log_run(run_id)` 一次取回"当时每个源各发生了什么"。
     # `opts['run_id']` 可注入（单测/工装要固定它）。
     run_id = str(_opt(options, "run_id") or "") or uuid.uuid4().hex[:12]
+    # 取数图（0.8.0 / P0-1）：内容类型 → 站点链 → **每字段一条链**。
+    # 今天三个源、所有类型共用一条链；`field_priority` / `field_blacklist` 是稀疏旋钮
+    # （设置台存 camelCase，由 `__init__.scrape_opts()` 映射成下划线）。
+    shape = number_classify.classify(display_number, version_tags=version_tags)
+    # ⚠️ 走 `_opt()` 而不是 `options.get()`：调用方没给时要能回落到 `DEFAULT_OPTS`
+    #   （`plot_sources` 的默认值就在那儿；直接读 options 会让默认链路整条失效）
+    enabled = scrape_graph.enabled_sources({"sources": _opt(options, "sources"),
+                                            "plot_sources": _opt(options, "plot_sources")})
+    chains = scrape_graph.compile_chain(
+        shape["content_type"],
+        field_priority=_opt(options, "field_priority"),
+        field_blacklist=_opt(options, "field_blacklist"),
+        enabled=enabled,
+    )
+    # 「这个字段最后是谁给的」——**在填值的那一刻打标**（事后按链反推会撒谎：
+    # javtxt 的占位简介要丢弃、MetaTube 只补空、LLM 会覆盖前两者）。
+    field_sources: Dict[str, str] = {}
+
+    def mark(name: str, source: str) -> None:
+        field_sources[name] = source
     warnings: List[str] = []
     sources: Dict[str, Any] = {
         SRC_JAVDB: {"status": "skipped"}, SRC_JAVTXT: {"status": "skipped"},
@@ -2345,11 +2392,23 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
     plot_zh = ""
     translation_status = "untranslated"
     plot_source = ""
+    # javdb 的字段先全部打上"javdb"的标（有值才算），后面谁覆盖就改谁的标
+    for name in scrape_graph.SOURCES["javdb"].provides:
+        if name == "plot_jp":
+            value = plot_jp
+        elif name == "title_jp":
+            value = title_jp
+        elif name == "origin_title":
+            value = origin_jp
+        else:
+            value = skeleton.get(name if name != "studio" else "maker")
+        if value:
+            mark(name, "javdb")
 
     javtxt_meta: Dict[str, Any] = {}
     metatube_meta: Dict[str, Any] = {}
-    plot_sources = [str(s) for s in (_opt(options, "plot_sources") or ())]
-    if "javtxt" in plot_sources:
+    # 启停来自取数图（`opts['sources']`，回落旧的 `plot_sources`）—— 别再自己拼条件
+    if "javtxt" in enabled:
         javtxt = _javtxt_from_cache(row.get("javtxt")) if row else None
         if javtxt is None:
             if cache_only:
@@ -2375,7 +2434,14 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
         if javtxt.get("ok"):
             title_zh = _clean_text(javtxt.get("title_zh"))
             plot_zh = _clean_text(javtxt.get("plot_zh"))
-            plot_jp = _clean_text(javtxt.get("plot_jp")) or plot_jp
+            javtxt_jp = _clean_text(javtxt.get("plot_jp"))
+            plot_jp = javtxt_jp or plot_jp
+            if title_zh:
+                mark("title_zh", "javtxt")
+            if javtxt_jp:
+                mark("plot_jp", "javtxt")
+            if plot_zh:
+                mark("plot_zh", "javtxt")
             if title_zh or plot_zh:
                 # 契约 §4.2 坑 3：Javtxt 的中文是**站点机翻**，状态由「允许机翻兜底」开关决定
                 translation_status = "machine_fallback" if javtxt.get("zh_is_machine") else "done"
@@ -2396,6 +2462,7 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
                                 f"改走翻译链")
                 plot_zh = ""
                 plot_source = ""
+                field_sources.pop("plot_zh", None)          # 溯源也要跟着撤，别留下假来源
         elif javtxt.get("status") == "error":
             # 被拦与"站点挂了/改版了"处置不同：前者要冷却 + 换 UA，后者要修解析器
             if str(javtxt.get("reason") or "") in (REASON_CF_CHALLENGE, REASON_CF_BLOCKED,
@@ -2408,14 +2475,15 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
             warnings.append("Javtxt 无同号结果（站点收录缺口，交 MetaTube 兜底）")
 
     # ★ S0b 的性能纪律：MetaTube search **恒定 ~10 秒**（服务端内部 10s 截止），
-    #   所以「Javtxt 已经拿到简介」时**绝不再打它**。只有两种情况值得这 10 秒：
-    #   ① 还没有中文简介（契约的概述第二顺位）；② javdb 挂了（契约 §5.2：MetaTube 是
-    #   核心骨架字段的第二顺位，仅在 javdb 404 时启用）。
-    need_core = str(sources.get(SRC_JAVDB, {}).get("status") or "") == "error"
+    #   所以「Javtxt 已经拿到简介」时**绝不再打它**。闸门现在写在取数图的源声明里
+    #   （`scrape_graph.SOURCES['metatube'].only_if_missing`），不再是这里的 if：
+    #   缺中文简介、或 javdb 没给标题/封面（`need_core` 的等价物）时才值得那 10 秒。
+    metatube_spec = scrape_graph.SOURCES["metatube"]
+    core = {"plot_zh": plot_zh, "title_jp": title_jp, "cover_url": skeleton.get("cover_url")}
     if cache_only:
         # dry-run 不打 MetaTube：它恒定 ~10 秒且**不缓存**，108 条就是 18 分钟纯等待
         sources[SRC_METATUBE] = {"status": "skipped", "why": "cache_only dry-run"}
-    elif (not plot_zh or need_core) and "metatube" in plot_sources:
+    elif scrape_graph.should_run(metatube_spec, core, enabled=enabled):
         mt = metatube_lookup(options, display_number, store=logs, key=key, run_id=run_id)
         metatube_meta = mt
         sources[SRC_METATUBE] = {
@@ -2435,14 +2503,20 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
                 warnings.append(f"MetaTube 补上了 javdb 没给的字段：{'/'.join(filled)}")
                 title_jp = _clean_text(skeleton.get("title_jp") or title_jp)
                 origin_jp = origin_jp or title_jp
+                for name in filled:                     # 溯源：谁补的就记谁
+                    mapped = _FILL_TO_FIELD.get(name)
+                    if mapped:
+                        mark(mapped, "metatube")
                 # 「只补空」：javtxt 已经给的简介不许被 MetaTube 顶掉
                 if not plot_before:
                     plot_jp = _clean_text(skeleton.get("summary_jp")) or plot_jp
         if mt.get("plot_jp"):
             plot_jp = mt["plot_jp"]
             plot_source = plot_source or "metatube"
+            mark("plot_jp", "metatube")
         if mt.get("title_jp") and not title_jp:
             title_jp = mt["title_jp"]
+            mark("title_jp", "metatube")
         if mt.get("mismatch"):
             warnings.append(f"MetaTube 串号拦截：返回 {mt.get('candidates')} 条候选无一与 "
                             f"{display_number} 同号（该站点查不到时会返回随机结果）")
@@ -2464,9 +2538,11 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
             actors=skeleton.get("actors"), opts=options, store=logs, key=key, run_id=run_id)
         if tr.get("title_zh"):
             title_zh = tr["title_zh"]
+            mark("title_zh", scrape_graph.DERIVED_SOURCE)
         if tr.get("plot_zh"):
             plot_zh = tr["plot_zh"]
             plot_source = plot_source or "llm"
+            mark("plot_zh", scrape_graph.DERIVED_SOURCE)
         if tr.get("called"):
             translation_status = str(tr.get("status") or "untranslated")
             sources[SRC_LLM] = {"status": tr.get("status", ""), "error": tr.get("error", "")}
@@ -2488,7 +2564,7 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
     # javdb 的 `number` 只用来补空，**不许反过来覆盖请求番号** —— 万一站点把我们的请求
     # 解析成了别的条目，覆盖 `display_number` 就会把 B 片的号写到 A 片上（写 `Name` 时尤其危险）。
     display = _clean_text(display_number) or _clean_text(skeleton.get("display_number"))
-    return {
+    result = {
         "key": key,
         "cli": cli,
         "run_id": run_id,
@@ -2523,7 +2599,25 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
         "javdb_raw": cached_javdb or trim_javdb_raw(skeleton),
         "javtxt_meta": javtxt_meta,
         "metatube_meta": metatube_meta if isinstance(metatube_meta, dict) else {},
+        # P0-0 的分类（路由的键）
+        "content_type": shape["content_type"],
+        "mosaic": shape["mosaic"],
     }
+    # P0-1 的溯源：**只在最终真有值时才留来源**（被丢弃/清空的字段不留假来源）
+    result["field_sources"] = {name: source for name, source in field_sources.items()
+                               if result_value(result, name) not in ("", None, [], {})}
+    return result
+
+
+def result_value(result: Dict[str, Any], name: str) -> Any:
+    """取最终值的**同一口径**（`field_sources` 过滤用）：字段可能被写成 int 0（duration），
+    也可能是列表（actors/tags）—— 这里只看"空不空"。"""
+    value = result.get(name)
+    if isinstance(value, (list, dict)):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value if value else ""
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -2671,8 +2765,9 @@ def effective_overrides(overrides: Any) -> Dict[str, Any]:
     return out
 
 
-def field_diff(dto: Optional[Dict[str, Any]], overrides: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """生成 `fields:[{name,current,target,changed}]`（`preview_one` 的字段级 diff）。
+def field_diff(dto: Optional[Dict[str, Any]], overrides: Dict[str, Any],
+               field_sources: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
+    """生成 `fields:[{name,current,target,changed,source}]`（`preview_one` 的字段级 diff）。
 
     顺序固定走 `MATRIX_FIELDS`，**每个矩阵字段都出一行**（哪怕这次跳过它）：
     `target=None` 就是"拿不到、跳过该字段"的可见证据，比只列改动过的字段有用得多。
@@ -2680,9 +2775,22 @@ def field_diff(dto: Optional[Dict[str, Any]], overrides: Dict[str, Any]) -> List
     `changed` 的判据是「**最终会写进去 且 与现值不同**」（`effective_overrides()` + 值比对），
     不是"`target` 非空"—— 后者会把压根不会发的字段也算成改动（0.7.0 试点真机反例：
     `FC2PPV4828968` 只写 `ProviderIds`，却报了 8 个"改动"）。
+
+    `source`（0.8.0 / P0-1）来自 `gather()` 的逐字段溯源：**这个值是谁给的**。
+    查 `_OVERRIDE_SOURCES` 拿候选字段，取第一个有来源的；未登记的字段回空串（不猜）。
     """
     current = dto if isinstance(dto, dict) else {}
     will_write = effective_overrides(overrides)
+    sources = field_sources or {}
+
+    def source_of(name: str) -> str:
+        for key in _OVERRIDE_SOURCES.get(name, ()):
+            if overrides.get(name) is None:
+                break
+            if sources.get(key):
+                return str(sources[key])
+        return ""
+
     out: List[Dict[str, Any]] = []
     for name in MATRIX_FIELDS:
         out.append({
@@ -2691,11 +2799,13 @@ def field_diff(dto: Optional[Dict[str, Any]], overrides: Dict[str, Any]) -> List
             "target": overrides.get(name, None),
             "changed": name in will_write and _differs(current.get(name, None),
                                                        overrides.get(name)),
+            "source": source_of(name),
         })
     for name in sorted(set(overrides) - set(MATRIX_FIELDS)):
         out.append({"name": name, "current": current.get(name),
                     "target": overrides[name],
-                    "changed": name in will_write and _differs(current.get(name), overrides[name])})
+                    "changed": name in will_write and _differs(current.get(name), overrides[name]),
+                    "source": source_of(name)})
     return out
 
 
@@ -3120,6 +3230,9 @@ def _persist(store: Any, target: Dict[str, Any], *, item_key: str, key: str, emb
         "retry_count": retry_count,
         "next_retry_at": next_retry if wrote else "",
         "last_scraped_at": now,
+        # P0-1 溯源落库（`{"plot_zh": "javtxt", "title_jp": "javdb", ...}`）：
+        # 界面要回答"这条简介是谁给的"，排障要回答"这个源到底贡献了什么"
+        "field_sources_json": dict(target.get("field_sources") or {}),
     }
     if store is None:
         return
@@ -3435,7 +3548,10 @@ def preview_one(key: Any, *, store: Any, cli: Any, emby_client: Any = None,
                        "number": entry.get("number") or "",
                        "version_tags": version_labels(entry.get("version_tags"))}
                       for entry in found],
-        "fields": field_diff(dto, overrides),
+        "fields": field_diff(dto, overrides, target.get("field_sources")),
+        # P0-1：逐字段溯源（`{"plot_zh": "javtxt", …}`）—— 与 `fields[].source` 是同一份数据的
+        # 两种颗粒度：前者按我们的字段名，后者按 Emby 字段名
+        "field_sources": dict(target.get("field_sources") or {}),
         # 0.7.4：手动刮削对话框要**如实列出将写入的演员**（0.7.1 起只写女演员，导演不写），
         # 用户能一眼看出"这次会写这几个人"，而不是只看到一个 People 字段名。
         "people": [str(entry.get("Name") or "") for entry in (overrides.get("People") or [])
@@ -4541,6 +4657,8 @@ def film_view(key_or_number: Any, item_key: Any = None, store: Any = None,
         # P0-0 的分类结论（路由的键；`mosaic` 为空串表示判不出来，见 number_classify 的口径）
         "content_type": shape["content_type"],
         "mosaic": shape["mosaic"],
+        # P0-1 逐字段溯源：界面要回答"这条简介/这张封面是谁给的"
+        "field_sources": dict((meta or {}).get("field_sources") or {}),
         "states": {
             "download": download_state,
             "library": picked_view.get("library_state") or "not_in_library",

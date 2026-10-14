@@ -1941,11 +1941,11 @@ const _hoisted_21$5 = {
   key: 0,
   class: "avh-map__sub"
 };
-const _hoisted_22$4 = {
+const _hoisted_22$5 = {
   key: 2,
   class: "text-caption text-medium-emphasis"
 };
-const _hoisted_23$4 = { class: "avh-map__right" };
+const _hoisted_23$5 = { class: "avh-map__right" };
 const _hoisted_24$4 = {
   key: 1,
   class: "text-caption text-medium-emphasis mb-3"
@@ -2487,9 +2487,9 @@ const _sfc_main$q = /* @__PURE__ */ _defineComponent$q({
                         ])
                       ], 10, _hoisted_17$7);
                     }), 128))
-                  ])) : !listError.value ? (_openBlock$q(), _createElementBlock$p("div", _hoisted_22$4, _toDisplayString$p(listLoading.value ? "正在读取…" : "没有匹配的记录（后端还没有返回数据，或查询词没命中）"), 1)) : _createCommentVNode$k("", true)
+                  ])) : !listError.value ? (_openBlock$q(), _createElementBlock$p("div", _hoisted_22$5, _toDisplayString$p(listLoading.value ? "正在读取…" : "没有匹配的记录（后端还没有返回数据，或查询词没命中）"), 1)) : _createCommentVNode$k("", true)
                 ]),
-                _createElementVNode$p("div", _hoisted_23$4, [
+                _createElementVNode$p("div", _hoisted_23$5, [
                   _createVNode$n(_component_v_text_field, {
                     modelValue: draftName.value,
                     "onUpdate:modelValue": _cache[5] || (_cache[5] = ($event) => draftName.value = $event),
@@ -4774,11 +4774,11 @@ const _hoisted_18$5 = {
 const _hoisted_19$5 = { class: "avh-q__hd" };
 const _hoisted_20$5 = { class: "avh-q__main" };
 const _hoisted_21$4 = { class: "avh-q__no" };
-const _hoisted_22$3 = {
+const _hoisted_22$4 = {
   key: 0,
   class: "avh-q__ttl"
 };
-const _hoisted_23$3 = { class: "avh-q__hint avh-q__meta" };
+const _hoisted_23$4 = { class: "avh-q__hint avh-q__meta" };
 const _hoisted_24$3 = ["title"];
 const _hoisted_25$3 = { class: "avh-downloads__secttl" };
 const _hoisted_26$3 = {
@@ -5038,8 +5038,8 @@ const _sfc_main$g = /* @__PURE__ */ _defineComponent$g({
                         _: 1
                       })
                     ]),
-                    item.title ? (_openBlock$g(), _createElementBlock$g("div", _hoisted_22$3, _toDisplayString$f(item.title), 1)) : _createCommentVNode$c("", true),
-                    _createElementVNode$g("div", _hoisted_23$3, _toDisplayString$f(metaOf(item)), 1),
+                    item.title ? (_openBlock$g(), _createElementBlock$g("div", _hoisted_22$4, _toDisplayString$f(item.title), 1)) : _createCommentVNode$c("", true),
+                    _createElementVNode$g("div", _hoisted_23$4, _toDisplayString$f(metaOf(item)), 1),
                     _createElementVNode$g("div", {
                       class: "avh-q__hint avh-q__path",
                       title: failReasonOf(item)
@@ -6246,8 +6246,8 @@ const _hoisted_19$4 = {
 };
 const _hoisted_20$4 = ["onClick"];
 const _hoisted_21$3 = { class: "avh-filmyears__n" };
-const _hoisted_22$2 = { class: "avh-films" };
-const _hoisted_23$2 = ["title", "onClick", "onMouseenter"];
+const _hoisted_22$3 = { class: "avh-films" };
+const _hoisted_23$3 = ["title", "onClick", "onMouseenter"];
 const _hoisted_24$2 = { class: "avh-film__ft" };
 const _hoisted_25$2 = { class: "avh-film__fn" };
 const _hoisted_26$2 = {
@@ -6935,7 +6935,7 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
               }), 128))
             ])) : _createCommentVNode$8("", true),
             list.value.length ? (_openBlock$9(), _createElementBlock$9(_Fragment$8, { key: 1 }, [
-              _createElementVNode$9("div", _hoisted_22$2, [
+              _createElementVNode$9("div", _hoisted_22$3, [
                 (_openBlock$9(true), _createElementBlock$9(_Fragment$8, null, _renderList$8(list.value, (mv, index) => {
                   return _openBlock$9(), _createElementBlock$9("div", {
                     key: filmKey(mv, index),
@@ -6967,7 +6967,7 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
                         mv.lib ? (_openBlock$9(), _createElementBlock$9("span", _hoisted_28$2, "已入库")) : _createCommentVNode$8("", true)
                       ])
                     ])
-                  ], 40, _hoisted_23$2);
+                  ], 40, _hoisted_23$3);
                 }), 128))
               ]),
               hasMore.value ? (_openBlock$9(), _createElementBlock$9("div", _hoisted_29$2, [
@@ -7506,19 +7506,27 @@ const _hoisted_12$4 = {
 };
 const _hoisted_13$4 = { class: "avh-sd__table" };
 const _hoisted_14$4 = ["title"];
-const _hoisted_15$3 = ["title"];
-const _hoisted_16$3 = ["title"];
-const _hoisted_17$3 = { key: 0 };
-const _hoisted_18$3 = {
+const _hoisted_15$3 = {
+  key: 0,
+  class: "avh-sd__src"
+};
+const _hoisted_16$3 = {
   key: 1,
   class: "avh-sd__hint"
 };
-const _hoisted_19$3 = {
+const _hoisted_17$3 = ["title"];
+const _hoisted_18$3 = ["title"];
+const _hoisted_19$3 = { key: 0 };
+const _hoisted_20$3 = {
+  key: 1,
+  class: "avh-sd__hint"
+};
+const _hoisted_21$2 = {
   key: 4,
   class: "avh-sd__more"
 };
-const _hoisted_20$3 = { class: "avh-sd__head" };
-const _hoisted_21$2 = { class: "avh-sd__people" };
+const _hoisted_22$2 = { class: "avh-sd__head" };
+const _hoisted_23$2 = { class: "avh-sd__people" };
 const {computed: computed$6,ref: ref$7} = await importShared('vue');
 const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
   __name: "ScrapeDialog",
@@ -7618,7 +7626,8 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
           current: valueText(item?.current),
           target: valueText(item?.target),
           changed: item?.changed === true,
-          hasValue: item?.target !== null && item?.target !== void 0
+          hasValue: item?.target !== null && item?.target !== void 0,
+          source: text(item?.source)
         };
       });
     });
@@ -7898,6 +7907,7 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
                           _createElementVNode$7("tr", null, [
                             _createElementVNode$7("th"),
                             _createElementVNode$7("th", null, "字段"),
+                            _createElementVNode$7("th", null, "来源"),
                             _createElementVNode$7("th", null, "Emby 现在的值"),
                             _createElementVNode$7("th", null, "这次抓到的值")
                           ])
@@ -7934,16 +7944,19 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
                                   _: 1
                                 })) : _createCommentVNode$6("", true)
                               ], 8, _hoisted_14$4),
+                              _createElementVNode$7("td", null, [
+                                row.source ? (_openBlock$7(), _createElementBlock$7("code", _hoisted_15$3, _toDisplayString$7(row.source), 1)) : (_openBlock$7(), _createElementBlock$7("span", _hoisted_16$3, "—"))
+                              ]),
                               _createElementVNode$7("td", {
                                 class: "avh-sd__cell",
                                 title: row.current
-                              }, _toDisplayString$7(clip(row.current) || "—"), 9, _hoisted_15$3),
+                              }, _toDisplayString$7(clip(row.current) || "—"), 9, _hoisted_17$3),
                               _createElementVNode$7("td", {
                                 class: "avh-sd__cell",
                                 title: row.target
                               }, [
-                                row.hasValue ? (_openBlock$7(), _createElementBlock$7("span", _hoisted_17$3, _toDisplayString$7(clip(row.target)), 1)) : (_openBlock$7(), _createElementBlock$7("span", _hoisted_18$3, "没抓到"))
-                              ], 8, _hoisted_16$3)
+                                row.hasValue ? (_openBlock$7(), _createElementBlock$7("span", _hoisted_19$3, _toDisplayString$7(clip(row.target)), 1)) : (_openBlock$7(), _createElementBlock$7("span", _hoisted_20$3, "没抓到"))
+                              ], 8, _hoisted_18$3)
                             ], 2);
                           }), 128))
                         ])
@@ -7953,7 +7966,7 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
                       text: "这次什么都没抓到",
                       hint: "三个数据源都没有这部片的值，换一部或稍后重试"
                     })),
-                    emptyCount.value ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_19$3, [
+                    emptyCount.value ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_21$2, [
                       _createVNode$6(_component_v_btn, {
                         variant: "text",
                         size: "x-small",
@@ -7966,8 +7979,8 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
                       })
                     ])) : _createCommentVNode$6("", true),
                     people.value.length ? (_openBlock$7(), _createElementBlock$7(_Fragment$6, { key: 5 }, [
-                      _createElementVNode$7("div", _hoisted_20$3, "要写入的演员（" + _toDisplayString$7(people.value.length) + "）", 1),
-                      _createElementVNode$7("div", _hoisted_21$2, [
+                      _createElementVNode$7("div", _hoisted_22$2, "要写入的演员（" + _toDisplayString$7(people.value.length) + "）", 1),
+                      _createElementVNode$7("div", _hoisted_23$2, [
                         (_openBlock$7(true), _createElementBlock$7(_Fragment$6, null, _renderList$6(people.value, (name) => {
                           return _openBlock$7(), _createBlock$7(_component_v_chip, {
                             key: name,
@@ -8037,7 +8050,7 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
   }
 });
 
-const ScrapeDialog = /* @__PURE__ */ _export_sfc(_sfc_main$7, [["__scopeId", "data-v-928a7adf"]]);
+const ScrapeDialog = /* @__PURE__ */ _export_sfc(_sfc_main$7, [["__scopeId", "data-v-4bc334fd"]]);
 
 const {defineComponent:_defineComponent$6} = await importShared('vue');
 

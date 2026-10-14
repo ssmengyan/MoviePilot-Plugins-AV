@@ -1294,7 +1294,8 @@ class TestWriteMatrix:
         names = [row["name"] for row in diff]
         for name in scraper.MATRIX_FIELDS:
             assert name in names
-        assert all(set(row) == {"name", "current", "target", "changed"} for row in diff)
+        assert all(set(row) == {"name", "current", "target", "changed", "source"}
+                   for row in diff)
         assert next(r for r in diff if r["name"] == "Name")["changed"] is True
         assert next(r for r in diff if r["name"] == "Overview")["changed"] is True
 
@@ -1619,6 +1620,8 @@ class TestScrapeOne:
         assert report["sources"]["javdb"]["status"] == "cache"
         assert store.meta_get("SNOS380")["plot_zh"]         # 但简介补上了
         assert report["completeness"] == "full"
+        # P0-1：溯源落库（`meta.field_sources_json`）—— 只重算不重抓的那一轮也要更新它
+        assert store.meta_get("SNOS380")["field_sources"]["title_jp"] == "javdb"
 
     def test_scrape_one_without_item_key(self, scraper, store_mod, tmp_path):
         store = make_store(store_mod, tmp_path)
@@ -2754,6 +2757,136 @@ class TestGatherOrder:
         assert hits["metatube"] == 1
         assert target["sources"]["metatube"]["status"] == "miss"
         assert target["completeness"] == "missing_plot"
+
+
+class TestFieldSources:
+    """P0-1：逐字段溯源（`field_sources`）—— 回答"这条数据是谁给的"。
+
+    打标只发生在**填值那一刻**：占位简介被丢弃就不留来源、MetaTube 补的字段记 metatube、
+    LLM 译出来的记 llm。事后按链反推会撒谎（javtxt 只补空、LLM 会覆盖），所以这里是行为用例。
+    """
+
+    def test_javdb_only(self, scraper):
+        """只开 javdb：它提供的字段全标 javdb；中文/中文简介**没有来源**（压根没有值）。"""
+        target = scraper.gather(FakeCli(detail=JAVDB_DETAIL), FakeStore(), "SNOS380", "SNOS-380",
+                                opts={"plot_sources": (), "write_images": False})
+        src = target["field_sources"]
+        assert src["title_jp"] == "javdb"
+        assert src["actors"] == "javdb" and src["tags"] == "javdb"
+        assert src["cover_url"] == "javdb" and src["javdb_id"] == "javdb"
+        assert "plot_zh" not in src and "title_zh" not in src
+        assert all(isinstance(v, str) and v for v in src.values())
+        # 溯源里的键必须是取数图认识的字段名
+        assert set(src) <= set(scraper.scrape_graph.FIELDS)
+
+    def test_javtxt_owns_the_chinese_fields(self, scraper, monkeypatch):
+        hits = {"metatube": 0}
+
+        def fake_get(url, **kwargs):
+            if "/v1/movies/search" in url:
+                hits["metatube"] += 1
+                return json.dumps({"data": []}).encode(), "", 200
+            if "/search" in url:
+                return JAVTXT_SEARCH_HTML.encode(), "", 200
+            return JAVTXT_DETAIL_HTML.encode(), "", 200
+
+        _patch_fetch(monkeypatch, fake_get)
+        target = scraper.gather(FakeCli(detail=JAVDB_DETAIL), FakeStore(), "SNOS380", "SNOS-380",
+                                opts={"javtxt_interval": 0, "javtxt_hosts": ("https://j.test",),
+                                      "metatube_base": "http://mt:8080", "write_images": False})
+        src = target["field_sources"]
+        assert src["title_zh"] == "javtxt" and src["plot_zh"] == "javtxt"
+        assert src["plot_jp"] == "javtxt"          # 日文简介也来自它（javdb 那边是空的）
+        assert src["title_jp"] == "javdb"          # 中文站不抢骨架字段
+        assert hits["metatube"] == 0               # 已经拿到简介 → 不花那 10 秒
+        assert "metatube" not in src.values()
+
+    def test_metatube_marks_what_it_filled(self, scraper, monkeypatch):
+        item = json.loads(json.dumps(TestMetatubeMapping.ITEM))
+        item["number"] = "SNOS-380"
+
+        def fake_get(url, **kwargs):
+            if "/v1/movies/search" in url:
+                return json.dumps({"data": [item]}).encode(), "", 200
+            if "/search" in url:
+                return JAVTXT_SEARCH_HTML.encode(), "", 200
+            return JAVTXT_DETAIL_HTML.encode(), "", 200
+
+        _patch_fetch(monkeypatch, fake_get)
+        target = scraper.gather(FakeCli(detail=None, error="javdb 挂了"), FakeStore(),
+                                "SNOS380", "SNOS-380",
+                                opts={"javtxt_interval": 0,
+                                      "javtxt_hosts": ("https://j.test",),
+                                      "metatube_base": "http://mt:8080",
+                                      "write_images": False})
+        src = target["field_sources"]
+        assert src["title_jp"] == "metatube"       # javdb 没给标题，MetaTube 补的
+        assert src["studio"] == "metatube"         # `metatube_fill()` 的 filled 清单驱动
+        assert src["duration"] == "metatube"
+        assert src["plot_zh"] == "javtxt"          # 中文简介仍然是 javtxt 的（只补空）
+
+    def test_llm_marks_the_translation(self, scraper, monkeypatch):
+        def fake_get(url, **kwargs):
+            if "/v1/movies/search" in url:
+                return json.dumps({"data": []}).encode(), "", 200
+            return JAVTXT_SEARCH_EMPTY.encode(), "", 200      # javtxt 落空 → 走翻译链
+
+        class T:
+            @staticmethod
+            def translate_batch(items, **kwargs):
+                return {"SNOS-380": {"title_zh": "中文标题", "plot_zh": "中文简介",
+                                     "status": "done"}}
+
+        _patch_fetch(monkeypatch, fake_get)
+        monkeypatch.setattr(scraper, "translator", T)
+        target = scraper.gather(FakeCli(detail=dict(JAVDB_DETAIL, summary="日本語のあらすじ")),
+                                FakeStore(), "SNOS380", "SNOS-380",
+                                opts={"javtxt_interval": 0, "javtxt_hosts": ("https://j.test",),
+                                      "metatube_base": "http://mt:8080", "write_images": False})
+        src = target["field_sources"]
+        assert target["plot_zh"] == "中文简介"
+        assert src["plot_zh"] == "llm" and src["title_zh"] == "llm"
+        assert src["title_jp"] == "javdb"
+
+    def test_dropped_placeholder_plot_has_no_source(self, scraper):
+        """占位简介被丢弃 → **不许留来源**（否则界面会说"这条简介来自 javtxt"，而它已经被扔了）。"""
+        cache = s11_cache()
+        row = cache["numbers"]["SNOS380"]["javtxt"]
+        row["plot_zh"] = "短简介"
+        row["plot_jp"] = "日本語の長いあらすじ" * 10
+        target = scraper.gather(FakeCli(detail=None), FakeStore(), "SNOS380", "SNOS-380",
+                                opts={"fetch_cache": cache, "write_images": False,
+                                      "plot_sources": ("javtxt",)})
+        assert target["plot_zh"] == ""
+        assert "plot_zh" not in target["field_sources"]
+
+    def test_override_sources_table_covers_every_matrix_field(self, scraper):
+        """`_OVERRIDE_SOURCES` 必须覆盖 `build_overrides()` 能产出的每个键。
+
+        漏一个 → 预览里那行的"来源"永远空着（而且没人会注意到）。将来加写入字段时，
+        这条用例会立刻红。
+        """
+        full = {
+            "display_number": "SNOS-380", "title_zh": "中文标题", "title_jp": "日文标题",
+            "origin_title": "日文标题", "plot_zh": "中文简介", "plot_jp": "日文简介",
+            "release_date": "2026-10-09", "studio": "S1", "series": "系列", "tags": ["中字"],
+            "score": "4.33", "actors": [{"name": "某人"}], "javdb_id": "snos00380",
+            "version_tags": {},
+        }
+        produced = scraper.build_overrides(full, EMPTY_DTO)
+        assert produced, "前提：这份 target 至少要产出一个覆盖键"
+        missing = sorted(set(produced) - set(scraper._OVERRIDE_SOURCES))
+        assert not missing, f"这些覆盖键没有登记溯源映射：{missing}"
+
+    def test_field_diff_maps_source(self, scraper):
+        overrides = {"Name": "SNOS-380 中文标题", "Overview": "中文简介"}
+        diff = scraper.field_diff({}, overrides, {"title_zh": "javtxt", "plot_zh": "javtxt"})
+        rows = {row["name"]: row for row in diff}
+        assert rows["Name"]["source"] == "javtxt"
+        assert rows["Overview"]["source"] == "javtxt"
+        assert rows["GenreItems"]["source"] == ""   # 没有值也没有来源 → 空串，不猜
+        # 没有 field_sources 的老调用方照常工作（参数可选）
+        assert all("source" in row for row in scraper.field_diff({}, overrides))
 
     def test_javdb_failure_still_triggers_metatube_core_fallback(self, scraper, monkeypatch):
         """契约 §5.2：核心骨架第二顺位是 MetaTube，**仅在 javdb 失败时启用**。"""

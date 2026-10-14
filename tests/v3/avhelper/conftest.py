@@ -185,3 +185,9 @@ def scraper_mod():
 def classify_mod():
     """`number_classify` 模块（内容类型 / 马赛克 / 分集 / 分辨率，纯标准库）。"""
     return _load("number_classify")
+
+
+@pytest.fixture(scope="session")
+def graph_mod():
+    """`scrape_graph` 模块（取数图：字段 × 站点链，纯标准库）。"""
+    return _load("scrape_graph")
