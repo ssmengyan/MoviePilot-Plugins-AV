@@ -59,6 +59,8 @@ import EmptyState from '../common/EmptyState.vue'
 import Thumb from '../common/Thumb.vue'
 import HistoryView from './HistoryView.vue'
 import { filledThumbs, queueMissingThumbs } from '../common/common'
+import { pushBottomToast } from '../../composables/bottomToast'
+import { useHostConfirm } from '../../composables/useHostDialogs'
 import { hostToast, type PluginApi } from '../../composables/usePluginApi'
 import type { PluginStore } from '../../composables/usePluginStore'
 import type { QueueItem } from '../../composables/storeTypes'
@@ -81,6 +83,55 @@ const props = withDefaults(
 )
 
 const t = hostToast(props.toast as any)
+
+/**
+ * 宿主要求复用的确认弹窗；拿不到注入时 `useHostConfirm` 内部降级 `window.confirm`。
+ *
+ * 取消下载会**连磁盘上已下载的部分文件一起删**，属破坏性动作，必须过这道闸
+ * （与历史页「移除记录」、订阅页「取消」同一道闸）。
+ */
+const confirm = useHostConfirm()
+
+/**
+ * 行内动作的 in-flight（按行 id 记）。
+ *
+ * 纪律与 0.6.2 的任务页下载按钮**完全一致**（见 `AGENTS.md` §5 那条硬口径）：
+ * 1. 连点几行的按钮互不阻塞（各自等各自的结论），只有同一行重复触发才合并；
+ * 2. 行内转圈**只由这一行自己的结论结束** —— 成功就随行消失/变形，失败才由这里解下来；
+ * 3. 兜底看门狗：超过 `WATCHDOG_MS` 还没有结论（宿主那条请求挂了又没超时）只解这一行。
+ * `key` = `<动作>:<行id>`，动作有 `cancel` / `return` / `discard` / `drop`。
+ */
+const pending = ref<Record<string, boolean>>({})
+/** 看门狗窗口：与 `CandTable` 同一口径（3 分钟）。 */
+const WATCHDOG_MS = 180_000
+
+function pendingKey(action: string, item: QueueItem): string {
+  return `${action}:${String(item.id || item.hash || item.number || '')}`
+}
+
+function isPending(action: string, item: QueueItem): boolean {
+  return !!pending.value[pendingKey(action, item)]
+}
+
+/** 起一个行内动作：置转圈 + 看门狗；`run` 返回后按需自动解下来（成功由数据变化带走）。 */
+function withRowPending(action: string, item: QueueItem, run: () => Promise<boolean>): void {
+  const key = pendingKey(action, item)
+  if (pending.value[key]) return
+  pending.value = { ...pending.value, [key]: true }
+  const clear = () => {
+    if (!pending.value[key]) return
+    const next = { ...pending.value }
+    delete next[key]
+    pending.value = next
+  }
+  window.setTimeout(clear, WATCHDOG_MS)
+  void run().finally(clear)
+}
+
+/** 这一行是不是「已经取消」（后端 `state='canceled'`，行留在原位等用户选出口）。 */
+function isCanceled(item: QueueItem): boolean {
+  return item.state === 'canceled'
+}
 
 /** 轮询间隔：与老 `startTaskPolling()` 的 5000ms 一致（下载器进度本身就更新得慢）。 */
 const POLL_MS = 5000
@@ -156,9 +207,19 @@ function isFailed(item: QueueItem): boolean {
   return item.state === 'failed'
 }
 
-/** 「下载中」：还没完成、也还没失败。 */
+/**
+ * 「下载中」：还没完成、也还没失败、**也还没被取消**。
+ *
+ * `canceled` 单独成节（见 `canceledRows`）：它的种子已经被删掉了，画进度条与百分比是假的；
+ * 但**行不消失**（用户要求"保留在原位置"），所以它必须有自己的一节来承载那三个出口。
+ */
 const activeRows = computed<QueueItem[]>(() =>
-  rows.value.filter(item => !isDone(item) && !isFailed(item)),
+  rows.value.filter(item => !isDone(item) && !isFailed(item) && !isCanceled(item)),
+)
+
+/** 「已取消」：行留在原位，等用户选「换资源」或「不要了」。 */
+const canceledRows = computed<RowExtra[]>(() =>
+  rows.value.filter(item => isCanceled(item)) as RowExtra[],
 )
 
 /** 「失败」：`state === 'failed'`，红色徽标 + 悬浮/正文给出 `failed_reason`。 */
@@ -234,6 +295,99 @@ function rowKey(item: QueueItem, index: number): string {
  */
 function thumbOf(item: QueueItem): string {
   return String(item.thumb || filledThumbs.value[String(item.number || '')] || '')
+}
+
+/** 这一行的显示名（番号优先，其次片名/种子站点，最后兜底）。 */
+function labelOf(item: QueueItem): string {
+  return String(item.number || (item as RowExtra).title || item.site || '这条下载')
+}
+
+/**
+ * 「取消下载」：删下载器里的种子（**含已下载的部分文件**）→ 行变「已取消」留在原位。
+ *
+ * 三件事按顺序：
+ * 1. 宿主确认弹窗写清"会删掉已经下好的部分"，别让用户在不知情的情况下丢文件；
+ * 2. `store.cancelDownload(id)`（闸门 `qcancel:<id>`，按行并发）；
+ * 3. **成功不摘行**：后端把这一行标成 `canceled` 并回一份新队列，界面自会把它挪到
+ *    「已取消」那一节 —— 前端不自己动手，免得与后端那份快照打架。
+ */
+async function cancelDownload(item: QueueItem): Promise<void> {
+  const label = labelOf(item)
+  const ok = await confirm({
+    type: 'warn',
+    title: '取消下载',
+    content: `将从下载器删除「${label}」的下载任务，并删除已下载的部分文件。`
+      + `条目会留在原位，之后可以「换资源」重新挑一个，或者「不要了」彻底取消。`,
+    confirmText: '取消下载',
+    cancelText: '先留着',
+  })
+  if (!ok) return
+  withRowPending('cancel', item, async () => {
+    const res = await props.store.cancelDownload(String(item.id || ''))
+    if (res.ok) {
+      pushBottomToast('success', res.message || `已取消 ${label}`)
+      return true
+    }
+    pushBottomToast('warning', `取消失败：${res.message || '请稍后重试'}`)
+    return false
+  })
+}
+
+/**
+ * 「换资源」：把这条下载摘掉，并让它对应的任务回到「任务」页待确认。
+ *
+ * 后端的口径是"任务置回 await、候选原样保留"，所以点完去任务页就能挑别的种子，
+ * 不必重搜站点（重搜要走限流、还慢）。
+ */
+async function returnDownload(item: QueueItem): Promise<void> {
+  const label = labelOf(item)
+  withRowPending('return', item, async () => {
+    const res = await props.store.returnDownload(String(item.id || ''))
+    if (res.ok) {
+      pushBottomToast('success', res.message || `已把 ${label} 放回任务列表`)
+      return true
+    }
+    pushBottomToast('warning', `操作失败：${res.message || '请稍后重试'}`)
+    return false
+  })
+}
+
+/**
+ * 「不要了」：彻底取消 —— 摘行 + 台账墓碑 + 任务取消 +（默认）取消该番号的订阅。
+ *
+ * 勾选框默认**勾上**：不取消订阅的话，下一次订阅检查还会把同一个番号重新搜出来落成任务，
+ * "不要了"就成了假话（后端 `cancel_all` 会给 `known` 写一条忽略记录兜底）。
+ */
+async function discardDownload(item: QueueItem): Promise<void> {
+  const label = labelOf(item)
+  const ok = await confirm({
+    type: 'warn',
+    title: '不要了',
+    content: `「${label}」会从下载列表移除，下载历史里也不再保留这条记录。`
+      + `如果它有番号订阅，会一并取消，以后不会再自动下载。`,
+    confirmText: '不要了',
+    cancelText: '先留着',
+  })
+  if (!ok) return
+  withRowPending('discard', item, async () => {
+    const res = await props.store.discardDownload(String(item.id || ''), true)
+    if (res.ok) {
+      pushBottomToast('success', res.message || `已彻底取消 ${label}`)
+      return true
+    }
+    pushBottomToast('warning', `取消失败：${res.message || '请稍后重试'}`)
+    return false
+  })
+}
+
+/** 「移除」：只把这条已经取消的灰行从列表去掉（不动下载器、不动台账）。 */
+async function dropCanceledRow(item: QueueItem): Promise<void> {
+  withRowPending('drop', item, async () => {
+    const res = await props.store.dropDownloadRow(String(item.id || ''))
+    if (res.ok) return true
+    pushBottomToast('warning', `移除失败：${res.message || '请稍后重试'}`)
+    return false
+  })
 }
 
 /**
@@ -371,6 +525,15 @@ onBeforeUnmount(() => {
               <div class="avh-q__right">
                 <div class="avh-q__no">{{ progressOf(item) }}%</div>
                 <div class="avh-q__hint">下载中…</div>
+                <!-- 行内「取消下载」（2026-10-15）：删种子（含已下载的部分文件）→ 行留在原位变灰 -->
+                <v-btn
+                  class="avh-q__act"
+                  variant="text"
+                  size="x-small"
+                  color="error"
+                  :loading="isPending('cancel', item)"
+                  @click="cancelDownload(item)"
+                >取消下载</v-btn>
               </div>
             </div>
             <div class="avh-bar">
@@ -418,6 +581,74 @@ onBeforeUnmount(() => {
                   失败原因：{{ failReasonOf(item) }}
                 </div>
               </div>
+            </div>
+          </div>
+        </template>
+
+        <!--
+          ===== 已取消（2026-10-15 新增，用户明确要求）=====
+          用户点「取消下载」之后，种子已经从下载器删掉，但**行不消失**（"条目不要立即消失，
+          应保留在原位置"）—— 留在这里等用户选出口，避免"点错了只能重来"：
+
+          - 换资源：摘掉这一行 + 把任务放回「任务」页待确认（候选原样保留，挑别的种子）
+          - 不要了：彻底取消（摘行 + 台账墓碑 + 任务取消 + 默认连番号订阅一起取消）
+          - 移除：只把这条灰行从列表去掉（不动下载器、不改台账）
+
+          没有进度条也没有百分比：种子已经不在下载器里了，画 0% 是骗人。
+        -->
+        <template v-if="canceledRows.length">
+          <div class="avh-downloads__secttl">
+            <span>已取消（{{ canceledRows.length }}）</span>
+            <span class="avh-downloads__secttl-note">选「换资源」重新挑，或「不要了」彻底取消</span>
+          </div>
+
+          <div
+            v-for="(item, index) in canceledRows"
+            :key="rowKey(item, index)"
+            class="avh-q avh-q--canceled"
+            :class="{ 'avh-q--vtag': hasBadge(item) }"
+          >
+            <span v-if="hasBadge(item)" class="avh-vbadge">{{ versionBadgeOf(item) }}</span>
+            <div class="avh-q__hd">
+              <Thumb
+                class="avh-q__poster"
+                variant="tposter"
+                :src="thumbOf(item)"
+                alt="无图"
+                :plugin-id="pluginId"
+              />
+              <div class="avh-q__main">
+                <div class="avh-q__no">
+                  {{ item.number || '' }}
+                  <v-chip size="x-small" variant="tonal" class="ms-1">已取消</v-chip>
+                </div>
+                <div v-if="item.title" class="avh-q__ttl">{{ item.title }}</div>
+                <div class="avh-q__hint avh-q__meta">{{ metaOf(item) }}</div>
+                <div class="avh-q__hint avh-q__path" :title="String(item.canceled_detail || '')">
+                  {{ item.canceled_detail || pathOf(item) }}
+                </div>
+              </div>
+            </div>
+            <div class="avh-q__exits">
+              <v-btn
+                variant="tonal"
+                size="small"
+                :loading="isPending('return', item)"
+                @click="returnDownload(item)"
+              >换资源</v-btn>
+              <v-btn
+                variant="text"
+                size="small"
+                color="error"
+                :loading="isPending('discard', item)"
+                @click="discardDownload(item)"
+              >不要了</v-btn>
+              <v-btn
+                variant="text"
+                size="small"
+                :loading="isPending('drop', item)"
+                @click="dropCanceledRow(item)"
+              >移除</v-btn>
             </div>
           </div>
         </template>
@@ -544,6 +775,33 @@ onBeforeUnmount(() => {
 /* 有角标时把右侧那一列（百分比 / 「下载中…」）压下一行，两者不叠在一起 */
 .avh-q--vtag .avh-q__right {
   padding-top: 20px;
+}
+
+/*
+ * 已取消行（2026-10-15）：整行压暗一档，与「下载中」一眼分得开。
+ * 不用禁用态灰（那看着像坏掉了），只把底色与描边收淡 —— 它仍然是一张"可操作"的卡
+ * （下面那三个出口等着用户点）。
+ */
+.avh-q--canceled {
+  background: rgba(var(--v-theme-on-surface), 0.02);
+  border-style: dashed;
+}
+
+/* 行内动作按钮（「取消下载」）：贴着百分比右下，不与进度条抢注意力 */
+.avh-q__act {
+  margin-top: 2px;
+  padding: 0 4px;
+  min-width: 0;
+  font-size: 11.5px;
+}
+
+/* 已取消行的三个出口：左对齐一排，右留一点空隙免得贴着卡片边 */
+.avh-q__exits {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding-left: 60px;      /* 与封面右侧的正文对齐（48px 封面 + 12px gap） */
 }
 
 /* 对齐 `.qhd` */

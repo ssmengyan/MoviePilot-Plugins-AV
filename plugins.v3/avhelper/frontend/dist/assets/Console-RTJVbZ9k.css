@@ -738,24 +738,24 @@
 }
 
 /* 对齐 `app.css` 的 `.toolbar` / `.hint` / `.spacer` */
-.avh-downloads__toolbar[data-v-0410ea2c] {
+.avh-downloads__toolbar[data-v-5ccd378d] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 14px;
 }
-.avh-downloads__hint[data-v-0410ea2c] {
+.avh-downloads__hint[data-v-5ccd378d] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-downloads__spacer[data-v-0410ea2c] {
+.avh-downloads__spacer[data-v-5ccd378d] {
   flex: 1;
 }
 
 /* 页签：与发现榜单那组 tabs 同一套几何（胶囊容器 + 选中那颗走主色，写法照 `DiscoverView`）。
    两份 scoped CSS 各有各的作用域，抄这一小段比抽公共件划算（本项目的既有做法）。 */
-.avh-tabs[data-v-0410ea2c] {
+.avh-tabs[data-v-5ccd378d] {
   display: flex;
   gap: 4px;
   padding: 3px;
@@ -763,7 +763,7 @@
   border-radius: 8px;
   background: rgba(var(--v-theme-on-surface), 0.04);
 }
-.avh-tabs button[data-v-0410ea2c] {
+.avh-tabs button[data-v-5ccd378d] {
   padding: 4px 12px;
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
@@ -772,13 +772,13 @@
   border-radius: 6px;
   cursor: pointer;
 }
-.avh-tabs__on[data-v-0410ea2c] {
+.avh-tabs__on[data-v-5ccd378d] {
   color: rgb(var(--v-theme-on-primary)) !important;
   background: rgb(var(--v-theme-primary)) !important;
 }
 
 /* 对齐 `app.css` 的 `.secttl`：12px、弱化色、字距 .4px（与 `TasksView` 的小标题同一套口径） */
-.avh-downloads__secttl[data-v-0410ea2c] {
+.avh-downloads__secttl[data-v-5ccd378d] {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -789,14 +789,14 @@
 }
 
 /* 小节标题右侧那句指路（契约 §5.3）：靠右、不参与标题的字距，免得挤成标题的一部分 */
-.avh-downloads__secttl-note[data-v-0410ea2c] {
+.avh-downloads__secttl-note[data-v-5ccd378d] {
   margin-left: auto;
   letter-spacing: 0;
 }
 
 /* 对齐 `.q`：卡片底色 + 描边 + 10px 圆角。
    `position: relative` 是给右上角的版本角标（v4.1 §9.2-6）做定位锚点。 */
-.avh-q[data-v-0410ea2c] {
+.avh-q[data-v-5ccd378d] {
   position: relative;
   padding: 12px;
   margin-bottom: 10px;
@@ -806,13 +806,13 @@
 }
 
 /* 失败行：描边与底色走 error 通道（与"下载中""已完成"一眼分得开） */
-.avh-q--failed[data-v-0410ea2c] {
+.avh-q--failed[data-v-5ccd378d] {
   border-color: rgba(var(--v-theme-error), 0.4);
   background: rgba(var(--v-theme-error), 0.08);
 }
 
 /* 版本角标（v4.1 §9.2-6）：贴在卡片右上角；没有 version_tags / badge 时整颗不渲染 */
-.avh-vbadge[data-v-0410ea2c] {
+.avh-vbadge[data-v-5ccd378d] {
   position: absolute;
   top: 8px;
   right: 10px;
@@ -829,12 +829,39 @@
 }
 
 /* 有角标时把右侧那一列（百分比 / 「下载中…」）压下一行，两者不叠在一起 */
-.avh-q--vtag .avh-q__right[data-v-0410ea2c] {
+.avh-q--vtag .avh-q__right[data-v-5ccd378d] {
   padding-top: 20px;
 }
 
+/*
+ * 已取消行（2026-10-15）：整行压暗一档，与「下载中」一眼分得开。
+ * 不用禁用态灰（那看着像坏掉了），只把底色与描边收淡 —— 它仍然是一张"可操作"的卡
+ * （下面那三个出口等着用户点）。
+ */
+.avh-q--canceled[data-v-5ccd378d] {
+  background: rgba(var(--v-theme-on-surface), 0.02);
+  border-style: dashed;
+}
+
+/* 行内动作按钮（「取消下载」）：贴着百分比右下，不与进度条抢注意力 */
+.avh-q__act[data-v-5ccd378d] {
+  margin-top: 2px;
+  padding: 0 4px;
+  min-width: 0;
+  font-size: 11.5px;
+}
+
+/* 已取消行的三个出口：左对齐一排，右留一点空隙免得贴着卡片边 */
+.avh-q__exits[data-v-5ccd378d] {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding-left: 60px;      /* 与封面右侧的正文对齐（48px 封面 + 12px gap） */
+}
+
 /* 对齐 `.qhd` */
-.avh-q__hd[data-v-0410ea2c] {
+.avh-q__hd[data-v-5ccd378d] {
   display: flex;
   align-items: flex-start;
   gap: 12px;
@@ -842,7 +869,7 @@
 }
 
 /* 对齐 `.tposter`：48×64 小封面 */
-.avh-q__poster[data-v-0410ea2c] {
+.avh-q__poster[data-v-5ccd378d] {
   width: 48px;
   height: 64px;
   flex: none;
@@ -851,29 +878,29 @@
 }
 
 /* 老实现的内联 `flex:1;min-width:0` */
-.avh-q__main[data-v-0410ea2c] {
+.avh-q__main[data-v-5ccd378d] {
   flex: 1;
   min-width: 0;
 }
 
 /* 对齐 `.qhd .qn` */
-.avh-q__no[data-v-0410ea2c] {
+.avh-q__no[data-v-5ccd378d] {
   font-size: 14px;
   font-weight: 600;
 }
-.avh-q__hint[data-v-0410ea2c] {
+.avh-q__hint[data-v-5ccd378d] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-q__meta[data-v-0410ea2c] {
+.avh-q__meta[data-v-5ccd378d] {
   margin-top: 3px;
 }
-.avh-q__path[data-v-0410ea2c] {
+.avh-q__path[data-v-5ccd378d] {
   margin-top: 2px;
 }
 
 /* 完成行的片名（台账可选字段，见 `DoneRow` 注释）：比 `.hint` 稍亮一档，读起来像"一行记录" */
-.avh-q__ttl[data-v-0410ea2c] {
+.avh-q__ttl[data-v-5ccd378d] {
   margin-top: 3px;
   font-size: 12.5px;
   line-height: 1.5;
@@ -881,7 +908,7 @@
 }
 
 /* 对齐 `.qhd .right` */
-.avh-q__right[data-v-0410ea2c] {
+.avh-q__right[data-v-5ccd378d] {
   margin-left: auto;
   text-align: right;
   white-space: nowrap;
@@ -890,13 +917,13 @@
 /* 对齐 `.bar` / `.bar i`（老实现是 --acc2 → --acc 的渐变）
    只有「下载中」那一节画进度条：完成行是静态历史行，契约 §5.3 明确要去掉进度，
    所以老实现的 `.bar.done i` 换绿那条规则已随之下线（没有使用者了）。 */
-.avh-bar[data-v-0410ea2c] {
+.avh-bar[data-v-5ccd378d] {
   height: 7px;
   border-radius: 99px;
   overflow: hidden;
   background: rgba(var(--v-theme-on-surface), 0.12);
 }
-.avh-bar i[data-v-0410ea2c] {
+.avh-bar i[data-v-5ccd378d] {
   display: block;
   width: 0;
   height: 100%;
