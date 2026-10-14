@@ -896,7 +896,7 @@ class AVHelper(_PluginBase):
         return merge_rule(rule)
 
     def scrape_conf(self) -> Dict[str, Any]:
-        """刮削设置的 12 项（**存放在 kv 的 `global_rule` 里**，不是宿主插件配置）。
+        """刮削设置的 11 项（**存放在 kv 的 `global_rule` 里**，不是宿主插件配置）。
 
         口径（主统筹 2026-10-14 更正，覆盖任务书 E 段）：前端设置台 S9 已经在用这套
         camelCase 键名读写 `global_rule`，所以这里**只读不写**、缺键逐项回落默认值 ——
@@ -904,7 +904,7 @@ class AVHelper(_PluginBase):
         原样透传（它只补默认 + 夹限流两项），所以 `/rule` POST 写进来的这些键能存住。
 
         键名一个字母都不许改（前端按这套读）：`scrapeMode` / `plotJavtxt` / `plotMetatube` /
-        `translateModel` / `translateModelFallback` / `cropAnchor` / `trailerMode` /
+        `translateModel` / `translateModelFallback` / `trailerMode` /
         `autoScrapeTier1` / `autoScrapeTier2` / `cleanSuffixes` / `nameTemplate` /
         `metatubeBase`（0.7.0 加：MetaTube 服务地址，**代码里不写死**，留空 = 不做 MetaTube 兜底）。
         """
@@ -918,7 +918,6 @@ class AVHelper(_PluginBase):
             "translateModel": str(rule.get("translateModel") or "").strip() or "hy3",
             "translateModelFallback": (str(rule.get("translateModelFallback") or "").strip()
                                        or "deepseek-v4.1-flash"),
-            "cropAnchor": pick_choice(rule.get("cropAnchor"), CROP_ANCHORS, "auto"),
             "trailerMode": pick_choice(rule.get("trailerMode"), TRAILER_MODES, "off"),
             "autoScrapeTier1": pick_bool(rule.get("autoScrapeTier1"), True),
             "autoScrapeTier2": pick_bool(rule.get("autoScrapeTier2"), True),
@@ -2516,14 +2515,16 @@ class AVHelper(_PluginBase):
         return self._emby_client
 
     def scrape_opts(self) -> Dict[str, Any]:
-        """给 `scraper.*` 的 `opts`：设置台那 12 项（`scrape_conf()`）+ `proxy` + **`library`**，
+        """给 `scraper.*` 的 `opts`：设置台那 11 项（`scrape_conf()`）+ `proxy` + **`library`**，
         并把驼峰键**映射成 scraper 认的下划线键**。
 
         ★ 0.7.0 修的集成缺口：`scraper._opt()` 按**字面键名**取值，而设置台存的是驼峰
-        （`plotJavtxt` / `plotMetatube` / `cropAnchor` / `metatubeBase`），scraper 读的是下划线
-        （`plot_sources` / `crop_anchor` / `metatube_base`）。没有这层映射，界面上的开关与
+        （`plotJavtxt` / `plotMetatube` / `metatubeBase`），scraper 读的是下划线
+        （`plot_sources` / `metatube_base`）。没有这层映射，界面上的开关与
         地址**全部静默失效**（永远走 `DEFAULT_OPTS`）。驼峰键原样保留无害，别删 ——
         契约里 `opts` 的形状就是这样透传的。
+        ★ 0.7.2：`crop_anchor` **不再**从这里映射（设置台的裁切锚点项已删）—— 锚点固定 `auto`，
+        由 `scraper.DEFAULT_OPTS["crop_anchor"]` 提供，裁切逻辑自判。
 
         **`library` 是必需项**（S10 试点批抓到的阻塞级集成缺口）：`scraper.locate_items()` 的定位顺序是
         「显式 `emby:<id>` → `store.item_list(key=…)` → `opts['emby_id']` → **`opts['library']`
@@ -2550,7 +2551,6 @@ class AVHelper(_PluginBase):
         if conf["plotMetatube"]:
             sources.append("metatube")
         opts["plot_sources"] = tuple(sources)
-        opts["crop_anchor"] = conf["cropAnchor"]
         # MetaTube 地址：留空就传空串（`_opt()` 认空串为"已给"→ 数据源自检回显"未配置"）
         opts["metatube_base"] = conf["metatubeBase"]
         opts["proxy"] = self._proxy
