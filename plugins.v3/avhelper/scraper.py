@@ -1672,7 +1672,9 @@ def build_people(original: Any, actors: Any, director: Any) -> List[Dict[str, An
 
     - 演员一条 `{"Name": 规范名, "Type": "Actor"}`，**不写 `Id`**（实测填 Id 与置空行为完全一样，
       写了只会误导后来人以为能"回填 PersonId"）；
-    - 导演一条 `{"Name": …, "Type": "Director"}`；
+    - **只写女演员**：javdb 口径 `gender` 0=女 / 1=男，`1` 一律跳过；`gender` 缺失（旧行 `None`）
+      或取值无法判定时**保守保留**（宁可多写一条，也不误删女优）；
+    - **不再写导演**（`director` 参数保留只为兼容调用方，本函数不再使用）；
     - **保留原 DTO 里 `Type` 既非 Actor 也非 Director 的元素**（工作室人员/客串等），
       否则一次刮削就把 MetaTube 或用户手工加的其它人员抹掉了。
     """
@@ -1687,15 +1689,19 @@ def build_people(original: Any, actors: Any, director: Any) -> List[Dict[str, An
     out: List[Dict[str, Any]] = list(kept)
     seen: List[str] = []
     for actor in (actors if isinstance(actors, list) else []):
+        gender = actor.get("gender") if isinstance(actor, dict) else None
+        if gender is not None:
+            try:
+                if int(gender) == 1:      # javdb 1=男 → 不写进 People
+                    continue
+            except (TypeError, ValueError):
+                pass                      # 脏值判不了男女 → 保守保留
         raw = actor.get("name") if isinstance(actor, dict) else actor
         name = person_name(actor_display(raw))
         if not name or name in seen:
             continue
         seen.append(name)
         out.append({"Name": name, "Type": "Actor", "Role": ""})
-    boss = person_name(actor_display(director)) if _clean_text(director) else ""
-    if boss and boss not in seen:
-        out.append({"Name": boss, "Type": "Director", "Role": ""})
     return out
 
 
