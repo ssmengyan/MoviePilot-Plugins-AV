@@ -763,6 +763,88 @@ class TestTranslateCache:
         assert store.translate_get("k") == ""
 
 
+class TestSiteSnapshot:
+    """逐站快照（0.8.0 / P0-3：「只重算不重抓」的凭据）。
+
+    与 `meta.raw_json` 的分工：那边是给人看的摘要（且受 5KB 上限），这里是给机器复用的完整结果。
+    """
+
+    def test_put_get_round_trip(self, store_mod, tmp_path):
+        store = make_store(store_mod, tmp_path)
+        assert store.snapshot_get("SNOS380", "javtxt") is None
+        store.snapshot_put("SNOS380", "javtxt", {"ok": True, "status": "ok", "plot_zh": "中文简介"},
+                           status="ok", run_id="RUN1", fetched_at="2026-10-15 12:00:00")
+        row = store.snapshot_get("SNOS380", "javtxt")
+        assert row["status"] == "ok" and row["run_id"] == "RUN1"
+        assert row["fetched_at"] == "2026-10-15 12:00:00"
+        assert row["payload"]["plot_zh"] == "中文简介"
+
+    def test_same_key_and_site_replaces(self, store_mod, tmp_path):
+        """同一部片同一源只留最新一份（PRIMARY KEY(key, site)）。"""
+        store = make_store(store_mod, tmp_path)
+        store.snapshot_put("SNOS380", "javtxt", {"plot_zh": "旧"})
+        store.snapshot_put("SNOS380", "javtxt", {"plot_zh": "新"})
+        assert store.snapshot_get("SNOS380", "javtxt")["payload"]["plot_zh"] == "新"
+        assert store.snapshot_stats() == {"rows": 1, "keys": 1}
+
+    def test_map_returns_all_sites(self, store_mod, tmp_path):
+        store = make_store(store_mod, tmp_path)
+        store.snapshot_put("SNOS380", "javtxt", {"ok": True})
+        store.snapshot_put("SNOS380", "metatube", {"ok": False, "status": "miss"})
+        store.snapshot_put("MIDV946", "javtxt", {"ok": True})
+        got = store.snapshot_map("SNOS380")
+        assert set(got) == {"javtxt", "metatube"}
+        assert got["metatube"]["payload"]["status"] == "miss"
+
+    def test_prune_drops_old_rows(self, store_mod, tmp_path):
+        store = make_store(store_mod, tmp_path)
+        store.snapshot_put("OLD", "javtxt", {"ok": True}, fetched_at="2020-01-01 00:00:00")
+        store.snapshot_put("NEW", "javtxt", {"ok": True})              # 刚写的
+        assert store.snapshot_prune(days=30) == 1
+        assert store.snapshot_stats()["rows"] == 1
+        assert store.snapshot_get("OLD", "javtxt") is None
+        assert store.snapshot_get("NEW", "javtxt") is not None
+
+    def test_prune_zero_days_is_a_noop(self, store_mod, tmp_path):
+        """`days<=0` 不删（防手滑清空整表）。"""
+        store = make_store(store_mod, tmp_path)
+        store.snapshot_put("OLD", "javtxt", {"ok": True}, fetched_at="2020-01-01 00:00:00")
+        assert store.snapshot_prune(days=0) == 0
+        assert store.snapshot_stats()["rows"] == 1
+
+    def test_huge_payload_is_skipped(self, store_mod, tmp_path):
+        """超 64KB 不写（快照是加速器，不许把库撑爆）。"""
+        store = make_store(store_mod, tmp_path)
+        store.snapshot_put("BIG", "javtxt", {"plot_zh": "x" * 70000})
+        assert store.snapshot_stats()["rows"] == 0
+
+    def test_bad_payload_json_degrades(self, store_mod, tmp_path):
+        store = make_store(store_mod, tmp_path)
+        store.snapshot_put("SNOS380", "javtxt", {"ok": True})
+        store._exec("UPDATE site_snapshot SET payload_json=? WHERE key=?",
+                    ("[不是对象", "SNOS380"))
+        assert store.snapshot_get("SNOS380", "javtxt")["payload"] == {}
+
+    def test_rejects_empty_key_or_site(self, store_mod, tmp_path):
+        store = make_store(store_mod, tmp_path)
+        store.snapshot_put("", "javtxt", {"ok": True})
+        store.snapshot_put("SNOS380", "", {"ok": True})
+        store.snapshot_put("SNOS380", "javtxt", "不是 dict")
+        assert store.snapshot_stats()["rows"] == 0
+
+    def test_snapshot_table_created_on_legacy_db(self, store_mod, tmp_path):
+        """老库没有这张表 → init() 建出来（`IF NOT EXISTS`，与其它新表同一套路）。"""
+        db = tmp_path / "legacy.db"
+        store = store_mod.Store(db_path=db)
+        store.init()
+        with sqlite3.connect(db) as conn:
+            conn.execute("DROP TABLE site_snapshot")
+        again = store_mod.Store(db_path=db)
+        again.init()
+        assert "site_snapshot" in tables_of(again)
+        assert again.snapshot_stats() == {"rows": 0, "keys": 0}
+
+
 class TestScrapeLog:
     """数据源自检日志（`scrape_log`）。"""
 

@@ -2913,6 +2913,140 @@ class TestFieldSources:
         assert "MetaTube 补上了" in " ".join(target["warnings"])
 
 
+class TestSiteSnapshot:
+    """P0-3：逐站快照 + 只重算不重抓 + 段间注入。
+
+    验收口径就是清单里的那条：**对已刮过的片子跑一次"只重算"，站点请求 0 次、结果一致**。
+    """
+
+    def _opts(self, **extra):
+        base = {"javtxt_interval": 0, "javtxt_hosts": ("https://j.test",),
+                "metatube_base": "http://mt:8080", "write_images": False}
+        base.update(extra)
+        return base
+
+    @staticmethod
+    def _boom(url, **kwargs):
+        raise AssertionError(f"不该发请求：{url}")
+
+    def test_javtxt_snapshot_round_trip_zero_requests(self, scraper, store_mod, tmp_path,
+                                                      monkeypatch):
+        store = make_store(store_mod, tmp_path)
+        calls = []
+
+        def fake_get(url, **kwargs):
+            calls.append(url)
+            if "/search" in url:
+                return JAVTXT_SEARCH_HTML.encode(), "", 200
+            return JAVTXT_DETAIL_HTML.encode(), "", 200
+
+        _patch_fetch(monkeypatch, fake_get)
+        first = scraper.gather(FakeCli(detail=JAVDB_DETAIL), store, "SNOS380", "SNOS-380",
+                               opts=self._opts())
+        assert len(calls) == 2                       # 1 次搜索 + 1 次详情
+        assert first["plot_zh"] and first["title_zh"]
+        # 快照落库了（不只是 `raw_json` 里那份摘要）
+        snap = store.snapshot_get("SNOS380", "javtxt")
+        assert snap and snap["status"] == "ok" and snap["payload"]["plot_zh"]
+        # 让第二轮像真刮削一样有 meta（javdb 骨架走"只补缺不重抓"那条路）
+        scraper._persist(store, first, item_key="emby:1", key="SNOS380", emby_id="1",
+                         opts=self._opts(), wrote=False, completeness=first["completeness"])
+
+        _patch_fetch(monkeypatch, self._boom)        # ★ 任何站点请求都当场炸
+        second = scraper.gather(FakeCli(detail=None), store, "SNOS380", "SNOS-380",
+                                existing=store.meta_get("SNOS380"),
+                                opts=self._opts(use_cache=("javdb", "javtxt", "metatube")))
+        assert second["plot_zh"] == first["plot_zh"]
+        assert second["title_zh"] == first["title_zh"]
+        assert second["title_jp"] == first["title_jp"]
+        assert second["sources"]["javtxt"]["status"] == "ok"
+        assert second["sources"]["javtxt"]["from_cache"] is True
+        assert second["field_sources"]["plot_zh"] == "javtxt"
+
+    def test_metatube_snapshot_reused(self, scraper, store_mod, tmp_path, monkeypatch):
+        store = make_store(store_mod, tmp_path)
+        item = json.loads(json.dumps(TestMetatubeMapping.ITEM))
+        item["number"] = "SNOS-380"
+        calls = {"mt": 0}
+
+        def fake_get(url, **kwargs):
+            if "/v1/movies/search" in url:
+                calls["mt"] += 1
+                return json.dumps({"data": [item]}).encode(), "", 200
+            return JAVTXT_SEARCH_EMPTY.encode(), "", 200     # javtxt 落空 → 走 MetaTube
+
+        _patch_fetch(monkeypatch, fake_get)
+        # javdb 故意失败：这样 MetaTube 的 `studio`/`duration` 才填得进来（它只补空）
+        first = scraper.gather(FakeCli(detail=None, error="javdb 挂了"), store, "SNOS380",
+                               "SNOS-380", opts=self._opts())
+        assert calls["mt"] == 1
+        assert first["studio"] == "MOODYZ"
+        assert store.snapshot_get("SNOS380", "metatube")["status"] == "ok"
+
+        _patch_fetch(monkeypatch, self._boom)
+        second = scraper.gather(FakeCli(detail=None, error="javdb 挂了"), store, "SNOS380",
+                                "SNOS-380",
+                                opts=self._opts(use_cache=("javtxt", "metatube")))
+        assert calls["mt"] == 1                     # 没有第二次调用
+        assert second["sources"]["metatube"]["from_cache"] is True
+        assert second["studio"] == "MOODYZ" and second["duration"] == 118
+        assert second["field_sources"]["studio"] == "metatube"
+
+    def test_failed_snapshot_is_not_reused(self, scraper, store_mod, tmp_path, monkeypatch):
+        """被拦/超时那次的快照**不复用**（它只说明"当时不行"，下次要真重试）。"""
+        store = make_store(store_mod, tmp_path)
+        store.snapshot_put("SNOS380", "javtxt",
+                           {"status": "error", "ok": False, "error": "HTTP 429",
+                            "reason": "rate_limited"})
+        calls = []
+
+        def fake_get(url, **kwargs):
+            calls.append(url)
+            if "/search" in url:
+                return JAVTXT_SEARCH_HTML.encode(), "", 200
+            return JAVTXT_DETAIL_HTML.encode(), "", 200
+
+        _patch_fetch(monkeypatch, fake_get)
+        target = scraper.gather(FakeCli(detail=JAVDB_DETAIL), store, "SNOS380", "SNOS-380",
+                                opts=self._opts(use_cache=("javtxt",)))
+        assert calls, "失败快照被复用了 —— 那就永远不会重试"
+        assert target["sources"]["javtxt"].get("from_cache") is None
+        assert target["plot_zh"]
+
+    def test_force_ignores_snapshots(self, scraper, store_mod, tmp_path, monkeypatch):
+        store = make_store(store_mod, tmp_path)
+        store.snapshot_put("SNOS380", "javtxt",
+                           {"status": "ok", "ok": True, "plot_zh": "旧中文简介",
+                            "title_zh": "旧标题"})
+        _patch_fetch(monkeypatch, self._boom)
+        with pytest.raises(AssertionError, match="不该发请求"):
+            scraper.gather(FakeCli(detail=JAVDB_DETAIL), store, "SNOS380", "SNOS-380",
+                           opts=self._opts(use_cache=("javtxt",), force=True))
+
+    def test_snapshot_only_written_when_logging_on(self, scraper, store_mod, tmp_path,
+                                                   monkeypatch):
+        """快照与 `scrape_log` 同一条闸门：`log_sources=False` 的只读调用方零副作用。"""
+        store = make_store(store_mod, tmp_path)
+        _patch_fetch(monkeypatch, lambda url, **k: (
+            JAVTXT_SEARCH_HTML.encode() if "/search" in url else JAVTXT_DETAIL_HTML.encode(),
+            "", 200))
+        scraper.gather(FakeCli(detail=JAVDB_DETAIL), store, "SNOS380", "SNOS-380",
+                       opts=self._opts(log_sources=False))
+        assert store.snapshot_stats()["rows"] == 0
+        assert store.scrape_log_recent(limit=5) == []
+
+    def test_partial_injection_lists_phase_one_fields(self, scraper, monkeypatch):
+        """段间注入：第二段的源能读到第一段**已定值**的字段（只读，今天记在 `partial_keys`）。"""
+        _patch_fetch(monkeypatch, lambda url, **k: (
+            JAVTXT_SEARCH_EMPTY.encode() if "/search" in url
+            else json.dumps({"data": []}).encode(), "", 200))
+        target = scraper.gather(FakeCli(detail=JAVDB_DETAIL), FakeStore(), "SNOS380", "SNOS-380",
+                                opts=self._opts())
+        keys = target["metatube_meta"]["partial_keys"]
+        assert "display_number" in keys and "title_jp" in keys and "cover_url" in keys
+        assert "plot_zh" not in keys                 # 第一段没拿到中文简介（javtxt 落空）
+
+
 # ---------------------------------------------------------------------------
 # 17. S11 全库实测落进 scraper 的四条（事实 1/2/3 + 设计缺口）
 # ---------------------------------------------------------------------------

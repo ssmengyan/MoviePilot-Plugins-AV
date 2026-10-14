@@ -75,6 +75,9 @@ FAIL_TTL = 120             # 抓取失败后的负缓存：这段时间内不再
 # 缓存总量上限**不再是常量**（0.6.3 起）：配置键 `cache_max_gb`，默认 1G、可设范围见
 # `paths.cache_limit_gb()`（0.1G 下限是硬保护，归零会把缓存目录清空）。
 CACHE_SIZE_TTL = 60        # 缓存体积的内存缓存时长（秒）：前端 15 秒轮询一次，不能每次 rglob 整个目录
+# 逐站快照的保留天数（P0-3）：每晚 `job_cacheclean` 淘汰。90 天覆盖"重刮一轮"的窗口，
+# 也远长于 Tier1 的 14 天退避上限 —— 快照是"只重算不重抓"的凭据，删早了等于白存。
+SNAPSHOT_KEEP_DAYS = 90
 ONCE_JOB_ID = "subcheck_now"
 # 启动预热（§8.2）：MP/插件启动时先把「发现榜单」首屏要用的数据与封面落进缓存，
 # 用户第一次打开插件时直接命中缓存，不必现抓 javdb、也不必现拉几十张封面。
@@ -3153,7 +3156,7 @@ class AVHelper(_PluginBase):
             logger.info(f"AVHelper 订阅检查被限流：{result.get('message')}")
 
     def job_cacheclean(self) -> int:
-        """缓存清理：过期文件 → 孤儿文件 → 容量上限淘汰（§8.1）。
+        """缓存清理：过期文件 → 孤儿文件 → 容量上限淘汰 → 逐站快照（§8.1 + P0-3）。
 
         定时任务与界面上的「清理缓存」共用本方法；SQLite 库与它的事务副产物（同目录下的
         `avhelper.db*`）永远跳过——它们不在缓存索引里，按孤儿删会连订阅/收藏/任务一起丢。
@@ -3161,6 +3164,14 @@ class AVHelper(_PluginBase):
         :return: 本次释放的字节数（cron 调用方忽略该值）
         """
         removed_bytes = 0
+        # 0. 逐站快照（P0-3）：**必须有淘汰**，否则它按"刮过的片 × 源"一直涨。
+        #    90 天足够覆盖"重刮一轮"的窗口，也远长于 Tier1 的 14 天退避上限。
+        try:
+            dropped = self.store.snapshot_prune(SNAPSHOT_KEEP_DAYS)
+            if dropped:
+                logger.info(f"AVHelper 清理逐站快照 {dropped} 条（超过 {SNAPSHOT_KEEP_DAYS} 天）")
+        except Exception as error:                              # pragma: no cover - 防御
+            logger.error(f"AVHelper 清理逐站快照失败：{error}")
         # 1. 过期项
         expired = self.store.cache_expired()
         keys, freed = [], 0

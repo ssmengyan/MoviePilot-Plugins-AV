@@ -814,6 +814,25 @@ class TestScrapeStatus:
         assert {"total", "ok", "fail", "avg_latency_ms", "last_status", "last_error"} <= set(row)
 
 
+class TestCacheCleanPrunesSnapshots:
+    """P0-3 的淘汰必须真的挂在清理任务上（快照会按"刮过的片 × 源"一直涨）。"""
+
+    def test_old_snapshots_are_pruned(self, plugin, store):
+        store.snapshot_put("OLD", "javtxt", {"ok": True}, fetched_at="2020-01-01 00:00:00")
+        store.snapshot_put("NEW", "javtxt", {"ok": True})
+        plugin.job_cacheclean()
+        assert store.snapshot_get("OLD", "javtxt") is None
+        assert store.snapshot_get("NEW", "javtxt") is not None
+
+    def test_prune_failure_does_not_break_cleanup(self, plugin, store, monkeypatch):
+        """清理任务不许因为快照淘汰失败而整条挂掉（它还要删过期文件与孤儿文件）。"""
+        def boom(*args, **kwargs):
+            raise RuntimeError("库锁住了")
+
+        monkeypatch.setattr(store, "snapshot_prune", boom)
+        plugin.job_cacheclean()                     # 不抛异常就是通过
+
+
 class TestScrapeLog:
     def test_items_use_contract_keys(self, plugin, store):
         store.scrape_log_add("javdb", "ok", "SNOS380", 1200, "")

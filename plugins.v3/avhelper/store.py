@@ -182,6 +182,21 @@ CREATE TABLE IF NOT EXISTS scrape_log(
 );
 CREATE INDEX IF NOT EXISTS idx_scrape_log_source ON scrape_log(source_name, id DESC);
 CREATE INDEX IF NOT EXISTS idx_scrape_log_run ON scrape_log(run_id);
+
+-- 0.8.0 / P0-3：**逐站快照**（"只重算不重抓"的凭据）。
+-- 与 `meta.raw_json` 的分工：那边是给人看的**摘要**（URL/vid/长度，且受 5KB 上限），
+-- 这里是给机器**复用**的完整结果（`javtxt_lookup()` / `metatube_lookup()` 的返回形状），
+-- 于是"换字段聚合策略时只重算不重抓"才能在**单个源**的粒度上成立。
+CREATE TABLE IF NOT EXISTS site_snapshot(
+    key TEXT NOT NULL,
+    site TEXT NOT NULL,
+    fetched_at TEXT DEFAULT '',
+    status TEXT DEFAULT '',
+    run_id TEXT DEFAULT '',
+    payload_json TEXT DEFAULT '{}',
+    PRIMARY KEY(key, site)
+);
+CREATE INDEX IF NOT EXISTS idx_site_snapshot_fetched ON site_snapshot(fetched_at);
 """
 
 # 老库动态补列（SQLite 的 ALTER TABLE ADD COLUMN 没有 IF NOT EXISTS，先看 PRAGMA table_info 再补）。
@@ -363,6 +378,15 @@ def _is_read_sql(sql: Any) -> bool:
 def _now() -> str:
     """当前时间字符串，统一写库格式。"""
     return time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _shift_days(days: int) -> str:
+    """当前时间往前/后挪 `days` 天（同样的字符串格式；给快照淘汰算 cutoff 用）。"""
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() + days * 86400))
+
+
+#: 单条快照的体积上限（64KB）：快照是加速器，超了就不写 —— 别把库撑爆
+_SNAPSHOT_LIMIT = 65536
 
 
 # 通知元信息里「发布源」永远是最后一段：「发布源：<站点> / <发布组> 发布」
@@ -1979,6 +2003,75 @@ class Store:
                 "reasons": {str(r[0] or ""): _to_int(r[1]) for r in reason_rows if r[0]},
             })
         return out
+
+    # ---------- 逐站快照（0.8.0 / P0-3：只重算不重抓） ----------
+
+    def snapshot_put(self, key: str, site: str, payload: Any, *, status: str = "",
+                     run_id: str = "", fetched_at: str = "") -> None:
+        """写/覆盖一个源的快照（`PRIMARY KEY(key, site)`：同一部片同一源只留最新一份）。
+
+        `payload` 是该源**可复用的返回形状**（`javtxt_lookup()` / `metatube_lookup()` 的 dict）——
+        不是给人看的摘要（摘要仍在 `meta.raw_json`）。体积上限 64KB：超了就不写（快照是加速器，
+        坏了只该"变慢"，不该把库撑爆）。
+        """
+        name = str(key or "").strip()
+        source = str(site or "").strip()
+        if not name or not source or not isinstance(payload, (dict, list)):
+            return
+        text = _json_text(payload, "{}")
+        if len(text) > _SNAPSHOT_LIMIT:
+            return
+        self._exec(
+            "INSERT INTO site_snapshot(key, site, fetched_at, status, run_id, payload_json) "
+            "VALUES(?,?,?,?,?,?) ON CONFLICT(key, site) DO UPDATE SET "
+            "fetched_at=excluded.fetched_at, status=excluded.status, run_id=excluded.run_id, "
+            "payload_json=excluded.payload_json",
+            (name, source, str(fetched_at or "") or _now(), str(status or ""),
+             str(run_id or ""), text),
+        )
+
+    def snapshot_get(self, key: str, site: str) -> Optional[Dict[str, Any]]:
+        """取一个源的快照（`{site, fetched_at, status, run_id, payload}`）；没有回 `None`。"""
+        rows = self._exec(
+            "SELECT fetched_at, status, run_id, payload_json FROM site_snapshot "
+            "WHERE key=? AND site=?", (str(key or ""), str(site or "")), fetch=True,
+        ) or []
+        if not rows:
+            return None
+        return {"site": str(site or ""), "fetched_at": rows[0][0] or "",
+                "status": rows[0][1] or "", "run_id": rows[0][2] or "",
+                "payload": _json_load(rows[0][3], {})}
+
+    def snapshot_map(self, key: str) -> Dict[str, Dict[str, Any]]:
+        """一次取回某部片的**全部**源快照：`{site: {fetched_at, status, run_id, payload}}`。"""
+        rows = self._exec(
+            "SELECT site, fetched_at, status, run_id, payload_json FROM site_snapshot "
+            "WHERE key=?", (str(key or ""),), fetch=True,
+        ) or []
+        return {str(r[0] or ""): {"site": str(r[0] or ""), "fetched_at": r[1] or "",
+                                  "status": r[2] or "", "run_id": r[3] or "",
+                                  "payload": _json_load(r[4], {})} for r in rows}
+
+    def snapshot_prune(self, days: int = 30) -> int:
+        """删掉 `fetched_at` 早于 `days` 天的快照（**必须有淘汰**：否则它按库的增长一直涨）。
+
+        返回删除条数。`days<=0` 不删（防手滑把整表清空）。
+        """
+        span = _to_int(days)
+        if span <= 0:
+            return 0
+        cutoff = _shift_days(-span)
+        before = self._exec("SELECT COUNT(*) FROM site_snapshot WHERE fetched_at < ?",
+                            (cutoff,), fetch=True) or [(0,)]
+        self._exec("DELETE FROM site_snapshot WHERE fetched_at <> '' AND fetched_at < ?",
+                   (cutoff,))
+        return _to_int(before[0][0])
+
+    def snapshot_stats(self) -> Dict[str, int]:
+        """快照表概况（设置台的「运行与缓存」会读它）。"""
+        rows = self._exec("SELECT COUNT(*), COUNT(DISTINCT key) FROM site_snapshot",
+                          fetch=True) or [(0, 0)]
+        return {"rows": _to_int(rows[0][0]), "keys": _to_int(rows[0][1])}
 
     # ---------- 演员名对齐（收藏 / 订阅匹配用） ----------
 

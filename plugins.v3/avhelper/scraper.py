@@ -1232,6 +1232,127 @@ def _javdb_from_cache(row: Any) -> Tuple[Optional[Dict[str, Any]], str]:
     return None, ""
 
 
+# ---------------------------------------------------------------------------
+# 逐站快照（0.8.0 / P0-3）：只重算不重抓
+#
+# 与 `meta.raw_json` 的分工：那边是**摘要**（URL/vid/长度，受 5KB 上限），这里是**可复用结果**
+# （`javtxt_lookup()` / `metatube_lookup()` 的返回形状，落 `store.site_snapshot`）。
+# 于是"换字段聚合策略时只重算不重抓"能在**单个源**的粒度上成立。
+# ---------------------------------------------------------------------------
+
+#: 快照载荷保留的键（结果 + 排障线索；`tried`/`latency_ms` 这类过程信息不入库）
+_SNAPSHOT_KEYS: Tuple[str, ...] = (
+    "ok", "status", "vid", "url", "host", "title_jp", "title_zh", "plot_jp", "plot_zh",
+    "zh_is_machine", "actors", "release_date", "studio", "director", "number_written",
+    "error", "reason", "http_status", "provider", "id", "candidates", "mismatch", "movie",
+)
+
+
+def snapshot_use(options: Dict[str, Any]) -> Set[str]:
+    """允许复用哪些源的快照：`opts['use_cache']`。
+
+    接受集合（`("javdb","javtxt","metatube")`）或 `"all"`。**默认空** —— 复用是"只重算不重抓"
+    的显式选择，不是默认行为：站点后来补了简介、改了标题，只有重抓才看得到。
+    （`javdb` 那条既有路径不受它管：`meta.raw_json['javdb']` 存在时本来就跳过调用。）
+    """
+    raw = _opt(options, "use_cache")
+    if isinstance(raw, str):
+        return set(scrape_graph.SOURCES) if raw.strip().lower() in ("all", "1", "true") else set()
+    if isinstance(raw, (list, tuple, set, frozenset)):
+        return {str(item) for item in raw}
+    return set()
+
+
+def snapshot_payload(got: Any) -> Dict[str, Any]:
+    """把一次源调用的结果收成快照载荷（只留 `_SNAPSHOT_KEYS`，空值不留）。"""
+    data = got if isinstance(got, dict) else {}
+    return {name: data.get(name) for name in _SNAPSHOT_KEYS
+            if data.get(name) not in (None, "", [], {})}
+
+
+def write_snapshot(store: Any, key: str, site: str, got: Any, *, run_id: str = "") -> None:
+    """落一份逐站快照。`store` 缺失/不支持/写失败都**静默跳过**（快照只是加速器）。
+
+    调用方传 `store=logs`（与 `scrape_log` 同一条闸门）：`log_sources=False` 的只读调用方
+    （`preview_one`）不落盘 —— "preview 一行不写"这条纪律不能因为快照破掉。
+    """
+    if store is None or not hasattr(store, "snapshot_put"):
+        return
+    try:
+        store.snapshot_put(key, site, snapshot_payload(got),
+                           status=str((got or {}).get("status") or ""), run_id=run_id)
+    except Exception as error:                                  # pragma: no cover - 防御
+        logger.warning(f"AVHelper 写站点快照失败（{site}）：{error}")
+
+
+def javtxt_from_snapshot(row: Any) -> Optional[Dict[str, Any]]:
+    """快照 → `javtxt_lookup()` 的返回形状（`from_cache=True`）；不能复用回 `None`。
+
+    **失败快照不复用**：被 CF 拦 / 超时那次的记录只说明"当时不行"，下次要真重试；
+    只有 `ok` 与 `miss`（真·收录缺口）才值得复用。
+    """
+    data = dict((row or {}).get("payload") or {}) if isinstance(row, dict) else {}
+    if not data:
+        return None
+    status = str(data.get("status") or "miss")
+    ok = bool(data.get("ok"))
+    if not ok and status != "miss":
+        return None
+    return {
+        "ok": ok, "status": status, "from_cache": True,
+        "vid": str(data.get("vid") or ""), "url": str(data.get("url") or ""),
+        "host": str(data.get("host") or ""),
+        "title_jp": _clean_text(data.get("title_jp")),
+        "title_zh": _clean_text(data.get("title_zh")),
+        "plot_jp": _clean_text(data.get("plot_jp")),
+        "plot_zh": _clean_text(data.get("plot_zh")),
+        "zh_is_machine": bool(data.get("zh_is_machine")),
+        "actors": [a for a in (data.get("actors") or []) if isinstance(a, dict)],
+        "tried": [], "error": str(data.get("error") or ""),
+        "reason": str(data.get("reason") or ""),
+        "http_status": _to_int(data.get("http_status")), "latency_ms": 0,
+    }
+
+
+def metatube_from_snapshot(row: Any) -> Optional[Dict[str, Any]]:
+    """快照 → `metatube_lookup()` 的返回形状（`from_cache=True`）；不能复用回 `None`。
+
+    只复用 `ok` / `miss` / `mismatch` / `empty`（都是**业务结论**）；`error`（连不上/被拦）
+    必须真重试。`movie` 是**当时已过 `pick_metatube_hit()` 校验**的那条，直接还原即可。
+    """
+    data = dict((row or {}).get("payload") or {}) if isinstance(row, dict) else {}
+    if not data:
+        return None
+    status = str(data.get("status") or "miss")
+    if status not in ("ok", "miss", "mismatch", "empty"):
+        return None
+    movie = data.get("movie") if isinstance(data.get("movie"), dict) else {}
+    if status == "ok" and not movie:
+        return None
+    return {
+        "ok": bool(data.get("ok")), "status": status, "from_cache": True,
+        "movie": dict(movie), "plot_jp": _clean_text(data.get("plot_jp")),
+        "title_jp": _clean_text(data.get("title_jp")),
+        "provider": str(data.get("provider") or ""), "id": str(data.get("id") or ""),
+        "candidates": _to_int(data.get("candidates")), "mismatch": bool(data.get("mismatch")),
+        "latency_ms": 0, "error": str(data.get("error") or ""),
+        "reason": str(data.get("reason") or ""),
+        "http_status": _to_int(data.get("http_status")), "partial_keys": [],
+    }
+
+
+def partial_of(values: Dict[str, Any]) -> Dict[str, Any]:
+    """段间注入的**只读**前序结果（P0-3）：第二段的源能看到第一段已定值的字段。
+
+    今天 MetaTube 在 `metatube_fill()` 里读的就是这些（经 `skeleton`）；这里把它显式化，
+    将来 DMM 那种"必须拿标题去检索"的源才有东西可读。
+    """
+    return {name: values.get(name) for name in
+            ("display_number", "title_jp", "title_zh", "plot_jp", "plot_zh", "cover_url",
+             "actors", "tags")
+            if values.get(name) not in (None, "", [], {})}
+
+
 def _short_plot_zh(plot_zh: str, plot_jp: str, opts: Optional[Dict[str, Any]]) -> bool:
     """中文简介是不是"站点占位符"（短且**同时有日文**才判不可用）。
 
@@ -1337,7 +1458,8 @@ def _metatube_fetch(opts: Dict[str, Any], url: str, timeout: int
 
 
 def metatube_lookup(opts: Dict[str, Any], number: str, *, store: Any = None,
-                    key: str = "", run_id: str = "") -> Dict[str, Any]:
+                    key: str = "", run_id: str = "",
+                    partial: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """MetaTube 取数：搜索 → **强校验** → 提取（概述兜底 + javdb 挂掉时的骨架兜底）。
 
     只打 `/v1/movies/search?q=`：**永远用默认 `lazy=true`**（`lazy=false` 对 7 个命中 7/7 全 500）、
@@ -1365,6 +1487,9 @@ def metatube_lookup(opts: Dict[str, Any], number: str, *, store: Any = None,
         "ok": False, "status": "miss", "plot_jp": "", "title_jp": "", "movie": {},
         "provider": "", "id": "", "candidates": 0, "mismatch": False,
         "latency_ms": 0, "error": "", "reason": "", "http_status": 0,
+        # 段间注入（P0-3）：这次拿到了前序哪些字段（只读；今天只记下来，
+        # 将来 DMM 那类"必须拿标题/番号去检索"的源才会真的用它）
+        "partial_keys": sorted(str(k) for k, v in (partial or {}).items() if v),
     }
     if not base:
         out["status"] = "error"
@@ -2321,6 +2446,8 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
     # 「这个字段最后是谁给的」——**在填值的那一刻打标**（事后按链反推会撒谎：
     # javtxt 的占位简介要丢弃、MetaTube 只补空、LLM 会覆盖前两者）。
     field_sources: Dict[str, str] = {}
+    # 逐站快照的复用名单（P0-3）：`force` 时不复用（"强制重抓"要真的重抓）
+    use_snapshots = set() if bool(_opt(options, "force")) else snapshot_use(options)
 
     def mark(name: str, source: str) -> None:
         field_sources[name] = source
@@ -2407,9 +2534,21 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
 
     javtxt_meta: Dict[str, Any] = {}
     metatube_meta: Dict[str, Any] = {}
+    # 逐站快照（P0-3）：`use_cache` 点名的源可以**不发请求**直接复用上次的结果
+    snapshots: Dict[str, Any] = {}
+    if use_snapshots and store is not None and hasattr(store, "snapshot_map"):
+        try:
+            snapshots = store.snapshot_map(key) or {}
+        except Exception as error:                              # pragma: no cover - 防御
+            logger.warning(f"AVHelper 读站点快照失败（{key}）：{error}")
+            snapshots = {}
     # 启停来自取数图（`opts['sources']`，回落旧的 `plot_sources`）—— 别再自己拼条件
     if "javtxt" in enabled:
-        javtxt = _javtxt_from_cache(row.get("javtxt")) if row else None
+        javtxt = javtxt_from_snapshot(snapshots.get("javtxt")) if "javtxt" in use_snapshots \
+            else None
+        if javtxt is None:
+            # S11 抓取缓存（工装 `coverage.json`）：命中就一次站点请求都不发
+            javtxt = _javtxt_from_cache(row.get("javtxt")) if row else None
         if javtxt is None:
             if cache_only:
                 # 缓存的"没命中"同样是权威结论（S11：8 条站点收录缺口，重试也没用）
@@ -2420,6 +2559,8 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
             else:
                 javtxt = javtxt_lookup(options, display_number, store=logs, key=key,
                                        run_id=run_id)
+                # 快照与 `scrape_log` 同一条闸门（`store=logs`）：preview 只读、不落盘
+                write_snapshot(logs, key, SRC_JAVTXT, javtxt, run_id=run_id)
         javtxt_meta = javtxt
         sources[SRC_JAVTXT] = {
             "status": javtxt.get("status", "miss"), "latency_ms": javtxt.get("latency_ms", 0),
@@ -2480,11 +2621,23 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
     #   缺中文简介、或 javdb 没给标题/封面（`need_core` 的等价物）时才值得那 10 秒。
     metatube_spec = scrape_graph.SOURCES["metatube"]
     core = {"plot_zh": plot_zh, "title_jp": title_jp, "cover_url": skeleton.get("cover_url")}
+    # 段间注入（P0-3）：第二段的源读得到第一段**已定值**的字段（只读）
+    partial = partial_of({
+        "display_number": display_number, "title_jp": title_jp, "title_zh": title_zh,
+        "plot_jp": plot_jp, "plot_zh": plot_zh, "cover_url": skeleton.get("cover_url"),
+        "actors": [a.get("name") for a in (skeleton.get("actors") or [])
+                   if isinstance(a, dict)],
+    })
     if cache_only:
         # dry-run 不打 MetaTube：它恒定 ~10 秒且**不缓存**，108 条就是 18 分钟纯等待
         sources[SRC_METATUBE] = {"status": "skipped", "why": "cache_only dry-run"}
     elif scrape_graph.should_run(metatube_spec, core, enabled=enabled):
-        mt = metatube_lookup(options, display_number, store=logs, key=key, run_id=run_id)
+        mt = metatube_from_snapshot(snapshots.get("metatube")) \
+            if "metatube" in use_snapshots else None
+        if mt is None:
+            mt = metatube_lookup(options, display_number, store=logs, key=key, run_id=run_id,
+                                 partial=partial)
+            write_snapshot(logs, key, SRC_METATUBE, mt, run_id=run_id)
         metatube_meta = mt
         sources[SRC_METATUBE] = {
             "status": mt.get("status", "miss"), "latency_ms": mt.get("latency_ms", 0),
@@ -2495,6 +2648,9 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
             sources[SRC_METATUBE]["reason"] = mt.get("reason")
         if mt.get("http_status"):
             sources[SRC_METATUBE]["http_status"] = _to_int(mt.get("http_status"))
+        if mt.get("from_cache"):
+            # P0-3：这次没发请求，用的是逐站快照（与 javtxt 那条同样的标记）
+            sources[SRC_METATUBE]["from_cache"] = True
         if mt.get("movie"):
             plot_before = plot_jp
             filled = metatube_fill(skeleton, mt["movie"])
