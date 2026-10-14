@@ -5,8 +5,8 @@
 **AV 资源助手** —— 番号发现、订阅、选种下载与入库标记的一体化界面
 
 [![MoviePilot](https://img.shields.io/badge/MoviePilot-v3.x-4c6ef5?style=flat-square)](https://github.com/jxxghp/MoviePilot)
-[![Plugin Version](https://img.shields.io/badge/plugin-0.4.1-7048e8?style=flat-square)](package.v3.json)
-[![License](https://img.shields.io/badge/license-非商业学习许可-ff8a4c?style=flat-square)](LICENSE)
+[![Plugin Version](https://img.shields.io/badge/plugin-0.7.0-7048e8?style=flat-square)](package.v3.json)
+[![License](https://img.shields.io/badge/license-GPL--3.0-3da639?style=flat-square)](LICENSE)
 
 </div>
 
@@ -235,7 +235,7 @@ A：卸载本身不会删。数据都在数据根目录下（默认 MoviePilot �
 
 ## 二次开发
 
-欢迎 fork、改代码、提 PR —— 只要符合 [LICENSE](LICENSE) 的**非商业**条件。
+欢迎 fork、改代码、提 PR —— 遵循 [LICENSE](LICENSE)（GPL-3.0）即可。
 
 **前端（Vue 联邦）**
 
@@ -268,13 +268,14 @@ python -m compileall plugins.v3/avhelper
 
 ## 开源声明与许可
 
-- 本项目**欢迎任何人学习、使用、修改与二次开发**，也欢迎 fork 与提交 PR。
-- 但**严禁任何形式的商业使用**：不得出售、出租、付费分发，不得作为付费产品或付费服务的一部分
-  （含代部署、代配置、付费教程社群等），不得与硬件/软件/镜像/云服务捆绑销售，不得以本项目为
-  卖点投放广告或引流牟利。
-- 分发（含修改版）时请**保留署名与本仓库地址**，并以**相同方式共享**（继续采用同样禁止商用的许可）。
-- 完整条款见 [LICENSE](LICENSE)。注意：由于禁止商用，本许可属于「源码公开（source-available）」
-  许可，按 OSI 定义**不是**严格意义的开源许可。
+- 本项目采用 **GNU General Public License v3.0（GPL-3.0）**，完整条款见 [LICENSE](LICENSE)。
+- 你可以自由学习、使用、修改与再分发（含商用），条件是：**保留署名与本仓库地址**、**修改版同样以 GPL-3.0 分发**、
+  分发二进制时**提供对应源码**。
+- ⚠️ **本仓库内置了第三方 GPL-3.0 数据文件**：`plugins.v3/avhelper/resources/` 下的
+  `mapping_actor.xml` / `mapping_info.xml` / `zhcdict.json` 取自 [sqzw-x/amane](https://github.com/sqzw-x/amane)
+  （GPL-3.0-only），这正是本项目整体切换到 GPL-3.0 的原因。出处、commit 与校验值见
+  [resources/NOTICE.md](plugins.v3/avhelper/resources/NOTICE.md)。
+  这三份文件可以原样替换成你自己的版本（放进插件数据目录的 `resources/` 即会优先使用，见 `paths.resource_file()`）。
 
 ## 致谢
 
@@ -285,5 +286,5 @@ python -m compileall plugins.v3/avhelper
 ---
 
 <div align="center">
-<sub>仅供学习研究 · 禁止商用 · 请遵守当地法律法规与你所使用服务的条款</sub>
+<sub>仅供学习研究 · GPL-3.0 · 请遵守当地法律法规与你所使用服务的条款</sub>
 </div>

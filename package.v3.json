@@ -1,7 +1,7 @@
 {
   "AVHelper": {
     "name": "AV 资源助手",
-    "description": "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与通知（Vue 联邦界面 + 自带应用页）。仅供学习研究使用，禁止商用。",
+    "description": "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与通知（Vue 联邦界面 + 自带应用页）。仅供学习研究使用，请遵守当地法律法规。",
     "labels": "发现",
     "version": "0.7.0",
     "icon": "https://raw.githubusercontent.com/ssmengyan/MoviePilot-Plugins-AV/main/icons/avhelper.png",
