@@ -367,6 +367,7 @@ const SCRAPE_DEFAULTS = {
   scrapeMode: "off",
   plotJavtxt: true,
   plotMetatube: true,
+  metatubeBase: "",
   translateModel: "hy3",
   translateModelFallback: "deepseek-v4.1-flash",
   cropAnchor: "auto",
@@ -404,6 +405,8 @@ function toScrapeSettings(raw) {
     scrapeMode: pick(src.scrapeMode, MODES, SCRAPE_DEFAULTS.scrapeMode),
     plotJavtxt: boolOf(src.plotJavtxt, SCRAPE_DEFAULTS.plotJavtxt),
     plotMetatube: boolOf(src.plotMetatube, SCRAPE_DEFAULTS.plotMetatube),
+    // 地址没有默认值：留空就是留空（后端据此报「未配置 MetaTube 地址」），不回落
+    metatubeBase: typeof src.metatubeBase === "string" ? src.metatubeBase.trim() : "",
     translateModel: textOf$1(src.translateModel, SCRAPE_DEFAULTS.translateModel),
     translateModelFallback: textOf$1(src.translateModelFallback, SCRAPE_DEFAULTS.translateModelFallback),
     cropAnchor: pick(src.cropAnchor, ANCHORS, SCRAPE_DEFAULTS.cropAnchor),
@@ -1646,13 +1649,13 @@ const _sfc_main$r = /* @__PURE__ */ _defineComponent$r({
             ]),
             default: _withCtx$m(() => [
               _createVNode$n(_component_v_card_title, null, {
-                default: _withCtx$m(() => _cache[9] || (_cache[9] = [
+                default: _withCtx$m(() => _cache[10] || (_cache[10] = [
                   _createTextVNode$k("刮削")
                 ])),
                 _: 1
               }),
               _createVNode$n(_component_v_card_subtitle, null, {
-                default: _withCtx$m(() => _cache[10] || (_cache[10] = [
+                default: _withCtx$m(() => _cache[11] || (_cache[11] = [
                   _createTextVNode$k("自建刮削层 · 简介 / 翻译 / 裁切 / 预告片 · 与「下载规则」同一份插件设置（POST /rule）")
                 ])),
                 _: 1
@@ -1662,7 +1665,7 @@ const _sfc_main$r = /* @__PURE__ */ _defineComponent$r({
           }),
           _createVNode$n(_component_v_card_text, null, {
             default: _withCtx$m(() => [
-              _cache[13] || (_cache[13] = _createElementVNode$p("div", { class: "text-caption text-medium-emphasis mb-1" }, "刮削模式", -1)),
+              _cache[14] || (_cache[14] = _createElementVNode$p("div", { class: "text-caption text-medium-emphasis mb-1" }, "刮削模式", -1)),
               _createVNode$n(_component_v_btn_toggle, {
                 "model-value": props.settings.scrapeMode,
                 mandatory: "",
@@ -1688,7 +1691,7 @@ const _sfc_main$r = /* @__PURE__ */ _defineComponent$r({
                 _: 1
               }, 8, ["model-value"]),
               _createElementVNode$p("p", _hoisted_1$p, _toDisplayString$q(modeHint.value) + " 具体字段路由由后端按这一档执行；本栏只负责选择与保存。 ", 1),
-              _cache[14] || (_cache[14] = _createElementVNode$p("div", { class: "text-caption text-medium-emphasis mb-1" }, "简介来源", -1)),
+              _cache[15] || (_cache[15] = _createElementVNode$p("div", { class: "text-caption text-medium-emphasis mb-1" }, "简介来源", -1)),
               _createVNode$n(_component_v_switch, {
                 "model-value": props.settings.plotJavtxt,
                 color: "primary",
@@ -1707,11 +1710,24 @@ const _sfc_main$r = /* @__PURE__ */ _defineComponent$r({
                 class: "mb-1",
                 "onUpdate:modelValue": _cache[2] || (_cache[2] = (value) => patch("plotMetatube", value === true))
               }, null, 8, ["model-value"]),
-              _cache[15] || (_cache[15] = _createElementVNode$p("p", { class: "text-caption text-medium-emphasis mb-4" }, [
+              _cache[16] || (_cache[16] = _createElementVNode$p("p", { class: "text-caption text-medium-emphasis mb-1" }, [
                 _createTextVNode$k(" javdb 侧不给简介（实测 12/12 "),
                 _createElementVNode$p("code", null, "summary"),
                 _createTextVNode$k(" 为 null），所以简介只能来自这两个源； 两个都关掉时这一档等于「只写核心字段」。 ")
               ], -1)),
+              props.settings.plotMetatube ? (_openBlock$r(), _createBlock$l(_component_v_text_field, {
+                key: 0,
+                "model-value": props.settings.metatubeBase,
+                label: "MetaTube 地址",
+                placeholder: "http://metatube:8080",
+                hint: "自建 MetaTube Server 的根地址；留空 = 不做 MetaTube 兜底（数据源自检会显式报「未配置」）",
+                "persistent-hint": "",
+                variant: "outlined",
+                density: "comfortable",
+                clearable: "",
+                class: "mb-4",
+                "onUpdate:modelValue": _cache[3] || (_cache[3] = (value) => patch("metatubeBase", String(value ?? "").trim()))
+              }, null, 8, ["model-value"])) : _createCommentVNode$k("", true),
               _createElementVNode$p("div", _hoisted_2$o, [
                 _createVNode$n(_component_v_text_field, {
                   "model-value": props.settings.translateModel,
@@ -1721,7 +1737,7 @@ const _sfc_main$r = /* @__PURE__ */ _defineComponent$r({
                   variant: "outlined",
                   density: "comfortable",
                   clearable: "",
-                  "onUpdate:modelValue": _cache[3] || (_cache[3] = (value) => patch("translateModel", String(value ?? "").trim() || "hy3"))
+                  "onUpdate:modelValue": _cache[4] || (_cache[4] = (value) => patch("translateModel", String(value ?? "").trim() || "hy3"))
                 }, null, 8, ["model-value"]),
                 _createVNode$n(_component_v_text_field, {
                   "model-value": props.settings.translateModelFallback,
@@ -1731,7 +1747,7 @@ const _sfc_main$r = /* @__PURE__ */ _defineComponent$r({
                   variant: "outlined",
                   density: "comfortable",
                   clearable: "",
-                  "onUpdate:modelValue": _cache[4] || (_cache[4] = (value) => patch("translateModelFallback", String(value ?? "").trim()))
+                  "onUpdate:modelValue": _cache[5] || (_cache[5] = (value) => patch("translateModelFallback", String(value ?? "").trim()))
                 }, null, 8, ["model-value"])
               ]),
               _createElementVNode$p("div", _hoisted_3$l, [
@@ -1742,15 +1758,15 @@ const _sfc_main$r = /* @__PURE__ */ _defineComponent$r({
                   loading: checking.value,
                   onClick: runSelfcheck
                 }, {
-                  default: _withCtx$m(() => _cache[11] || (_cache[11] = [
+                  default: _withCtx$m(() => _cache[12] || (_cache[12] = [
                     _createTextVNode$k("模型自检")
                   ])),
                   _: 1
                 }, 8, ["loading"]),
-                _cache[12] || (_cache[12] = _createElementVNode$p("span", { class: "text-caption text-medium-emphasis" }, "POST /scrape/selfcheck（后端转 translator.selfcheck）", -1))
+                _cache[13] || (_cache[13] = _createElementVNode$p("span", { class: "text-caption text-medium-emphasis" }, "POST /scrape/selfcheck（后端转 translator.selfcheck）", -1))
               ]),
               check.value ? (_openBlock$r(), _createBlock$l(_component_v_alert, {
-                key: 0,
+                key: 1,
                 type: check.value.ok ? "success" : "warning",
                 variant: "tonal",
                 density: "compact",
@@ -1761,7 +1777,7 @@ const _sfc_main$r = /* @__PURE__ */ _defineComponent$r({
                 ]),
                 _: 1
               }, 8, ["type"])) : _createCommentVNode$k("", true),
-              _cache[16] || (_cache[16] = _createElementVNode$p("div", { class: "text-caption text-medium-emphasis mb-1" }, "封面裁切锚点", -1)),
+              _cache[17] || (_cache[17] = _createElementVNode$p("div", { class: "text-caption text-medium-emphasis mb-1" }, "封面裁切锚点", -1)),
               _createVNode$n(_component_v_btn_toggle, {
                 "model-value": props.settings.cropAnchor,
                 mandatory: "",
@@ -1769,7 +1785,7 @@ const _sfc_main$r = /* @__PURE__ */ _defineComponent$r({
                 variant: "outlined",
                 color: "primary",
                 class: "mb-1",
-                "onUpdate:modelValue": _cache[5] || (_cache[5] = (value) => value && patch("cropAnchor", value))
+                "onUpdate:modelValue": _cache[6] || (_cache[6] = (value) => value && patch("cropAnchor", value))
               }, {
                 default: _withCtx$m(() => [
                   (_openBlock$r(), _createElementBlock$q(_Fragment$i, null, _renderList$g(ANCHORS, (item) => {
@@ -1787,7 +1803,7 @@ const _sfc_main$r = /* @__PURE__ */ _defineComponent$r({
                 _: 1
               }, 8, ["model-value"]),
               _createElementVNode$p("p", _hoisted_4$i, _toDisplayString$q(anchorHint.value), 1),
-              _cache[17] || (_cache[17] = _createElementVNode$p("div", { class: "text-caption text-medium-emphasis mb-1" }, "预告片", -1)),
+              _cache[18] || (_cache[18] = _createElementVNode$p("div", { class: "text-caption text-medium-emphasis mb-1" }, "预告片", -1)),
               _createVNode$n(_component_v_btn_toggle, {
                 "model-value": props.settings.trailerMode,
                 mandatory: "",
@@ -1795,7 +1811,7 @@ const _sfc_main$r = /* @__PURE__ */ _defineComponent$r({
                 variant: "outlined",
                 color: "primary",
                 class: "mb-1",
-                "onUpdate:modelValue": _cache[6] || (_cache[6] = (value) => value && patch("trailerMode", value))
+                "onUpdate:modelValue": _cache[7] || (_cache[7] = (value) => value && patch("trailerMode", value))
               }, {
                 default: _withCtx$m(() => [
                   (_openBlock$r(), _createElementBlock$q(_Fragment$i, null, _renderList$g(TRAILERS, (item) => {
@@ -1813,7 +1829,7 @@ const _sfc_main$r = /* @__PURE__ */ _defineComponent$r({
                 _: 1
               }, 8, ["model-value"]),
               _createElementVNode$p("p", _hoisted_5$h, _toDisplayString$q(trailerHint.value) + " 产品口径：写媒体目录（本地文件那档）会让 Emby 立刻扫一遍库，所以这里默认停在「关闭」。 ", 1),
-              _cache[18] || (_cache[18] = _createElementVNode$p("div", { class: "text-caption text-medium-emphasis mb-1" }, "定时重刮", -1)),
+              _cache[19] || (_cache[19] = _createElementVNode$p("div", { class: "text-caption text-medium-emphasis mb-1" }, "定时重刮", -1)),
               _createVNode$n(_component_v_switch, {
                 "model-value": props.settings.autoScrapeTier1,
                 color: "primary",
@@ -1821,7 +1837,7 @@ const _sfc_main$r = /* @__PURE__ */ _defineComponent$r({
                 inset: "",
                 label: "Tier 1：新片与残缺片（指数退避 6h→24h→72h→7d→14d）",
                 class: "mb-1",
-                "onUpdate:modelValue": _cache[7] || (_cache[7] = (value) => patch("autoScrapeTier1", value === true))
+                "onUpdate:modelValue": _cache[8] || (_cache[8] = (value) => patch("autoScrapeTier1", value === true))
               }, null, 8, ["model-value"]),
               _createVNode$n(_component_v_switch, {
                 "model-value": props.settings.autoScrapeTier2,
@@ -1830,9 +1846,9 @@ const _sfc_main$r = /* @__PURE__ */ _defineComponent$r({
                 inset: "",
                 label: "Tier 2：全库冷数据滚动（每轮取最久未更新的 5 条）",
                 class: "mb-1",
-                "onUpdate:modelValue": _cache[8] || (_cache[8] = (value) => patch("autoScrapeTier2", value === true))
+                "onUpdate:modelValue": _cache[9] || (_cache[9] = (value) => patch("autoScrapeTier2", value === true))
               }, null, 8, ["model-value"]),
-              _cache[19] || (_cache[19] = _createElementVNode$p("p", { class: "text-caption text-medium-emphasis mb-0" }, " 两档默认都关：打开后由后端调度器按退避节奏跑，队列长度在数据台「刮削」栏顶部看。 ", -1))
+              _cache[20] || (_cache[20] = _createElementVNode$p("p", { class: "text-caption text-medium-emphasis mb-0" }, " 两档默认都关：打开后由后端调度器按退避节奏跑，队列长度在数据台「刮削」栏顶部看。 ", -1))
             ]),
             _: 1
           })
@@ -1843,7 +1859,7 @@ const _sfc_main$r = /* @__PURE__ */ _defineComponent$r({
   }
 });
 
-const ScrapePanel = /* @__PURE__ */ _export_sfc(_sfc_main$r, [["__scopeId", "data-v-7d9bb2f9"]]);
+const ScrapePanel = /* @__PURE__ */ _export_sfc(_sfc_main$r, [["__scopeId", "data-v-9d9bd18e"]]);
 
 const {defineComponent:_defineComponent$q} = await importShared('vue');
 
@@ -2888,7 +2904,7 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
               _createVNode$k(_component_v_text_field, {
                 "model-value": props.config.emby_host,
                 label: "Emby 地址",
-                placeholder: "http://192.0.2.10:8096",
+                placeholder: "http://emby:8096",
                 hint: "可留空；两栏都空时自动复用 MoviePilot 已配置的 Emby",
                 "persistent-hint": "",
                 variant: "outlined",
@@ -2920,7 +2936,7 @@ const _sfc_main$n = /* @__PURE__ */ _defineComponent$n({
   }
 });
 
-const LibraryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-d05104fc"]]);
+const LibraryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-3801e593"]]);
 
 const {defineComponent:_defineComponent$m} = await importShared('vue');
 

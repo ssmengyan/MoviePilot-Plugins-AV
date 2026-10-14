@@ -1173,6 +1173,7 @@ class TestScrapeConf:
         conf = plugin.scrape_conf()
         assert conf == {
             "scrapeMode": "fill", "plotJavtxt": True, "plotMetatube": True,
+            "metatubeBase": "",
             "translateModel": "hy3", "translateModelFallback": "deepseek-v4.1-flash",
             "cropAnchor": "auto", "trailerMode": "off",
             "autoScrapeTier1": True, "autoScrapeTier2": True,
@@ -1183,12 +1184,36 @@ class TestScrapeConf:
         store.kv_set("global_rule", {"scrapeMode": "hybrid", "plotJavtxt": False,
                                      "cropAnchor": "right", "trailerMode": "local",
                                      "translateModel": "hy3-pro", "cleanSuffixes": ["-UC", " "],
-                                     "nameTemplate": "{number}"})
+                                     "nameTemplate": "{number}",
+                                     "metatubeBase": " http://metatube.test:8080 "})
         conf = plugin.scrape_conf()
         assert conf["scrapeMode"] == "hybrid" and conf["plotJavtxt"] is False
         assert conf["cropAnchor"] == "right" and conf["trailerMode"] == "local"
         assert conf["translateModel"] == "hy3-pro"
         assert conf["cleanSuffixes"] == ["-UC"]
+        assert conf["metatubeBase"] == "http://metatube.test:8080"
+
+    def test_scrape_opts_maps_camel_to_snake(self, plugin, store):
+        """★ 0.7.0 集成缺口回归：`scraper._opt()` 按下划线键取值，驼峰开关必须被映射过去，
+        否则界面上的「简介来源」「裁切锚点」「MetaTube 地址」全部静默失效。"""
+        store.kv_set("global_rule", {"plotJavtxt": True, "plotMetatube": False,
+                                     "cropAnchor": "right",
+                                     "metatubeBase": "http://metatube.test:8080"})
+        opts = plugin.scrape_opts()
+        assert opts["plot_sources"] == ("javtxt",)
+        assert opts["crop_anchor"] == "right"
+        assert opts["metatube_base"] == "http://metatube.test:8080"
+        # 驼峰原样保留（契约里 opts 就是透传形状，别删）
+        assert opts["plotMetatube"] is False
+
+    def test_scrape_opts_both_plot_sources_off_gives_empty_tuple(self, plugin, store):
+        store.kv_set("global_rule", {"plotJavtxt": False, "plotMetatube": False})
+        assert plugin.scrape_opts()["plot_sources"] == ()
+
+    def test_scrape_opts_metatube_base_empty_stays_empty(self, plugin, store):
+        """没配地址 → 传空串而不是缺键：`_opt()` 认空串为"已给"，数据源自检才能回显「未配置」。"""
+        opts = plugin.scrape_opts()
+        assert opts["metatube_base"] == ""
 
     def test_bad_values_fall_back_without_raising(self, plugin, store):
         store.kv_set("global_rule", {"scrapeMode": "随便", "cropAnchor": 7, "trailerMode": None,

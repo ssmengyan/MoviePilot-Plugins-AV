@@ -893,7 +893,7 @@ class AVHelper(_PluginBase):
         return merge_rule(rule)
 
     def scrape_conf(self) -> Dict[str, Any]:
-        """刮削设置的 11 项（**存放在 kv 的 `global_rule` 里**，不是宿主插件配置）。
+        """刮削设置的 12 项（**存放在 kv 的 `global_rule` 里**，不是宿主插件配置）。
 
         口径（主统筹 2026-10-14 更正，覆盖任务书 E 段）：前端设置台 S9 已经在用这套
         camelCase 键名读写 `global_rule`，所以这里**只读不写**、缺键逐项回落默认值 ——
@@ -902,7 +902,8 @@ class AVHelper(_PluginBase):
 
         键名一个字母都不许改（前端按这套读）：`scrapeMode` / `plotJavtxt` / `plotMetatube` /
         `translateModel` / `translateModelFallback` / `cropAnchor` / `trailerMode` /
-        `autoScrapeTier1` / `autoScrapeTier2` / `cleanSuffixes` / `nameTemplate`。
+        `autoScrapeTier1` / `autoScrapeTier2` / `cleanSuffixes` / `nameTemplate` /
+        `metatubeBase`（0.7.0 加：MetaTube 服务地址，**代码里不写死**，留空 = 不做 MetaTube 兜底）。
         """
         rule = self.global_rule() or {}
         suffixes = rule.get("cleanSuffixes")
@@ -910,6 +911,7 @@ class AVHelper(_PluginBase):
             "scrapeMode": pick_choice(rule.get("scrapeMode"), SCRAPE_MODES, "fill"),
             "plotJavtxt": pick_bool(rule.get("plotJavtxt"), True),
             "plotMetatube": pick_bool(rule.get("plotMetatube"), True),
+            "metatubeBase": str(rule.get("metatubeBase") or "").strip(),
             "translateModel": str(rule.get("translateModel") or "").strip() or "hy3",
             "translateModelFallback": (str(rule.get("translateModelFallback") or "").strip()
                                        or "deepseek-v4.1-flash"),
@@ -2511,7 +2513,14 @@ class AVHelper(_PluginBase):
         return self._emby_client
 
     def scrape_opts(self) -> Dict[str, Any]:
-        """给 `scraper.*` 的 `opts`：设置台那 11 项（`scrape_conf()`）+ `proxy` + **`library`**。
+        """给 `scraper.*` 的 `opts`：设置台那 12 项（`scrape_conf()`）+ `proxy` + **`library`**，
+        并把驼峰键**映射成 scraper 认的下划线键**。
+
+        ★ 0.7.0 修的集成缺口：`scraper._opt()` 按**字面键名**取值，而设置台存的是驼峰
+        （`plotJavtxt` / `plotMetatube` / `cropAnchor` / `metatubeBase`），scraper 读的是下划线
+        （`plot_sources` / `crop_anchor` / `metatube_base`）。没有这层映射，界面上的开关与
+        地址**全部静默失效**（永远走 `DEFAULT_OPTS`）。驼峰键原样保留无害，别删 ——
+        契约里 `opts` 的形状就是这样透传的。
 
         **`library` 是必需项**（S10 试点批抓到的阻塞级集成缺口）：`scraper.locate_items()` 的定位顺序是
         「显式 `emby:<id>` → `store.item_list(key=…)` → `opts['emby_id']` → **`opts['library']`
@@ -2529,7 +2538,18 @@ class AVHelper(_PluginBase):
         同一部影片的备用版本、`/Items` 只回主条目（11452）—— 所以「一个 key → 一个 Emby **可见**条目」
         是正常的，写到主条目就是对的；`media_item` 一行一个 **Emby 可见条目**，不是一行一个文件。
         """
-        opts = dict(self.scrape_conf())
+        conf = self.scrape_conf()
+        opts = dict(conf)
+        # 驼峰 → 下划线：两个开关合成 `plot_sources`（顺序即回落优先级，契约 §4.2）
+        sources = []
+        if conf["plotJavtxt"]:
+            sources.append("javtxt")
+        if conf["plotMetatube"]:
+            sources.append("metatube")
+        opts["plot_sources"] = tuple(sources)
+        opts["crop_anchor"] = conf["cropAnchor"]
+        # MetaTube 地址：留空就传空串（`_opt()` 认空串为"已给"→ 数据源自检回显"未配置"）
+        opts["metatube_base"] = conf["metatubeBase"]
         opts["proxy"] = self._proxy
         host, apikey = self._emby_conn()
         opts["library"] = self.emby() if (host and apikey) else None

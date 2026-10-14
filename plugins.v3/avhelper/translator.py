@@ -5,9 +5,12 @@
 
 设计口径（每条都有实测依据，别改）：
 
-- **模型**：默认 `hy3`（NAS 网关 `http://192.0.2.50:3065/v1`，OpenAI 兼容），失败降级
-  `deepseek-v4.1-flash`（D6）。网关坐标从宿主运行时配置读（`app.runtime.settings.get_runtime_setting`），
-  **模块 import 期不读配置、不联网**（单测环境没有宿主，延迟到调用点）。
+- **模型**：默认 `hy3`，失败降级 `deepseek-v4.1-flash`（D6；这两个是公开模型标识）。
+  **网关坐标不写死**（同 `DEFAULT_PROXY` 的公开分发口径）：`base_url` / `api_key` 从宿主
+  运行时配置读（`app.runtime.settings.get_runtime_setting`，键 `LLM_BASE_URL` /
+  `LLM_API_KEY`），也可用同名环境变量覆盖；未配置 = 不调 LLM、全部标 `untranslated`
+  保留日文，**绝不编造中文**。**模块 import 期不读配置、不联网**（单测环境没有宿主，
+  延迟到调用点）。
 - **`max_tokens` 必须给足（D20 / P0-②）**：`hy3` 把 token 先烧在 `reasoning_content` 上，
   `max_tokens` 太小会 `finish_reason=length` 且 `content=""`（实测 512 必空、4096 在「5 条露骨简介」
   这种批次上也会被推理耗尽）。所以默认给 8192，并且**显式判空**：`content` 为空而
@@ -46,10 +49,10 @@ logger = _host_logger if _host_logger is not None else logging.getLogger(__name_
 
 # ---------------------------------------------------------------- 常量
 
-DEFAULT_MODEL = "hy3"
+DEFAULT_MODEL = "hy3"                 # 公开模型标识，不是私有坐标；坐标（base_url/key）一律不写死
 DEFAULT_FALLBACK = "deepseek-v4.1-flash"
 
-DEFAULT_BASE_URL = "http://192.0.2.50:3065/v1"
+DEFAULT_BASE_URL = ""           # OpenAI 兼容网关地址同 `DEFAULT_PROXY` 口径：只存在配置里
 CHAT_PATH = "/chat/completions"
 SELFCHECK_TIMEOUT = 30      # 自检要快，界面点一下就得回
 CHAT_TIMEOUT = 180          # 批量超时：实测 hy3 最长 52 s，180 s 有 3.4x 余量（别按中位数设）

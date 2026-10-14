@@ -68,7 +68,7 @@ function mode(): 'reuse' | 'own' | 'half' {
       <v-text-field
         :model-value="props.config.emby_host"
         label="Emby 地址"
-        placeholder="http://192.0.2.10:8096"
+        placeholder="http://emby:8096"
         hint="可留空；两栏都空时自动复用 MoviePilot 已配置的 Emby"
         persistent-hint
         variant="outlined"

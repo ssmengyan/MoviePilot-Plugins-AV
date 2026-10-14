@@ -114,8 +114,10 @@ JAVTXT_HOSTS: Tuple[str, ...] = ("https://javtxt.com", "https://javtxt.net", "ht
 # 单站点请求间隔（契约 §4.2 硬要求 ≥2s）。搜索要试多个变体，不节流会打爆站点。
 JAVTXT_MIN_INTERVAL = 2.0
 
-# MetaTube Server（§0 坐标；没配 token，免鉴权）
-METATUBE_BASE = "http://192.0.2.11:8080"
+# MetaTube Server 地址：**代码里不留坐标**（同 `DEFAULT_PROXY` 的公开分发口径，0.7.0 起），
+# 只从插件设置「刮削」栏的 `metatubeBase` 来；留空 = 混合模式不做 MetaTube 兜底，
+# `metatube_lookup()` 会给出「未配置 MetaTube 地址」的显式 error，不炸、不编造。
+METATUBE_BASE = ""
 # MetaTube 单次 search 的 HTTP 超时：**必须 ≥25 秒**（S0b：服务端对 30 个源有硬 10 秒截止，
 # 30 次实测全落在 [10000, 10047] ms；给 10 秒会把"它还在正常等上游"误判成超时）
 METATUBE_TIMEOUT = 30
@@ -153,7 +155,7 @@ _TMP_PREFIX = "avhelper-scrape-"
 
 DEFAULT_OPTS: Dict[str, Any] = {
     "proxy": "",                     # javtxt / javdb 代理；**只从调用方传进来**
-    "metatube_base": METATUBE_BASE,
+    "metatube_base": METATUBE_BASE,  # 只从设置台 `metatubeBase` 来（见 `scrape_opts()` 的映射）
     "javtxt_hosts": JAVTXT_HOSTS,
     "crop_anchor": "auto",           # auto / left / center / right / raw
     "write_images": True,            # 封面 + 剧照

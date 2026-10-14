@@ -371,7 +371,7 @@ def emby_image(host: str, apikey: str, item_id: str, img_type: str = "Primary"
     `?emby=<item_id>` 与 `?emby_person=<person_id>` 是同一个端点（Person 也是 Item），
     差别只在调用方传进来的 id；返回值落磁盘缓存（与 URL 图分开，见 `emby_cache_path`）。
 
-    :param host: Emby 根地址（`http://192.0.2.50:8096`；带 `/emby` 也认）
+    :param host: Emby 根地址（宿主配置的 `EMBY_HOST`，形如 `http://<媒体服务器>:8096`；带 `/emby` 也认）
     :param apikey: Emby API Key（由 `__init__.py` 从配置里读，本模块不读配置）
     :param item_id: 影片 / Person 的 Emby Id
     :param img_type: `Primary` / `Backdrop/0` / `Thumb` …

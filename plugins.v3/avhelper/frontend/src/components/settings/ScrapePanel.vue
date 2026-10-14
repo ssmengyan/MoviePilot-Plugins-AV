@@ -171,10 +171,23 @@ async function runSelfcheck(): Promise<void> {
         class="mb-1"
         @update:model-value="(value: any) => patch('plotMetatube', value === true)"
       />
-      <p class="text-caption text-medium-emphasis mb-4">
+      <p class="text-caption text-medium-emphasis mb-1">
         javdb 侧不给简介（实测 12/12 <code>summary</code> 为 null），所以简介只能来自这两个源；
         两个都关掉时这一档等于「只写核心字段」。
       </p>
+      <v-text-field
+        v-if="props.settings.plotMetatube"
+        :model-value="props.settings.metatubeBase"
+        label="MetaTube 地址"
+        placeholder="http://metatube:8080"
+        hint="自建 MetaTube Server 的根地址；留空 = 不做 MetaTube 兜底（数据源自检会显式报「未配置」）"
+        persistent-hint
+        variant="outlined"
+        density="comfortable"
+        clearable
+        class="mb-4"
+        @update:model-value="(value: any) => patch('metatubeBase', String(value ?? '').trim())"
+      />
 
       <!-- ===== 翻译模型 + 自检 ===== -->
       <div class="avh-grid mb-2">

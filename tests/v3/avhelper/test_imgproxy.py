@@ -135,6 +135,8 @@ REJECTED = [
     "ftp://tp.spfcas.com/x.jpg",
     "//tp.spfcas.com/x.jpg",
     # IP 字面量（含局域网 Emby 本身：它有自己的入口 `emby_image()`，不走 /img）
+    # 地址一律用 RFC 5737 TEST-NET（`192.0.2.0/24`）：既保住"IP 字面量"这条语义，
+    # 又不泄露任何真实内网坐标（`tests/` 会随公开仓库发布）。
     "https://127.0.0.1/x.jpg",
     "http://192.0.2.50:8096/emby/Items/1/Images/Primary",
     "https://[::1]/x.jpg",
@@ -341,8 +343,8 @@ def test_fetch_rejects_non_image_and_http_errors(imgproxy, cache_root, monkeypat
 def test_fetch_passes_proxy(imgproxy, cache_root, monkeypatch):
     http = _FakeHTTP(b"\xff\xd8\xff\xdb" + b"\x0c" * 16)
     monkeypatch.setattr(imgproxy, "_open", http)
-    imgproxy.fetch("https://tp.spfcas.com/p.jpg", proxy="http://192.0.2.11:7890")
-    assert http.calls[0]["proxy"] == "http://192.0.2.11:7890"
+    imgproxy.fetch("https://tp.spfcas.com/p.jpg", proxy="http://proxy.invalid:7890")
+    assert http.calls[0]["proxy"] == "http://proxy.invalid:7890"
     assert http.calls[0]["direct"] is False
 
 
@@ -350,7 +352,7 @@ def test_fetch_passes_proxy(imgproxy, cache_root, monkeypatch):
 # 五、emby_image()：拼 URL、缓存键、失败降级
 # ---------------------------------------------------------------------------
 
-EMBY = "http://192.0.2.50:8096"
+EMBY = "http://192.0.2.50:8096"   # RFC 5737 TEST-NET：假的局域网地址，不泄露真实坐标
 # 假密钥：这里**只**用于拼 URL 与缓存键的断言，绝不是真凭据。
 # ⚠️ 2026-10-14 修：这个常量原先被写成了本机线上 Emby 的真实 API Key，而 `tests/` 会随
 # 公开仓库（`MoviePilot-Plugins-AV/` 子树）一起发布 —— 等于把密钥公开。任何测试都不得内置真凭据。

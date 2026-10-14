@@ -76,8 +76,10 @@ export interface ScrapeSettings {
   scrapeMode: ScrapeMode
   /** 简介源：Javtxt（中文直出，契约 §4.2）。 */
   plotJavtxt: boolean
-  /** 简介源：MetaTube（日文 + `hy3` 翻译）。 */
+  /** 简介源：MetaTube（日文 + LLM 翻译）。 */
   plotMetatube: boolean
+  /** MetaTube 服务地址（0.7.0 加：只在开了上面的开关时才有意义；**代码里不写死**，留空 = 不做兜底）。 */
+  metatubeBase: string
   /** 翻译模型（契约 D6：默认 `hy3`，失败降级 `translateModelFallback`）。 */
   translateModel: string
   /** 备用翻译模型（同一网关）。 */
@@ -101,6 +103,7 @@ export const SCRAPE_DEFAULTS: ScrapeSettings = {
   scrapeMode: 'off',
   plotJavtxt: true,
   plotMetatube: true,
+  metatubeBase: '',
   translateModel: 'hy3',
   translateModelFallback: 'deepseek-v4.1-flash',
   cropAnchor: 'auto',
@@ -148,6 +151,8 @@ export function toScrapeSettings(raw: unknown): ScrapeSettings {
     scrapeMode: pick(src.scrapeMode, MODES, SCRAPE_DEFAULTS.scrapeMode),
     plotJavtxt: boolOf(src.plotJavtxt, SCRAPE_DEFAULTS.plotJavtxt),
     plotMetatube: boolOf(src.plotMetatube, SCRAPE_DEFAULTS.plotMetatube),
+    // 地址没有默认值：留空就是留空（后端据此报「未配置 MetaTube 地址」），不回落
+    metatubeBase: typeof src.metatubeBase === 'string' ? src.metatubeBase.trim() : '',
     translateModel: textOf(src.translateModel, SCRAPE_DEFAULTS.translateModel),
     translateModelFallback: textOf(src.translateModelFallback, SCRAPE_DEFAULTS.translateModelFallback),
     cropAnchor: pick(src.cropAnchor, ANCHORS, SCRAPE_DEFAULTS.cropAnchor),
@@ -164,6 +169,7 @@ export const SCRAPE_KEYS: (keyof ScrapeSettings)[] = [
   'scrapeMode',
   'plotJavtxt',
   'plotMetatube',
+  'metatubeBase',
   'translateModel',
   'translateModelFallback',
   'cropAnchor',
