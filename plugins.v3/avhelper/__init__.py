@@ -2670,7 +2670,10 @@ class AVHelper(_PluginBase):
         - `version_tags` 用 **media_item 行的 dict**（S1 提过：`downloads` 行那个同名键是 JSON 串，
           两份别混用）；
         - 只有实例、没有作品行（`media_item` 里有、`meta` 里没有）的 key 也算一条，
-          `completeness` 按 `missing_core` 计（作品级元数据确实什么都没有）。
+          `completeness` 按 `missing_core` 计（作品级元数据确实什么都没有）；
+        - **Emby 库里有、`meta` 表里也没有**的条目（连 `media_item` 行都没有）同样补一条，
+          `completeness` 给 `missing_core` / `scrape_state` 给 `unscraped`（R1，2026-10-15：
+          用户报「库里很多内容都没有」，根因就是这些条目既不进列表也不进队列）。
         """
         index = self._film_index()
         metas: Dict[str, Any] = index.get("meta") or {}
@@ -2692,6 +2695,38 @@ class AVHelper(_PluginBase):
                 "crop_anchor": str(item.get("crop_anchor") or "auto"),
                 "version_tags": version_labels(item.get("version_tags")),
                 "updated_at": str(meta.get("updated_at") or ""),
+            })
+        # R1：补出「Emby 库里有、`meta` 表里没有」的条目，否则它们永远不出现在刮削台上。
+        # 口径必须是 `emby.best_keys()`（一个 Emby 条目收敛成一个干净键）：Emby 索引的键是
+        # 「刮削 id + 文件名 + 标题」三套写法的并集（本机实测 148 个键、canon 后 128 个），
+        # 而库只有 112 条 —— 直接遍历 `index.keys()` 会造出重复行与标题派生的垃圾行，
+        # `best_keys()` 按条目 id 归并后是 109 个干净键（2026-10-15 真机实测）。
+        # 已有的行（meta 行 + media_item 行）按 key 去重，不重复补。取不到 Emby 索引时只返回
+        # 现有那些行 —— /scrape/status 是首屏热路径，绝不能因为 Emby 不通就报错。
+        emitted = {str(row.get("key") or "") for row in rows}
+        try:
+            lib_index = self.emby().index() or {}
+            library = emby.best_keys(lib_index)
+        except Exception as error:
+            logger.error(f"AVHelper 读 Emby 库索引失败（刮削台只列台账行）：{error}")
+            lib_index, library = {}, {}
+        for library_key in library.values():
+            key = str(library_key or "")
+            if not key or key in emitted:
+                continue
+            emitted.add(key)
+            entry = lib_index.get(key) or {}
+            rows.append({
+                "key": key,
+                "number": emby.shown_number(key, entry.get("name")),
+                "title": "",
+                "emby_id": str(entry.get("id") or ""),
+                "completeness": "missing_core",
+                "scrape_state": "unscraped",
+                "has_backup": False,
+                "crop_anchor": "auto",
+                "version_tags": [],
+                "updated_at": "",
             })
         rows.sort(key=lambda row: str(row.get("updated_at") or ""), reverse=True)
         wanted = str(filter_text or "").strip()
