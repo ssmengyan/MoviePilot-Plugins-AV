@@ -37,6 +37,8 @@ from . import emby, imgproxy, longshot, paths, scoring
 from .client import JavdbClient, mask, reset as reset_javdb_state
 from .notify import Notifier
 from .ratelimit import RateLimiter
+from . import number_classify
+from . import scrape_graph
 from .store import PLUGIN_SOURCES, Store
 from .tasks import DEFAULT_RULE, TaskEngine, merge_rule
 
@@ -359,6 +361,39 @@ def _rate_map(value: Any) -> Dict[str, str]:
         text = _rate_value(raw)
         if name and text and name not in out:
             out[name] = text
+    return out
+
+
+def _source_list(rule: Dict[str, Any]) -> List[str]:
+    """启用了哪些数据源（P1-5）：`sources` 是**新真值**；老规则没有它就由两个布尔开关推。
+
+    `javdb` 是骨架，永远在（`scrape_graph.ALWAYS_ON`）；认不出的 id 直接丢掉 —— 站点清单
+    由后端注册表说了算（`/scrape/graph` 下发），前端不许自己编。
+    """
+    raw = rule.get("sources")
+    if isinstance(raw, (list, tuple, set)) and raw:
+        kept = sorted({str(item) for item in raw if str(item) in scrape_graph.SOURCES})
+        return sorted(set(kept) | set(scrape_graph.ALWAYS_ON))
+    out = set(scrape_graph.ALWAYS_ON)
+    if pick_bool(rule.get("plotJavtxt"), True):
+        out.add("javtxt")
+    if pick_bool(rule.get("plotMetatube"), True):
+        out.add("metatube")
+    return sorted(out)
+
+
+def _field_map(value: Any) -> Dict[str, List[str]]:
+    """`fieldPriority` / `fieldBlacklist` → `{字段: [站点…]}`（只留认识的字段与站点）。"""
+    if not isinstance(value, dict):
+        return {}
+    out: Dict[str, List[str]] = {}
+    for field, sites in list(value.items())[:len(scrape_graph.FIELDS)]:
+        name = str(field or "").strip()
+        if name not in scrape_graph.FIELDS or not isinstance(sites, (list, tuple, set)):
+            continue
+        kept = [str(site) for site in sites if str(site) in scrape_graph.SOURCES]
+        if kept:
+            out[name] = kept
     return out
 
 
@@ -777,7 +812,12 @@ class AVHelper(_PluginBase):
              "description": "POST {item_key}：用写前备份的完整 DTO 原样回灌（D7 闸门）"},
             {"path": "/scrape/log", "endpoint": self.api_scrape_log, "methods": ["GET"],
              "auth": "bear", "summary": "刮削日志与数据源汇总",
-             "description": "?limit= 取 scrape_log 最近若干条 + 各源成功/失败/耗时汇总"},
+             "description": "?limit= 取 scrape_log 最近若干条 + 各源成功/失败/耗时汇总；"
+                            "?run=<id> 取某一次刮削的全部站点记录"},
+            {"path": "/scrape/graph", "endpoint": self.api_scrape_graph, "methods": ["GET"],
+             "auth": "bear", "summary": "取数图（当前生效的字段×站点链）",
+             "description": "P1-5：设置台据此渲染「可选值」与「当前链」——站点/字段清单由后端下发，"
+                            "前端不许自己拼；?key= 按那部片的内容类型渲染"},
             {"path": "/scrape/selfcheck", "endpoint": self.api_scrape_selfcheck, "methods": ["POST"],
              "auth": "bear", "summary": "翻译模型自检",
              "description": "POST {model?} → translator.selfcheck()：「模型自检」按钮；"
@@ -993,10 +1033,13 @@ class AVHelper(_PluginBase):
         """
         rule = self.global_rule() or {}
         suffixes = rule.get("cleanSuffixes")
+        sources = _source_list(rule)
         return {
             "scrapeMode": pick_choice(rule.get("scrapeMode"), SCRAPE_MODES, "fill"),
-            "plotJavtxt": pick_bool(rule.get("plotJavtxt"), True),
-            "plotMetatube": pick_bool(rule.get("plotMetatube"), True),
+            # P1-5：`sources` 是启用源的新真值；两个布尔是 0.7.x 的旧键，**由它派生**（兼容老前端）
+            "sources": sources,
+            "plotJavtxt": "javtxt" in sources,
+            "plotMetatube": "metatube" in sources,
             "metatubeBase": str(rule.get("metatubeBase") or "").strip(),
             "translateModel": str(rule.get("translateModel") or "").strip() or "hy3",
             "translateModelFallback": (str(rule.get("translateModelFallback") or "").strip()
@@ -1011,6 +1054,9 @@ class AVHelper(_PluginBase):
             "defaultRateLimit": _rate_value(rule.get("defaultRateLimit"),
                                             DEFAULT_RATE_LIMIT_TEXT),
             "rateLimits": _rate_map(rule.get("rateLimits")),
+            # P1-5：字段级择优（稀疏；空 = 用链的默认顺序）
+            "fieldPriority": _field_map(rule.get("fieldPriority")),
+            "fieldBlacklist": _field_map(rule.get("fieldBlacklist")),
         }
 
     def magnets_cached(self, number: str) -> Optional[List[Dict[str, Any]]]:
@@ -2321,12 +2367,23 @@ class AVHelper(_PluginBase):
         return {"success": True, "tasks": tasks, "queue": queue}
 
     async def api_rule(self, request: Request) -> Dict[str, Any]:
-        """全局默认规则：GET 读取、POST 保存（以已存规则为基准合并）。"""
+        """全局默认规则：GET 读取、POST 保存（以已存规则为基准合并）。
+
+        P1-5：写进来的**刮削键**先过一次写入校验（`_clean_scrape_patch`）——非法站点/字段/
+        超范围间隔不落库，并如实回报 `ignored`（界面可以提示"忽略了 N 项"）。
+        校验用的站点与字段清单来自后端注册表（`scrape_graph`），前端从 `/scrape/graph` 取。
+        """
         if request.method == "POST":
             payload = await self._json_body(request)
-            rule = merge_rule({**self.global_rule(), **(payload.get("rule") or {})})
+            patch = dict(payload.get("rule") or {})
+            cleaned, ignored = self._clean_scrape_patch(patch)
+            rule = merge_rule({**self.global_rule(), **patch, **cleaned})
             await asyncio.to_thread(self.store.kv_set, GLOBAL_RULE_KEY, rule)
-            return {"success": True, "rule": self.global_rule(), "message": "默认规则已保存"}
+            message = "默认规则已保存"
+            if ignored:
+                message += f"（忽略 {len(ignored)} 项非法刮削设置：{'、'.join(ignored[:5])}）"
+            return {"success": True, "rule": self.global_rule(), "message": message,
+                    "ignored": ignored}
         return {"success": True, "rule": self.global_rule()}
 
     async def api_task_search(self, request: Request) -> Dict[str, Any]:
@@ -2637,6 +2694,10 @@ class AVHelper(_PluginBase):
         if conf["plotMetatube"]:
             sources.append("metatube")
         opts["plot_sources"] = tuple(sources)
+        # P1-5：启用源（新真值）与字段级择优 —— 取数图直接读这三个键
+        opts["sources"] = tuple(conf["sources"])
+        opts["field_priority"] = dict(conf["fieldPriority"])
+        opts["field_blacklist"] = dict(conf["fieldBlacklist"])
         # MetaTube 地址：留空就传空串（`_opt()` 认空串为"已给"→ 数据源自检回显"未配置"）
         opts["metatube_base"] = conf["metatubeBase"]
         # 限流（P1-2）：驼峰 → 下划线，并**顺手把当前配置推给限流器** —— 那个实例是长命的
@@ -2657,6 +2718,87 @@ class AVHelper(_PluginBase):
         """刮削编排的依赖注入包（契约 §3.6 的四个关键字：`store`/`cli`/`emby_client`/`opts`）。"""
         return {"store": self.store, "cli": self.cli(),
                 "emby_client": self.emby_client(), "opts": self.scrape_opts()}
+
+    def _clean_scrape_patch(self, patch: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+        """设置台写进来的刮削键做一次**写入校验**（P1-5）：非法值不落库、如实回报。
+
+        判据全部来自后端注册表（`scrape_graph` 的 `FIELDS` / `SOURCES` 与 `_rate_value`）——
+        前端拿的是 `/scrape/graph` 下发的可选值，不该（也查不出）自己编站点或字段名。
+        返回 `(清洗后的补丁, 被忽略项说明)`；只有请求里出现过的键才进清洗结果。
+        """
+        out: Dict[str, Any] = {}
+        ignored: List[str] = []
+        if "sources" in patch:
+            raw = patch.get("sources")
+            if isinstance(raw, (list, tuple, set)):
+                kept = {str(item) for item in raw if str(item) in scrape_graph.SOURCES}
+                for item in raw:
+                    if str(item) not in scrape_graph.SOURCES:
+                        ignored.append(f"sources={item}")
+                out["sources"] = sorted(kept | set(scrape_graph.ALWAYS_ON))
+            else:
+                ignored.append("sources（要数组）")
+        for key in ("fieldPriority", "fieldBlacklist"):
+            if key in patch:
+                raw = patch.get(key)
+                if not isinstance(raw, dict):
+                    ignored.append(f"{key}（要对象）")
+                    continue
+                cleaned = _field_map(raw)
+                dropped = sum(len(v) for v in raw.values() if isinstance(v, (list, tuple, set)))
+                dropped -= sum(len(v) for v in cleaned.values())
+                for field in raw:
+                    if str(field) not in scrape_graph.FIELDS:
+                        ignored.append(f"{key}.{field}（字段不认识）")
+                if dropped > 0:
+                    ignored.append(f"{key} 里有 {dropped} 个不认识的数据源")
+                out[key] = cleaned
+        if "defaultRateLimit" in patch:
+            text = _rate_value(patch.get("defaultRateLimit"), DEFAULT_RATE_LIMIT_TEXT)
+            out["defaultRateLimit"] = text
+            if str(patch.get("defaultRateLimit")) != text:
+                ignored.append(f"defaultRateLimit={patch.get('defaultRateLimit')}（夹到 {text}）")
+        if "rateLimits" in patch:
+            cleaned = _rate_map(patch.get("rateLimits"))
+            out["rateLimits"] = cleaned
+            raw_map = patch.get("rateLimits") if isinstance(patch.get("rateLimits"), dict) else {}
+            if len(cleaned) != len(raw_map):
+                ignored.append(f"rateLimits 里有 {len(raw_map) - len(cleaned)} 项非法/重复")
+        return out, ignored
+
+    def api_scrape_graph(self, key: str = "") -> Dict[str, Any]:
+        """`/scrape/graph`：当前生效的**取数图**（P1-5）。
+
+        设置台据此渲染「数据源可选值」与「当前每个字段的链」——**前端不许自己拼站点/字段清单**。
+        `?key=` 给了就按那部片的内容类型渲染（否则用默认链）。
+        """
+        conf = self.scrape_conf()
+        options = {"sources": tuple(conf["sources"]), "plot_sources": (
+            *(("javtxt",) if conf["plotJavtxt"] else ()),
+            *(("metatube",) if conf["plotMetatube"] else ()),
+        )}
+        enabled = scrape_graph.enabled_sources(options)
+        content_type = ""
+        if str(key or "").strip():
+            try:
+                mod = self.scrape_module()
+                resolved = mod.resolve_key(key) if mod is not None else {}
+                content_type = number_classify.classify(
+                    resolved.get("display_number") or resolved.get("number") or key,
+                    version_tags=resolved.get("version_tags"))["content_type"]
+            except Exception as error:                          # noqa: BLE001 - 防御
+                logger.warning(f"AVHelper 取数图渲染失败（{key}），退回默认链：{error}")
+        info = scrape_graph.describe(content_type or "censored", enabled=enabled,
+                                     field_priority=conf["fieldPriority"],
+                                     field_blacklist=conf["fieldBlacklist"])
+        info["fields"] = list(scrape_graph.FIELDS)
+        info["all_sources"] = [
+            {"id": spec.id, "label": spec.label, "phase": spec.phase,
+             "provides": list(spec.provides),
+             "always_on": spec.id in scrape_graph.ALWAYS_ON, "note": spec.note}
+            for spec in sorted(scrape_graph.SOURCES.values(), key=lambda s: (s.phase, s.id))
+        ]
+        return {"success": True, **info}
 
     @staticmethod
     def api_error(message: str, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

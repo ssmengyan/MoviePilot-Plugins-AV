@@ -18,7 +18,7 @@
  *  - FC2 的规范键带 `PPV`（契约 D12：`FC2PPV4828968`）。
  * 复刻件只用于预览，**不参与写库**：界面上的数字与后端不一致时以后端为准（报告里已登记为未验证项）。
  */
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import Thumb from '../common/Thumb.vue'
 import { errorText, hostToast, unwrap, type PluginApi } from '../../composables/usePluginApi'
 import type { ScrapeSettings } from './panels'
@@ -44,6 +44,128 @@ const t = hostToast(props.toast as any)
 
 function patch(key: keyof ScrapeSettings, value: unknown): void {
   emit('patch', { [key]: value })
+}
+
+// ---------- ⓪ 数据源 / 字段择优 / 限流（0.8.0 / P1-5，契约 §3.11 / §3.13） ----------
+//
+// **站点与字段清单由后端下发**（`GET /scrape/graph`）：前端不许自己编站点名/字段名 ——
+// 编出来的值会被后端写入校验丢掉（`api_rule` 的 `ignored`），白让用户敲一遍。
+// 这里的「当前生效的链」是**后端算的**（已保存配置），所以改完要保存才会变；页面上标注了这一点。
+
+const graph = ref<Record<string, any> | null>(null)
+const graphError = ref('')
+const graphLoading = ref(false)
+
+const enabledSources = computed<string[]>(() => props.settings.sources || [])
+const allSources = computed<Record<string, any>[]>(() => {
+  const list = graph.value?.all_sources
+  return Array.isArray(list) ? list : []
+})
+const fieldNames = computed<string[]>(() => {
+  const list = graph.value?.fields
+  return Array.isArray(list) && list.length ? list : []
+})
+const chains = computed<Record<string, string[]>>(() => {
+  const raw = graph.value?.chains
+  return raw && typeof raw === 'object' ? raw : {}
+})
+/** 字段名 → 人话（拿不到翻译就用原名，别硬编一张表）。 */
+const FIELD_LABELS: Record<string, string> = {
+  title_jp: '日文标题', origin_title: '原标题', title_zh: '中文标题',
+  plot_jp: '日文简介', plot_zh: '中文简介', actors: '演员', tags: '标签',
+  studio: '片商', publisher: '发行商', series: '系列', director: '导演',
+  release_date: '发行日', duration: '时长', score: '评分',
+  cover_url: '封面', thumb_url: '缩略图', preview_video_url: '预告片',
+  preview_images: '剧照', javdb_id: '来源 ID',
+}
+function fieldLabel(name: string): string {
+  return FIELD_LABELS[name] || name
+}
+
+async function loadGraph(): Promise<void> {
+  if (graphLoading.value) return
+  graphLoading.value = true
+  graphError.value = ''
+  try {
+    const api = props.api
+    if (!api || typeof api.get !== 'function') throw new Error('宿主 api 不可用')
+    const payload: any = unwrap<any>(await api.get('plugin/scrape/graph'))
+    if (payload && typeof payload === 'object' && payload.success === false) {
+      throw new Error(String(payload.message || '取数图读取失败'))
+    }
+    graph.value = payload && typeof payload === 'object' ? payload : null
+  } catch (err) {
+    graphError.value = errorText(err)
+    graph.value = null
+  } finally {
+    graphLoading.value = false
+  }
+}
+
+onMounted(() => {
+  void loadGraph()
+})
+
+function toggleSource(id: string, on: boolean): void {
+  const current = new Set(enabledSources.value)
+  if (on) current.add(id)
+  else current.delete(id)
+  current.add('javdb')                       // 骨架源不可关（与后端 ALWAYS_ON 同一口径）
+  patch('sources', [...current])
+}
+
+// 字段择优：稀疏的「字段 + 站点」对（19 个字段 × 2 列多选太重，实际通常只填一两项）
+const pickField = ref('')
+const pickSource = ref('')
+const pickKind = ref<'fieldPriority' | 'fieldBlacklist'>('fieldPriority')
+
+function fieldMap(name: 'fieldPriority' | 'fieldBlacklist'): Record<string, string[]> {
+  const raw = props.settings[name]
+  return raw && typeof raw === 'object' ? { ...raw } : {}
+}
+function pickRows(name: 'fieldPriority' | 'fieldBlacklist'): { field: string; source: string }[] {
+  const out: { field: string; source: string }[] = []
+  for (const [field, sites] of Object.entries(fieldMap(name))) {
+    for (const source of sites) out.push({ field, source })
+  }
+  return out
+}
+function addPick(): void {
+  const field = pickField.value || fieldNames.value[0] || ''
+  const source = pickSource.value || enabledSources.value[0] || ''
+  if (!field || !source) return
+  const kind = pickKind.value
+  const current = fieldMap(kind)
+  const list = [...(current[field] || [])]
+  if (!list.includes(source)) list.push(source)
+  current[field] = list
+  patch(kind, current)
+}
+function removePick(kind: 'fieldPriority' | 'fieldBlacklist', field: string, source: string): void {
+  const current = fieldMap(kind)
+  const list = (current[field] || []).filter(item => item !== source)
+  if (list.length) current[field] = list
+  else delete current[field]
+  patch(kind, current)
+}
+
+// 限流：默认间隔 + 逐 host 覆盖（值由后端夹到 0.2~60 秒，归零等于关限流、不许）
+const newHost = ref('')
+const newRate = ref('')
+const rateRows = computed(() => Object.entries(props.settings.rateLimits || {}))
+
+function addRate(): void {
+  const host = String(newHost.value || '').trim()
+  const rate = String(newRate.value || '').trim()
+  if (!host || !rate) return
+  patch('rateLimits', { ...(props.settings.rateLimits || {}), [host]: rate })
+  newHost.value = ''
+  newRate.value = ''
+}
+function removeRate(host: string): void {
+  const next = { ...(props.settings.rateLimits || {}) }
+  delete next[host]
+  patch('rateLimits', next)
 }
 
 // ---------- ① 后缀清洗词表 ----------
@@ -331,10 +453,161 @@ void loadMap()
         <v-icon icon="mdi-file-document-edit-outline" color="primary" />
       </template>
       <v-card-title>刮削规则</v-card-title>
-      <v-card-subtitle>后缀清洗 · 命名模板 · 演员/标签映射 · 文件名试跑（本地预览）</v-card-subtitle>
+      <v-card-subtitle>数据源与取数链 · 字段择优 · 限流 · 后缀清洗 · 命名模板 · 演员/标签映射 · 文件名试跑（本地预览）</v-card-subtitle>
     </v-card-item>
 
     <v-card-text>
+      <!-- ===== ⓪ 数据源（P1-5）：清单由后端 /scrape/graph 下发，前端不许自己编 ===== -->
+      <div class="text-subtitle-2 mb-1">数据源</div>
+      <p class="text-caption text-medium-emphasis mb-2">
+        关掉的源<b>一个请求都不会发</b>（取数图里直接没有它）。JavDB 是骨架源，不可关。
+        <span v-if="graphError" class="text-warning">取数图读取失败：{{ graphError }}</span>
+      </p>
+      <div class="avh-row mb-2">
+        <v-chip
+          v-for="src in allSources"
+          :key="src.id"
+          size="small"
+          :color="enabledSources.includes(src.id) ? 'primary' : undefined"
+          :variant="enabledSources.includes(src.id) ? 'flat' : 'tonal'"
+          :disabled="src.always_on"
+          @click="toggleSource(src.id, !enabledSources.includes(src.id))"
+        >{{ src.label || src.id }}<span v-if="src.phase === 2" class="ms-1">（第二段）</span></v-chip>
+        <v-btn
+          variant="text"
+          size="x-small"
+          :loading="graphLoading"
+          @click="loadGraph"
+        >↻ 刷新当前链</v-btn>
+      </div>
+      <div v-if="!allSources.length" class="text-caption text-medium-emphasis mb-2">
+        （拿不到数据源清单：后端未就绪或接口未上线）
+      </div>
+
+      <!-- ===== ⓪b 字段择优（P1-5）：稀疏的「字段 + 站点」对 ===== -->
+      <div class="text-subtitle-2 mb-1 mt-3">字段择优</div>
+      <p class="text-caption text-medium-emphasis mb-2">
+        <b>先问的源</b>：只对选中的那个字段生效（链上其余站点顺序不变）；<b>不用的源</b>：该字段不采用它。
+        两者都留空 = 用默认链。字段与站点清单来自后端，写错的值会被保存接口拦掉。
+      </p>
+      <div class="avh-row mb-2">
+        <v-select
+          v-model="pickKind"
+          class="avh-pick-input"
+          density="compact"
+          variant="outlined"
+          hide-details
+          :items="[{ title: '先问的源', value: 'fieldPriority' }, { title: '不用的源', value: 'fieldBlacklist' }]"
+        />
+        <v-select
+          v-model="pickField"
+          class="avh-pick-input"
+          density="compact"
+          variant="outlined"
+          hide-details
+          placeholder="字段"
+          :items="fieldNames.map(name => ({ title: fieldLabel(name), value: name }))"
+        />
+        <v-select
+          v-model="pickSource"
+          class="avh-pick-input"
+          density="compact"
+          variant="outlined"
+          hide-details
+          placeholder="站点"
+          :items="enabledSources.map(id => ({ title: id, value: id }))"
+        />
+        <v-btn variant="outlined" size="small" prepend-icon="mdi-plus" @click="addPick">添加</v-btn>
+      </div>
+      <div class="avh-chips mb-1">
+        <v-chip
+          v-for="row in pickRows('fieldPriority')"
+          :key="`p#${row.field}#${row.source}`"
+          size="small"
+          color="primary"
+          variant="tonal"
+          closable
+          @click:close="removePick('fieldPriority', row.field, row.source)"
+        >先问 {{ fieldLabel(row.field) }} → {{ row.source }}</v-chip>
+        <span v-if="!pickRows('fieldPriority').length" class="text-caption text-medium-emphasis">（没有字段优先级）</span>
+      </div>
+      <div class="avh-chips mb-3">
+        <v-chip
+          v-for="row in pickRows('fieldBlacklist')"
+          :key="`b#${row.field}#${row.source}`"
+          size="small"
+          variant="tonal"
+          closable
+          @click:close="removePick('fieldBlacklist', row.field, row.source)"
+        >不用 {{ fieldLabel(row.field) }} ← {{ row.source }}</v-chip>
+        <span v-if="!pickRows('fieldBlacklist').length" class="text-caption text-medium-emphasis">（没有字段排除）</span>
+      </div>
+
+      <!-- ===== ⓪c 限流（P1-2 / P1-5）：默认间隔 + 逐 host 覆盖 ===== -->
+      <div class="text-subtitle-2 mb-1">限流</div>
+      <p class="text-caption text-medium-emphasis mb-2">
+        每个域名两次请求的<b>最小间隔</b>（秒，0.2~60）。只影响"调用方没写死间隔"的取数：
+        <code>javtxt</code> 的 2 秒是硬要求，调这里不会让它变快。被站点拦截后该域名会自动冷却 6 小时。
+      </p>
+      <div class="avh-row mb-2">
+        <v-text-field
+          :model-value="props.settings.defaultRateLimit"
+          class="avh-pick-input"
+          density="compact"
+          variant="outlined"
+          hide-details
+          single-line
+          type="number"
+          label="默认间隔（秒）"
+          @update:model-value="(value: any) => patch('defaultRateLimit', String(value ?? ''))"
+        />
+        <v-text-field
+          v-model="newHost"
+          class="avh-pick-input"
+          density="compact"
+          variant="outlined"
+          hide-details
+          single-line
+          placeholder="域名，如 javtxt.com"
+        />
+        <v-text-field
+          v-model="newRate"
+          class="avh-pick-input"
+          density="compact"
+          variant="outlined"
+          hide-details
+          single-line
+          type="number"
+          placeholder="秒"
+        />
+        <v-btn variant="outlined" size="small" prepend-icon="mdi-plus" @click="addRate">添加</v-btn>
+      </div>
+      <div class="avh-chips mb-3">
+        <v-chip
+          v-for="[host, rate] in rateRows"
+          :key="`rate#${host}`"
+          size="small"
+          variant="tonal"
+          closable
+          @click:close="removeRate(host)"
+        >{{ host }} = {{ rate }}s</v-chip>
+        <span v-if="!rateRows.length" class="text-caption text-medium-emphasis">（没有按域名覆盖）</span>
+      </div>
+
+      <!-- ===== ⓪d 当前生效的链（后端算的，只读） ===== -->
+      <div class="text-subtitle-2 mb-1">当前生效的链</div>
+      <p class="text-caption text-medium-emphasis mb-1">
+        这一份是<b>后端按已保存的配置</b>算出来的（改完要保存才会变）；每个字段按链的顺序问，
+        取第一个非空值。
+      </p>
+      <div v-if="Object.keys(chains).length" class="avh-chain mb-4">
+        <div v-for="(chain, field) in chains" :key="`chain#${field}`" class="avh-chain__row">
+          <span class="avh-chain__k">{{ fieldLabel(String(field)) }}</span>
+          <span class="avh-chain__v">{{ chain.join(' → ') || '（没有可用数据源）' }}</span>
+        </div>
+      </div>
+      <p v-else class="text-caption text-medium-emphasis mb-4">（拿不到链：后端未就绪或接口未上线）</p>
+
       <!-- ===== ① 后缀清洗词表 ===== -->
       <div class="text-subtitle-2 mb-1">后缀清洗词表</div>
       <p class="text-caption text-medium-emphasis mb-2">
@@ -594,6 +867,39 @@ void loadMap()
 
 .avh-suffix-input {
   max-width: 260px;
+}
+
+/* P1-5：字段择优/限流的行内小输入（三四个一排，窄屏自动换行） */
+.avh-pick-input {
+  max-width: 190px;
+  min-width: 130px;
+}
+
+/* P1-5：当前生效的链（等宽小字，只读预览） */
+.avh-chain {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+  border-radius: 6px;
+}
+
+.avh-chain__row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.avh-chain__k {
+  flex: 0 0 84px;
+  color: rgba(var(--v-theme-on-surface), 0.55);
+}
+
+.avh-chain__v {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: rgba(var(--v-theme-on-surface), 0.8);
 }
 
 .avh-preview {
