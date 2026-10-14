@@ -975,11 +975,11 @@ watch(
             <Thumb :src="entity.avatar" :alt="actor" :plugin-id="pluginId" />
           </div>
           <div class="avh-profile__main">
-            <h2 class="avh-profile__name">
-              {{ entity.name || actor }}
-              <span v-if="entity.zh" class="avh-profile__zh">/ {{ entity.zh }}</span>
-            </h2>
-            <!-- 备注另起一行、排在原名下面（用户口径：原名显示位置不变） -->
+            <!-- 主位（大字）：有中文名就上中文名，没有才退回原名 —— 备注永远进不来（老实现的 `/ zh` 斜杠后缀已取消） -->
+            <h2 class="avh-profile__name">{{ entity.zh || entity.name || actor }}</h2>
+            <!-- 辅位（小字）：仅当主位已经是中文名时，才在下面另画一行原名；主位已是原名就不重复画 -->
+            <div v-if="entity.zh" class="avh-profile__zh">{{ entity.name || actor }}</div>
+            <!-- 附加行：备注独立成行（更小更浅），有才画 —— 空行会把档案头撑高，有无备注两块就对不齐了 -->
             <div v-if="aliasOf(actor)" class="avh-profile__alias">{{ aliasOf(actor) }}</div>
             <div class="avh-kv">
               <span v-if="entity.videos_count"><b>作品</b> {{ entity.videos_count }}</span>
@@ -1290,13 +1290,15 @@ watch(
   line-height: 1.3;
 }
 
+/* 辅位：独立一行的原名（仅主位是中文名时才画），比主位小一号的浅色小字 */
 .avh-profile__zh {
   font-size: 14px;
   font-weight: 400;
+  line-height: 1.35;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
 
-/* 备注：比 `zh` 还小一号的浅色小字，排在原名块下面（用户要求「浅色、小字体」） */
+/* 附加行：备注独立成行、比 `zh` 还小一号的浅色小字（用户要求「浅色、小字体」），**永不占用主位** */
 .avh-profile__alias {
   margin-top: 2px;
   font-size: 11px;
