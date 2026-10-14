@@ -948,7 +948,6 @@ class TestWriteMatrix:
         assert out["GenreItems"] == [{"Name": "OL"}, {"Name": "巨乳"}]
         assert out["CommunityRating"] == 4.33
         assert out["ProviderIds"] == {"AVHelper": "SNOS-380", "JavDB": "96GB0p"}
-        assert [p["Type"] for p in out["People"] if p["Type"] == "Director"] == ["Director"]
 
     def test_name_needs_title(self, scraper):
         out = scraper.build_overrides(targets({}, title_zh="", title_jp=""), EMPTY_DTO)
@@ -1017,7 +1016,8 @@ class TestWriteMatrix:
         assert "provider_ids_replace" not in out
 
     def test_people_name_format_and_no_id(self, scraper, monkeypatch):
-        """D13/D14：`中文（日文）`、**不写 Id**、保留非 Actor/Director 元素。"""
+        """D13/D14：`中文（日文）`、**不写 Id**、保留非 Actor/Director 元素、
+        且不再写导演（0.7.1 起 `build_people()` 只写女演员）。"""
         monkeypatch.setattr(scraper, "actor_display",
                             lambda name, alias="": {"name": str(name), "jp": str(name),
                                                     "zh": {"雛形みくる": "雏形实久"}.get(str(name), ""),
@@ -1029,12 +1029,12 @@ class TestWriteMatrix:
         names = [p["Name"] for p in people]
         assert "雛形みくる" not in names
         assert "雏形实久（雛形みくる）" in names
-        assert "肉尊" in names
+        assert "肉尊" not in names                         # 0.7.1：导演一律不写进 People
         for person in people:
             if person["Type"] in ("Actor", "Director"):
                 assert "Id" not in person                  # D14：写 Id 会被彻底忽略
         assert people[0] == {"Name": "監督", "Type": "Producer", "Id": "9"}   # 原样保留
-        assert {p["Type"] for p in people} == {"Producer", "Actor", "Director"}
+        assert {p["Type"] for p in people} == {"Producer", "Actor"}
 
     def test_person_name_single_side(self, scraper):
         assert scraper.person_name({"name": "x", "zh": "雏形实久", "jp": ""}) == "雏形实久"
@@ -1792,13 +1792,13 @@ class TestNamemapWiring:
         assert store.logs[0]["status"] == "error" and "表坏了" in store.logs[0]["error"]
 
     def test_actor_rows_shape(self, scraper, monkeypatch):
-        """`meta.actors_json` 必须同时带 avatar 与 javdb_actor_id（追加 2）。"""
+        """`meta.actors_json` 必须同时带 avatar、javdb_actor_id（追加 2）与 gender（0.7.1 全链路透传）。"""
         monkeypatch.setattr(scraper, "namemap", None)
         rows = scraper.actor_rows([{"id": "neAOa", "name": "雛形みくる",
                                     "avatar_url": "https://a/2.jpg", "gender": 0}])
         assert rows == [{"name": "雛形みくる", "zh": "", "jp": "雛形みくる",
                          "avatar": "https://a/2.jpg", "javdb_actor_id": "neAOa",
-                         "canonical_id": ""}]
+                         "canonical_id": "", "gender": 0}]
 
     def test_actor_rows_is_idempotent(self, scraper, monkeypatch):
         monkeypatch.setattr(scraper, "namemap", None)
@@ -1850,7 +1850,8 @@ class TestSyncActorAvatars:
     def test_dry_run_makes_zero_write_calls(self, scraper, store_mod, tmp_path, monkeypatch, nomap):
         store = self._seed_store(store_mod, tmp_path, [
             {"name": "雛形みくる", "jp": "雛形みくる", "zh": "", "canonical_id": "",
-             "avatar": "https://tp.spfcas.com/a.jpg", "javdb_actor_id": "neAOa"}])
+             "avatar": "https://tp.spfcas.com/a.jpg", "javdb_actor_id": "neAOa",
+             "gender": 0}])
         emby = self._persons({"雛形みくる": {"Id": "12617", "Name": "雛形みくる",
                                             "ImageTags": {}}})
         report = scraper.sync_actor_avatars(store, emby, dry_run=True, namemap_mod=nomap,
@@ -1865,7 +1866,8 @@ class TestSyncActorAvatars:
                                                  monkeypatch, nomap):
         store = self._seed_store(store_mod, tmp_path, [
             {"name": "雛形みくる", "jp": "雛形みくる", "zh": "", "canonical_id": "",
-             "avatar": "https://tp.spfcas.com/a.jpg", "javdb_actor_id": "neAOa"}])
+             "avatar": "https://tp.spfcas.com/a.jpg", "javdb_actor_id": "neAOa",
+             "gender": 0}])
         emby = self._persons({"雛形みくる": {"Id": "12617", "Name": "雛形みくる",
                                             "ImageTags": {}}})
 
@@ -1885,7 +1887,8 @@ class TestSyncActorAvatars:
 
     def test_missing_person_is_not_an_error(self, scraper, store_mod, tmp_path, nomap):
         store = self._seed_store(store_mod, tmp_path, [
-            {"name": "还没刮过的演员", "avatar": "https://a.jpg", "javdb_actor_id": "x"}])
+            {"name": "还没刮过的演员", "avatar": "https://a.jpg", "javdb_actor_id": "x",
+             "gender": 0}])
         emby = self._persons({})
         report = scraper.sync_actor_avatars(store, emby, dry_run=False, namemap_mod=nomap)
         assert report["ok"] is True and report["errors"] == []
@@ -1895,14 +1898,15 @@ class TestSyncActorAvatars:
 
     def test_skips_when_person_already_has_image(self, scraper, store_mod, tmp_path, nomap):
         store = self._seed_store(store_mod, tmp_path, [
-            {"name": "A（ア）", "avatar": "https://a.jpg"}])
+            {"name": "A（ア）", "avatar": "https://a.jpg", "gender": 0}])
         emby = self._persons({"A（ア）": {"Id": "9", "ImageTags": {"Primary": "tag"}}})
         report = scraper.sync_actor_avatars(store, emby, dry_run=False, namemap_mod=nomap)
         assert report["planned"][0]["reason"] == "has_image"
         assert emby.calls["upload_image"] == 0
 
     def test_no_avatar_is_skipped(self, scraper, store_mod, tmp_path, nomap):
-        store = self._seed_store(store_mod, tmp_path, [{"name": "A", "avatar": ""}])
+        store = self._seed_store(store_mod, tmp_path, [{"name": "A", "avatar": "",
+                                                        "gender": 0}])
         emby = self._persons({"A": {"Id": "9", "ImageTags": {}}})
         report = scraper.sync_actor_avatars(store, emby, dry_run=False, namemap_mod=nomap)
         assert report["planned"][0]["reason"] == "no_avatar"
@@ -1910,7 +1914,7 @@ class TestSyncActorAvatars:
 
     def test_fetch_failure_recorded(self, scraper, store_mod, tmp_path, monkeypatch, nomap):
         store = self._seed_store(store_mod, tmp_path, [
-            {"name": "A", "avatar": "https://a.jpg", "javdb_actor_id": "x"}])
+            {"name": "A", "avatar": "https://a.jpg", "javdb_actor_id": "x", "gender": 0}])
         emby = self._persons({"A": {"Id": "9", "ImageTags": {}}})
 
         class Broken:
@@ -1927,7 +1931,7 @@ class TestSyncActorAvatars:
                                                      monkeypatch, nomap):
         """缺 imgproxy 时裸取会拿到 XOR 包装数据 —— 必须靠魔数挡住，不能喂给 Emby。"""
         store = self._seed_store(store_mod, tmp_path, [
-            {"name": "A", "avatar": "https://a.jpg"}])
+            {"name": "A", "avatar": "https://a.jpg", "gender": 0}])
         emby = self._persons({"A": {"Id": "9", "ImageTags": {}}})
         monkeypatch.setattr(scraper, "imgproxy", None)
         monkeypatch.setattr(scraper, "http_get",
@@ -1944,7 +1948,7 @@ class TestSyncActorAvatars:
 
     def test_limit_truncates(self, scraper, store_mod, tmp_path, nomap):
         store = self._seed_store(store_mod, tmp_path, [
-            {"name": f"演员{i}", "avatar": "https://a.jpg"} for i in range(5)])
+            {"name": f"演员{i}", "avatar": "https://a.jpg", "gender": 0} for i in range(5)])
         report = scraper.sync_actor_avatars(store, self._persons({}), limit=2, dry_run=True,
                                            namemap_mod=nomap)
         assert report["actors"] == 2
