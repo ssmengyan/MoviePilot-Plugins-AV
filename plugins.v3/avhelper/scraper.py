@@ -399,7 +399,10 @@ def resolve_key(number_or_key: str, item_key: str = "") -> Dict[str, Any]:
     parsed = emby.parse_av_number(raw)
     number = parsed.display_number if parsed.matched else ""
     if not number:
-        # 归一化键（`SNOS380`）反推展示番号；推不出来就原样用（宁可显示怪一点也不猜别的片）
+        # 归一化键（`SNOS380`）反推展示番号；推不出来就原样用（宁可显示怪一点也不猜别的片）。
+        # ⚠️ 这是**旧口径兜底**，只在 `parse_av_number()` 认不出番号时才走到 ——
+        #    能认出时一律用 parse 的 `display_number`（见 `site_number()`：`CAWB-040` 不能被
+        #    旧口径抹成 `CAWB-40`，前导零是有意义的）。
         number = emby.display_number(raw) or raw
     key = parsed.norm_key if (parsed.matched and parsed.norm_key) else emby.canon_key(number)
     return {
@@ -418,31 +421,36 @@ def resolve_key(number_or_key: str, item_key: str = "") -> Dict[str, Any]:
 
 
 def site_number(raw_or_number: Any, parsed: Any = None, key: str = "") -> str:
-    """**拿去查站点**的展示番号（比 `ParsedNumber.display_number` 更保守的一层）。
+    """**给站点 / 给 Emby 用**的展示番号：`parse_av_number()` 优先，解析不出才退回旧口径。
 
-    为什么要有这一层（S11 全库实测，事实 2）：S2 的 `display_number` 曾经把 `IPZZ-586`
-    还原成 `IPZZ-00586`（多补了两个零）→ **javdb 直接 404**。S2 正在修，但番号形态是
-    "查站点能不能命中"的唯一输入，错一位就是整条片子刮不到，所以这里再兜一层：
+    历史（**别把顺序改回去**，两端都踩过）：
 
-    1. `key = canon_key(输入)`（干净号，如 `IPZZ586`）；
-    2. `emby.display_number(key)` → 能切分就得到规范形态 `IPZZ-586`（**采用它**）；
-    3. 切不出来（`1PONDO123` 这种前置数字、`SSIS1` 这种一位数字段）→ **退回 parse 的结果**，
-       因为那时 `display_number()` 只是原样回传键，信息量还不如 parse。
+    - 2026-10-14 早先：S2 的 `parse_av_number("ipzz00961").display_number` 会保留**多余**的零
+      （`IPZZ-00961`），而番号错一位就是整条片子查不到（javdb 404）→ 这里加了一层
+      `emby.display_number(canon_key(...))` 兜底（得到 `IPZZ-961`），当时是对的；
+    - 但那个 bug 已由 S2 修好（复核：`ipzz00586_1_4K.mp4` → `IPZZ-586`、
+      `CAWB-040.mp4` → `CAWB-040`、`IPOK-025L.iso` → `IPOK-025`），于是这层兜底**反而有害**：
+      `emby.display_number()` 是**旧口径**（`^([A-Z]{2,6})(\\d{2,7})$` 直接拼、**不补三位零**），
+      会把**有意义的前导零**抹掉 —— 真机缺陷 4：`CAWB-040` 写成 `CAWB-40`、`IPOK-025` → `IPOK-25`
+      （AGENTS.md §5：本库 109 条里 **31 条**是这个"数字段不足三位"的形态）。
+    - 结论：**parse 优先**（它同时管住"零太多"与"不足三位"两个方向），
+      只有 parse 认不出时才退回旧口径兜底。
 
-    这层在 S2 修好之后**依然是正确且幂等的**（`display_number(canon_key(x))` 对规范形态是恒等），
-    所以可以长期留着，不必等谁改完再拆。
+    `norm_key` / `canon_key` **一律不动**（它们是台账主键，改一个字就全库错位）。
     """
-    text = str(raw_or_number or "").strip()
+    text = _nfkc(str(raw_or_number or "")).strip()
     if not text:
         return ""
-    clean = emby.canon_key(text) or (key or "")
+    info = parsed if parsed is not None else emby.parse_av_number(text)
+    display = str(getattr(info, "display_number", "") or "")
+    if getattr(info, "matched", False) and display:
+        return display                                   # ① parse 优先（权威口径）
+    clean = emby.canon_key(text) or str(key or "")        # ② 旧口径兜底（认不出番号时）
     if clean:
         fixed = emby.display_number(clean)
-        if fixed and fixed != clean:                 # 能切分 → 规范形态
+        if fixed:
             return fixed
-    if parsed is not None and getattr(parsed, "display_number", ""):
-        return str(parsed.display_number)
-    return emby.display_number(text) or text
+    return emby.display_number(text) or text              # ③ 最后的原样退回
 
 
 # ---------------------------------------------------------------------------
@@ -2233,18 +2241,56 @@ def _backup_gate(store: Any, item_key: str, dto: Optional[Dict[str, Any]],
     return True, ""
 
 
+def _fetch_cover_bytes(url: Any, opts: Dict[str, Any]) -> Tuple[bytes, str]:
+    """按 `cover_url` 取封面字节：**优先 `imgproxy.fetch()`**（它负责白名单、Referer、
+    `http→https` 升级与 XOR 解包），缺它时退回裸 `http_get` + **图片魔数校验**。
+
+    `imgproxy.fetch()` 返回的已经是可用图片字节（S5 实测 `pics.dmm.co.jp`/`awsimgsrc.dmm.co.jp`
+    都在白名单里，DMM 系不校验 Referer）；裸取那条路必须校验魔数 —— javdb 图床的字节是 XOR
+    包装的，把垃圾喂给 Emby 会 500（P0-① 实测）。
+    """
+    text = str(url or "").strip()
+    if not text:
+        return b"", "没有 cover_url"
+    if imgproxy is not None and hasattr(imgproxy, "fetch"):
+        try:
+            blob = imgproxy.fetch(text, proxy=str(_opt(opts, "proxy") or ""))
+        except Exception as error:                              # noqa: BLE001 - 故意的
+            return b"", f"imgproxy.fetch 异常：{type(error).__name__}: {error}"
+        if blob:
+            return bytes(blob), ""
+        return b"", "imgproxy.fetch 返回空（不在白名单 / 站点 4xx / 代理不通）"
+    body, error, _status = http_get(text, proxy=str(_opt(opts, "proxy") or ""),
+                                    timeout=_to_int(_opt(opts, "http_timeout")) or 30)
+    if body is None:
+        return b"", f"http_get 失败：{error}"
+    if not is_image_bytes(body):
+        return b"", "拿到的不是图片（缺 imgproxy 时无法解 XOR/Referer，已丢弃）"
+    return body, ""
+
+
 def _upload_images(emby_client: Any, store: Any, emby_id: str, target: Dict[str, Any],
                    assets: Sequence[Dict[str, Any]], opts: Dict[str, Any],
                    key: str, cli: Any = None) -> Dict[str, Any]:
     """封面 → `Primary`、横版剧照 → `Backdrop/0..2` + `Thumb`（**同一张图只下一次**）。
 
-    封面：`imgproxy.crop_poster(raw, anchor=…)` 裁成 377×538 再传；`crop_poster` 缺失或
-    本机没 Pillow 时**直传原图**（P0-① 实测原图直传是合法写入，原图直传不会失败）。
+    **封面取数的两级兜底**（缺陷 5，试点批真机）：
+
+    1. javdb `assets list` 挑出来的 cover（优先）；
+    2. 拿不到就退回**取数层给的 `cover_url`**（MetaTube 的 dmm 系封面 / javdb 详情的封面），
+       走 `imgproxy.fetch(url, proxy)`。真机现象：`12593`(IPOK-025L.iso)/`12596`(CAWB-040.mp4)
+       的 javdb 图集是空的（番号查不到 / 该片图集为空），写完 `/img?emby=<id>&type=Primary`
+       仍 404 —— 而这两条的 `cover_url` 在 target 里**本来是有的**。
+    3. 两级都空/都取不到 → 记 `scrape_log` 与 `report['notes']` 的说明，**不报错**
+       （不写 `errors`：封面缺失不该让整条刮削记成失败）。
+    裁剪：`imgproxy.crop_poster(raw, anchor=…)` —— **竖图直传、横图按 anchor 裁**（契约 §8.2），
+    没有尺寸信息（解码失败/无 Pillow）也一律直传原图，不会崩。
 
     ⚠️ `Thumb` **只传第一张剧照**：契约 §3.6.1 说"同一张图上传多个 type 时别重复下载"，
     不是"每张剧照都传 Thumb" —— Thumb 是条目列表里那张小图，多传只会互相覆盖。
     """
-    report: Dict[str, Any] = {"cover": "skipped", "samples": [], "crop": {}, "errors": []}
+    report: Dict[str, Any] = {"cover": "skipped", "samples": [], "crop": {}, "errors": [],
+                              "notes": []}
     if not bool(_opt(opts, "write_images", True)) or not _emby_write_ok(emby_client):
         report["cover"] = "skipped"
         return report
@@ -2259,30 +2305,55 @@ def _upload_images(emby_client: Any, store: Any, emby_id: str, target: Dict[str,
     blobs = (javdb_assets_download(cli, str(target.get("display_number") or ""), wanted,
                                    opts=opts, store=store, key=key)
              if (cli is not None and wanted) else {})
+
+    raw: Optional[bytes] = None
+    source = ""
     if cover:
         raw = blobs.get(str(cover.get("url")))
+        source = "javdb_assets"
+    fallback_url = str(target.get("cover_url") or "")
+    if not raw and fallback_url:
+        raw, why = _fetch_cover_bytes(fallback_url, opts)
         if raw:
-            anchor = str(_opt(opts, "crop_anchor") or "auto")
-            jpeg, meta = _crop(raw, anchor, target)
-            report["crop"] = meta
-            ok, detail = _call(emby_client, "upload_image", emby_id, "Primary", jpeg)
-            report["cover"] = "ok" if ok else f"error: {detail}"
-            if not ok:
-                report["errors"].append(f"封面上传失败：{detail}")
+            source = "cover_url"
+            report["notes"].append(f"javdb 图集没有封面，已用 cover_url 兜底：{fallback_url}")
+            _log_source(store, SRC_IMAGE, "ok", key, 0,
+                        f"封面走 cover_url 兜底（{len(raw)} B）：{fallback_url}")
         else:
-            report["cover"] = "download_failed"
+            report["notes"].append(f"cover_url 兜底也失败（{why}）：{fallback_url}")
+            _log_source(store, SRC_IMAGE, "error", key, 0, f"cover_url 兜底失败：{why}")
+    if raw:
+        anchor = str(_opt(opts, "crop_anchor") or "auto")
+        jpeg, meta = _crop(raw, anchor, target)
+        meta = dict(meta or {})
+        meta["source"] = source
+        report["crop"] = meta
+        ok, detail = _call(emby_client, "upload_image", emby_id, "Primary", jpeg)
+        report["cover"] = "ok" if ok else f"error: {detail}"
+        if not ok:
+            report["errors"].append(f"封面上传失败：{detail}")
+    else:
+        # 两级都拿不到：**不报错**，只留说明（javdb 图集空 + 没有 cover_url / 取不到）
+        report["cover"] = "no_cover"
+        if not cover and not fallback_url:
+            report["notes"].append("javdb 图集与 cover_url 都没有封面，跳过 Primary")
+        elif cover and not fallback_url:
+            report["notes"].append(f"javdb 图集的封面下载失败且没有 cover_url 可兜底："
+                                   f"{cover.get('url')}")
+        _log_source(store, SRC_IMAGE, "miss", key, 0,
+                    "封面两级兜底都没拿到字节（javdb 图集 + cover_url），跳过 Primary")
     for index, asset in enumerate(samples[:SAMPLE_COUNT]):
-        raw = blobs.get(str(asset.get("url")))
-        if not raw:
+        raw_sample = blobs.get(str(asset.get("url")))
+        if not raw_sample:
             report["samples"].append({"url": asset.get("url"), "status": "download_failed"})
             continue
-        ok, detail = _call(emby_client, "upload_image", emby_id, f"Backdrop/{index}", raw)
+        ok, detail = _call(emby_client, "upload_image", emby_id, f"Backdrop/{index}", raw_sample)
         report["samples"].append({
             "url": asset.get("url"), "type": f"Backdrop/{index}",
             "status": "ok" if ok else f"error: {detail}",
         })
         if index == 0:
-            ok2, detail2 = _call(emby_client, "upload_image", emby_id, "Thumb", raw)
+            ok2, detail2 = _call(emby_client, "upload_image", emby_id, "Thumb", raw_sample)
             if not ok2:
                 report["errors"].append(f"Thumb 上传失败：{detail2}")
     return report
@@ -2361,7 +2432,7 @@ def write_item(store: Any, emby_client: Any, target: Dict[str, Any], *, item_key
     的调用方用；`preview_one` 走的是自己那条更轻的路径（它连备份与台账都不碰），不走这里。
     """
     options = dict(opts or {})
-    # 每个实例一份**带自己角标**的视图（缺陷 1）：`locate_items()` 已经用盘上路径派生过一次，
+    # 每个实例一份**带自己角标**的视图（缺陷 1）：`locate_instances()` 已经用盘上路径派生过一次，
     # 下面读到 DTO 后再用条目自己的 `Path` 补正一次（DTO 才是权威，且**不额外增加请求**）。
     local = dict(target)
     result: Dict[str, Any] = {
@@ -2425,6 +2496,7 @@ def write_item(store: Any, emby_client: Any, target: Dict[str, Any], *, item_key
     images = _upload_images(emby_client, store, emby_id, local, assets or [],
                             options, key, cli=cli)
     result["images"] = images
+    result["notes"] = list(images.get("notes") or [])
     if images.get("errors"):
         result["error"] = "；".join(images["errors"])
     _log_source(store, SRC_EMBY_WRITE, "ok", key,
@@ -2781,6 +2853,9 @@ def preview_one(key: Any, *, store: Any, cli: Any, emby_client: Any = None,
         "anchor": str(_opt(options, "crop_anchor") or "auto"),
         "assets": len(assets),
         "source": "assets" if assets else "meta",
+        # 真实封面链路的**预览**：javdb 图集空时，写侧会退回 `cover_url`（缺陷 5）
+        "plan": ("javdb_assets" if (picked.get("cover") and assets)
+                 else ("cover_url" if target.get("cover_url") else "none")),
     }
     return {
         "key": key_text,
@@ -2888,6 +2963,7 @@ def scrape_one(key: Any, *, store: Any, cli: Any, emby_client: Any,
             "ok": bool(one.get("ok")), "status": one.get("status"),
             "changed": one.get("changed") or [], "images": one.get("images") or {},
             "error": one.get("error") or "",
+            "notes": one.get("notes") or [],
             "version_tags": one.get("version_tags") or version_labels(entry.get("version_tags")),
         })
     changed: List[str] = []
@@ -2897,6 +2973,11 @@ def scrape_one(key: Any, *, store: Any, cli: Any, emby_client: Any,
                 changed.append(name)
     wrote = [one for one in results if one["ok"]]
     ok_all = len(wrote) == len(results)
+    notes: List[str] = []
+    for one in results:
+        for note in one.get("notes") or []:
+            if note not in notes:
+                notes.append(note)
     report: Dict[str, Any] = {
         "ok": bool(wrote) and ok_all,
         "status": "ok" if ok_all and wrote else ("partial" if wrote else results[0]["status"]),
@@ -2904,7 +2985,9 @@ def scrape_one(key: Any, *, store: Any, cli: Any, emby_client: Any,
         "item_key": item_key, "emby_id": emby_id,
         "changed": changed, "images": results[0]["images"],
         "sources": target.get("sources") or {},
-        "warnings": target.get("warnings") or [],
+        # 图片兜底之类的"说明"折进 warnings：**不是错误**，但用户该看见
+        "warnings": list(target.get("warnings") or []) + notes,
+        "notes": notes,
         "completeness": target.get("completeness"),
         "translation_status": target.get("translation_status"),
         "error": "；".join(one["error"] for one in results if one["error"]),

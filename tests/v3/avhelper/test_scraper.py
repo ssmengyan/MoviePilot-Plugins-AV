@@ -2136,13 +2136,54 @@ class TestNumberSource:
 
 
 class TestSiteNumber:
-    """事实 2：查站点的番号用 `display_number(canon_key(...))` 兜一层（S2 修好前是刚需）。"""
+    """展示番号：`parse_av_number()` **优先**，解析不出才退回旧口径。
 
-    def test_zero_padding_stripped(self, scraper):
-        """`IPZZ-00586` 查 javdb 直接 404 —— 规范形态必须是 `IPZZ-586`。"""
+    真机缺陷 4（0.7.0 试点批）：`CAWB-040` 被写成 `CAWB-40`、`IPOK-025` 被写成 `IPOK-25` ——
+    根因是这里曾经"旧口径优先"（当初为绕开 S2 的多余零 bug，S2 修好后那层兜底**反而有害**）。
+    AGENTS.md §5：本库 109 条里 **31 条**是"数字段不足三位"的形态，漏到批量就是 31 条显示错。
+    """
+
+    def test_extra_zeros_stripped(self, scraper):
+        """`IPZZ-00586` 查 javdb 直接 404 —— 多余零必须抹掉（S2 已修，这里锁回归）。"""
         assert scraper.site_number("IPZZ-00586") == "IPZZ-586"
         assert scraper.site_number("ipzz00586") == "IPZZ-586"
         assert scraper.site_number("IPZZ-586") == "IPZZ-586"
+        assert scraper.site_number("ipzz00586_1_4K.mp4") == "IPZZ-586"
+
+    def test_meaningful_leading_zeros_kept(self, scraper):
+        """★ 硬性验收：**有意义的补零不许被抹掉**（旧口径会把 `CAWB-040` 拼成 `CAWB-40`）。"""
+        assert scraper.site_number("CAWB-040.mp4") == "CAWB-040"
+        assert scraper.site_number("CAWB-040") == "CAWB-040"
+        assert scraper.site_number("IPOK-025L.iso") == "IPOK-025"
+        assert scraper.site_number("CAWD-989_4K.mp4") == "CAWD-989"
+        assert scraper.site_number("MIRD-277-D.mp4") == "MIRD-277"
+        assert scraper.site_number("SNOS-380.mp4") == "SNOS-380"
+
+    def test_names_are_correct_for_the_two_real_defects(self, scraper):
+        """★ 硬性验收：两条真机错番号的写侧 `Name` 目标。"""
+        for raw, want_number, want_prefix in (
+            ("CAWB-040.mp4", "CAWB-040", "CAWB-040 "),
+            ("IPOK-025L.iso", "IPOK-025", "IPOK-025 [L/ISO] "),
+        ):
+            resolved = scraper.resolve_key(raw)
+            assert resolved["display_number"] == want_number
+            out = scraper.build_overrides(
+                targets({}, display_number=resolved["display_number"],
+                        version_tags=resolved["version_tags"]), EMPTY_DTO)
+            assert out["Name"].startswith(want_prefix), out["Name"]
+        # 角标照旧：IPOK-025L 的版本字母 L 与 ISO 都在
+        assert scraper.version_labels(scraper.resolve_key("IPOK-025L.iso")["version_tags"]) == \
+            ["L", "ISO"]
+        assert scraper.version_labels(scraper.resolve_key("CAWB-040.mp4")["version_tags"]) == []
+
+    def test_keys_never_change(self, scraper):
+        """`norm_key` / `canon_key` 是台账主键 —— 展示番号怎么修都不许动它们。"""
+        for raw, want in (("CAWB-040.mp4", "CAWB40"), ("IPOK-025L.iso", "IPOK25"),
+                          ("ipzz00586_1_4K.mp4", "IPZZ586"), ("IPZZ-912-UC.mp4", "IPZZ912"),
+                          ("FC2-PPV-4828968.mp4", "FC2PPV4828968")):
+            resolved = scraper.resolve_key(raw)
+            assert resolved["key"] == want and resolved["norm_key"] == want
+            assert scraper.emby.canon_key(raw) == want
 
     def test_resolve_key_uses_site_number(self, scraper):
         got = scraper.resolve_key("ipzz00961")
@@ -2156,11 +2197,11 @@ class TestSiteNumber:
         assert scraper.site_number("FC2PPV4828968") == "FC2-PPV-4828968"
         assert scraper.site_number("FC2-PPV-4828968") == "FC2-PPV-4828968"
 
-    def test_odd_forms_fall_back_to_parse(self, scraper):
-        """切不出规范形态（前置数字/一位数字段）时退回 parse 的结果，别丢信息。"""
-        assert scraper.site_number("1PONDO-123")
+    def test_odd_forms_still_resolve(self, scraper):
+        """前置数字这类形态仍要有兜底（`parse` 认不出时由旧口径接手）。"""
+        assert scraper.site_number("1PONDO-123") == "1PONDO-123"
         assert scraper.site_number("") == ""
-        assert scraper.site_number("SNOS-380") == "SNOS-380"
+        assert scraper.site_number("完全不认识的东西")
 
 
 class TestFetchCache:
@@ -2664,6 +2705,141 @@ class TestChangedAccuracy:
                                            "_mode": "z", "ProviderIds": {"A": "1"},
                                            "RunTimeTicks": 1, "MediaSources": []})
         assert got == {"Name": "x", "SeriesName": "y", "ProviderIds": {"A": "1"}}
+
+
+class TestCoverFallback:
+    """缺陷 5：javdb 图集为空时，用取数层的 `cover_url`（MetaTube / javdb 详情）兜底。
+
+    真机现象（试点批）：`12593`(IPOK-025L.iso)/`12596`(CAWB-040.mp4) 写完
+    `/img?emby=<id>&type=Primary` 仍 **404**（`ImageTags` 没出现 Primary）—— 这两条的 javdb
+    图集是空的，而 MetaTube 给的 dmm 系 `cover_url` **本来就在 target 里**，却没进图集。
+    """
+
+    COVER_URL = "http://pics.dmm.co.jp/digital/video/ipok00025/ipok00025ps.jpg"
+
+    def _write(self, scraper, monkeypatch, emby_client, assets, cover_url, fetch=None):
+        store = FakeStore()
+        if fetch is not None:
+            class Proxy:
+                @staticmethod
+                def fetch(url, proxy=""):
+                    return fetch(url, proxy)
+            monkeypatch.setattr(scraper, "imgproxy", Proxy)
+        monkeypatch.setattr(scraper, "_crop", lambda raw, anchor, t: (raw, {"mode": "raw"}))
+        report = scraper.write_item(
+            store, emby_client, targets({}, cover_url=cover_url,
+                                        display_number="IPOK-025",
+                                        version_tags={"edition": "L", "is_iso": True}),
+            item_key="emby:12593", key="IPOK25", emby_id="12593",
+            opts={"now": "2026-10-14T00:00:00", "write_images": True}, assets=assets,
+            cli=FakeCli())
+        return report, store
+
+    def test_empty_assets_falls_back_to_cover_url(self, scraper, monkeypatch):
+        """★ 硬性验收：javdb 图集为空 → 用 `cover_url` 兜底 → 仍然会调 `upload_image`。"""
+        seen = []
+
+        def fetch(url, proxy):
+            seen.append((url, proxy))
+            return b"\xff\xd8\xff-dmm-cover"
+
+        emby = FakeEmby(dto=EMPTY_DTO)
+        report, store = self._write(scraper, monkeypatch, emby, [], self.COVER_URL, fetch)
+        assert seen == [(self.COVER_URL, "")]                  # 走的就是 target 的 cover_url
+        assert report["ok"] and report["images"]["cover"] == "ok"
+        assert report["images"]["crop"]["source"] == "cover_url"
+        assert emby.uploaded == [{"item_id": "12593", "type": "Primary",
+                                  "bytes": b"\xff\xd8\xff-dmm-cover"}]
+        assert any("cover_url 兜底" in n for n in report["notes"])
+        assert report["error"] == ""                           # **不报错**
+        assert any("cover_url 兜底" in row["error"] for row in store.logs
+                   if row["source"] == "javdb_assets")
+
+    def test_assets_win_over_cover_url(self, scraper, monkeypatch):
+        """javdb 图集有封面时**不许**走兜底（优先级不能反）。"""
+        calls = []
+
+        def fetch(url, proxy):
+            calls.append(url)
+            return b"\xff\xd8\xff-fallback"
+
+        assets = scraper.parse_assets_list(ASSETS_JSON)
+        cover = [a for a in assets if a["type"] == "image" and "/covers/" in a["url"]][0]
+        monkeypatch.setattr(scraper, "javdb_assets_download",
+                            lambda *a, **k: {cover["url"]: b"\xff\xd8\xff-javdb"})
+        emby = FakeEmby(dto=EMPTY_DTO)
+        report, _store = self._write(scraper, monkeypatch, emby,
+                                     [dict(cover, url=JAVDB_DETAIL["cover_url"])],
+                                     self.COVER_URL, fetch)
+        assert calls == []                                     # 没动 cover_url
+        assert report["images"]["crop"]["source"] == "javdb_assets"
+        assert emby.uploaded[0]["bytes"] == b"\xff\xd8\xff-javdb"
+
+    def test_both_levels_empty_is_not_an_error(self, scraper, monkeypatch):
+        """★ 硬性验收：两级都空 → 不报错、只记日志。"""
+        emby = FakeEmby(dto=EMPTY_DTO)
+        report, store = self._write(scraper, monkeypatch, emby, [], "")
+        assert report["ok"] is True and report["error"] == ""
+        assert report["images"]["cover"] == "no_cover"
+        assert emby.calls["upload_image"] == 0
+        assert any("都没有封面" in n for n in report["notes"])
+        assert any(row["status"] == "miss" for row in store.logs
+                   if row["source"] == "javdb_assets")
+
+    def test_cover_url_fetch_failure_is_not_an_error(self, scraper, monkeypatch):
+        emby = FakeEmby(dto=EMPTY_DTO)
+        report, store = self._write(scraper, monkeypatch, emby, [], self.COVER_URL,
+                                    lambda url, proxy: None)
+        assert report["ok"] is True and report["error"] == ""
+        assert report["images"]["cover"] == "no_cover"
+        assert emby.calls["upload_image"] == 0
+        assert any("兜底也失败" in n for n in report["notes"])
+        assert any(row["status"] == "error" for row in store.logs
+                   if row["source"] == "javdb_assets")
+
+    def test_cover_url_without_imgproxy_checks_magic(self, scraper, monkeypatch):
+        """缺 `imgproxy` 时退回裸 http_get —— 必须靠魔数挡住 XOR 包装数据（否则 Emby 500）。"""
+        monkeypatch.setattr(scraper, "imgproxy", None)
+        monkeypatch.setattr(scraper, "http_get",
+                            lambda url, **k: (b"not-an-image", "", 200))
+        emby = FakeEmby(dto=EMPTY_DTO)
+        report, _store = self._write(scraper, monkeypatch, emby, [], self.COVER_URL)
+        assert emby.calls["upload_image"] == 0 and report["ok"] is True
+        assert any("不是图片" in n for n in report["notes"])
+        # 真的 JPEG 就走通（`is_image_bytes` 要求 ≥12 字节，别拿 8 字节的假货糊弄它）
+        monkeypatch.setattr(scraper, "http_get",
+                            lambda url, **k: (b"\xff\xd8\xff\xe0" + b"real-jpeg-body", "", 200))
+        emby2 = FakeEmby(dto=EMPTY_DTO)
+        report2, _s2 = self._write(scraper, monkeypatch, emby2, [], self.COVER_URL)
+        assert emby2.calls["upload_image"] == 1 and report2["images"]["cover"] == "ok"
+
+    def test_crop_handles_unknown_size(self, scraper):
+        """没有尺寸信息（无 Pillow / 解码失败）时 `crop_poster` 直传原图，不许崩。"""
+        raw, meta = scraper._crop(b"not-really-a-jpeg", "right", {})
+        assert raw == b"not-really-a-jpeg"
+        assert meta["mode"] == "raw"
+
+    def test_notes_reach_scrape_one_warnings(self, scraper, store_mod, tmp_path, monkeypatch):
+        """封面兜底的说明要能被调用方看见（折进 `warnings`/`notes`），而不是静默。"""
+        store = make_store(store_mod, tmp_path)
+        store.item_upsert("emby:12593", "IPOK25", display_number="IPOK-025", emby_id="12593")
+        cache = s11_cache(key="IPOK25", display="IPOK-025")
+        cache["numbers"]["IPOK25"]["javdb"]["detail"]["cover_url"] = self.COVER_URL
+
+        class Proxy:
+            @staticmethod
+            def fetch(url, proxy=""):
+                return b"\xff\xd8\xff-dmm"
+
+        monkeypatch.setattr(scraper, "imgproxy", Proxy)
+        report = scraper.scrape_one("IPOK-025", store=store, cli=FakeCli(detail=None),
+                                    emby_client=FakeEmby(dto=EMPTY_DTO),
+                                    opts={"now": "2026-10-14T00:00:00",
+                                          "fetch_cache": cache, "cache_only": True,
+                                          "write_images": True, "write_samples": False})
+        assert report["ok"] and report["images"]["cover"] == "ok"
+        assert any("cover_url 兜底" in w for w in report["warnings"])
+        assert report["notes"] and any("cover_url 兜底" in n for n in report["notes"])
 
 
 # ---------------------------------------------------------------------------
