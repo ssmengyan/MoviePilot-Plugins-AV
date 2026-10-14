@@ -241,6 +241,91 @@ class TestMigrationBackup:
         assert list(tmp_path.glob("*.bak")) == []     # 备份确实没写成
 
 
+class TestMetaQueueIndexes:
+    """P1-9：重刮队列的索引必须**真的被用上**（不是"建了就算"）。"""
+
+    @staticmethod
+    def _plan(store, sql, args=()):
+        rows = store._exec(f"EXPLAIN QUERY PLAN {sql}", args, fetch=True)
+        return " ".join(str(row[-1]) for row in rows)
+
+    def _capture(self, store, **kwargs):
+        """跑一次 `meta_due()` 并把它真正执行的那条 SELECT 抓出来（免得测试里抄一份 SQL）。"""
+        seen = []
+        real = store._exec
+
+        def spy(sql, args=(), fetch=False):
+            if str(sql).lstrip().upper().startswith("SELECT"):
+                seen.append((sql, args))
+            return real(sql, args, fetch)
+
+        store._exec = spy
+        store.meta_due(**kwargs)
+        store._exec = real
+        return seen[0]
+
+    def test_tier1_plan_uses_next_retry_index(self, store_mod, tmp_path):
+        store = make_store(store_mod, tmp_path)
+        for index in range(40):
+            store.meta_upsert(f"K{index}", display_number=f"IPZZ-{index}",
+                              next_retry_at="2026-10-15 09:00:00")
+        sql, args = self._capture(store, tier=1, limit=5)
+        plan = self._plan(store, sql, args)
+        assert "idx_meta_next_retry" in plan, plan
+
+    def test_tier2_plan_uses_last_scraped_index(self, store_mod, tmp_path):
+        store = make_store(store_mod, tmp_path)
+        for index in range(40):
+            store.meta_upsert(f"K{index}", display_number=f"IPZZ-{index}",
+                              last_scraped_at="2026-10-01 09:00:00")
+        sql, args = self._capture(store, tier=2, limit=5)
+        plan = self._plan(store, sql, args)
+        assert "idx_meta_last_scraped" in plan, plan
+
+    def test_tier1_still_skips_empty_and_null_retry(self, store_mod, tmp_path):
+        """`IFNULL(x,'')<>''` 改成 `IS NOT NULL AND <> ''` 后语义必须一致。"""
+        store = make_store(store_mod, tmp_path)
+        store.meta_upsert("EMPTY", display_number="IPZZ-001", next_retry_at="")
+        store.meta_upsert("NULLY", display_number="IPZZ-002", next_retry_at=None)
+        store.meta_upsert("DUE", display_number="IPZZ-003", next_retry_at="2020-01-01 00:00:00")
+        store.meta_upsert("LATER", display_number="IPZZ-004", next_retry_at="2999-01-01 00:00:00")
+        due = [str(row.get("key")) for row in store.meta_due(tier=1, limit=10)]
+        assert due == ["DUE"]
+
+
+class TestItemOrderWhitelist:
+    """P1-9：`item_list(order=…)` 走**排序白名单**，不许把调用方给的片段反射进 SQL。
+
+    amane 的教训（`docs/dev/api.md`）：排序参数必须白名单化。老写法是
+    `ORDER BY {filters['order']}` —— 原样拼接，注入面。
+    """
+
+    def test_accepted_forms(self, store_mod):
+        order = store_mod._item_order
+        assert order("") == "item_key ASC"
+        assert order("last_synced_at") == "last_synced_at ASC"
+        assert order("-last_synced_at") == "last_synced_at DESC"
+        assert order("last_synced_at DESC") == "last_synced_at DESC"      # 老写法照旧认
+        assert order("last_synced_at asc") == "last_synced_at ASC"
+        assert order("+emby_id") == "emby_id ASC"
+
+    def test_rejected_forms_fall_back_to_default(self, store_mod):
+        order = store_mod._item_order
+        for bad in ("item_key ASC; DROP TABLE media_item", "1=1", "random()",
+                    "item_key DESC, emby_id ASC", "不存在" , "(SELECT 1)"):
+            assert order(bad) == "item_key ASC", bad
+
+    def test_item_list_sorts_and_ignores_where(self, store_mod, tmp_path):
+        store = make_store(store_mod, tmp_path)
+        store.item_upsert("a", "KEYA", display_number="KEY-001", last_synced_at="2026-10-01 00:00:00")
+        store.item_upsert("b", "KEYB", display_number="KEY-002", last_synced_at="2026-10-09 00:00:00")
+        assert [r["item_key"] for r in store.item_list(order="-last_synced_at")] == ["b", "a"]
+        assert [r["item_key"] for r in store.item_list(order="last_synced_at")] == ["a", "b"]
+        # `where=` 不再拼进 SQL：注入片段只会被忽略（行数不变）
+        assert len(store.item_list(where="1=1 OR 1=1")) == 2
+        assert len(store.item_list(order="item_key ASC; DROP TABLE media_item")) == 2
+
+
 class TestSchemaUpgrade:
     """五张新表 + `downloads` 动态补列（幂等）。"""
 
@@ -399,7 +484,12 @@ class TestMeta:
         assert len(store.meta_list()) == 3
         assert len(store.meta_list(limit=2)) == 2
         assert len(store.meta_list(limit=2, offset=2)) == 1
-        assert {r["key"] for r in store.meta_list(where="completeness='full'")} == {"KEY1", "KEY2"}
+        # P1-9：`where=` 原始 SQL 片段已废止 → 用**列参数**过滤（白名单之外一律忽略）
+        assert {r["key"] for r in store.meta_list(completeness="full")} == {"KEY1", "KEY2"}
+        assert store.meta_list(completeness="full", 不存在的列="x") and \
+            len(store.meta_list(不存在的列="x")) == 3
+        assert {r["key"] for r in store.meta_list(where="completeness='full'")} == \
+            {"KEY0", "KEY1", "KEY2"}          # 片段被忽略（只记 warning），不再拼进 SQL
 
     def test_stats(self, store_mod, tmp_path):
         store = make_store(store_mod, tmp_path)

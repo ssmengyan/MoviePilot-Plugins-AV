@@ -145,6 +145,11 @@ CREATE TABLE IF NOT EXISTS meta(
     updated_at TEXT DEFAULT '',
     field_sources_json TEXT DEFAULT '{}'
 );
+-- P1-9：重刮两档队列的索引，**与 `meta_due()` 的 ORDER BY 逐字对齐**
+-- （tier1 用 `ORDER BY next_retry_at`、tier2 用 `ORDER BY last_scraped_at, updated_at`）。
+-- 没有索引时每次取队列都要全表扫 + 排序，而 `/scrape/status` 每屏都会问一次队列长度。
+CREATE INDEX IF NOT EXISTS idx_meta_next_retry ON meta(next_retry_at, updated_at);
+CREATE INDEX IF NOT EXISTS idx_meta_last_scraped ON meta(last_scraped_at, updated_at);
 
 CREATE TABLE IF NOT EXISTS media_item(
     item_key TEXT PRIMARY KEY,
@@ -326,6 +331,8 @@ _META_COLUMNS = (
 )
 # 可写字段：主键与 updated_at 不能从外面传（updated_at 由 meta_upsert 自己写）
 _META_FIELDS = frozenset(_META_COLUMNS) - {"key", "updated_at"}
+#: 可当**过滤条件**的列（P1-9：`meta_list(**filters)` 按列名等值过滤，白名单之外一律忽略）
+_META_COLUMN_SET = frozenset(_META_COLUMNS)
 _META_DEFAULTS: Dict[str, Any] = {
     "display_number": "", "javdb_id": "", "title_jp": "", "title_zh": "", "plot_jp": "",
     "plot_zh": "", "translation_status": "untranslated", "actors_json": "[]", "tags_json": "[]",
@@ -397,6 +404,31 @@ def _is_read_sql(sql: Any) -> bool:
 def _now() -> str:
     """当前时间字符串，统一写库格式。"""
     return time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _item_order(raw: Any) -> str:
+    """`item_list(order=…)` 的**排序白名单**（P1-9）：只认 `media_item` 的列名。
+
+    认这几种写法（其余一律回默认排序，绝不拼进 SQL）：
+    `"last_synced_at"`（升序）/ `"-last_synced_at"`（降序）/ 老的 `"last_synced_at DESC"`。
+
+    amane 的教训（`docs/dev/api.md`）：排序参数**必须走白名单**，不许反射列名 ——
+    老写法是把调用方给的整段片段塞进 `ORDER BY`，那是个注入面。
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return "item_key ASC"
+    body = text[1:] if text[:1] in ("-", "+") else text
+    parts = body.replace(",", " ").split()
+    if not parts or parts[0] not in _ITEM_COLUMN_SET:
+        logger.warning(f"AVHelper item_list(order=…) 认不出的排序（已回默认）：{text[:80]}")
+        return "item_key ASC"
+    if len(parts) == 2 and parts[1].upper() in ("ASC", "DESC"):
+        return f"{parts[0]} {parts[1].upper()}"
+    if len(parts) > 2:
+        logger.warning(f"AVHelper item_list(order=…) 只认单列排序（已回默认）：{text[:80]}")
+        return "item_key ASC"
+    return f"{parts[0]} {'DESC' if text[:1] == '-' else 'ASC'}"
 
 
 def _shift_days(days: int) -> str:
@@ -1563,18 +1595,32 @@ class Store:
                     pass
                 raise
 
-    def meta_list(self, limit: int = 0, offset: int = 0, where: str = "") -> List[Dict[str, Any]]:
+    def meta_list(self, limit: int = 0, offset: int = 0, where: str = "",
+                  **filters: Any) -> List[Dict[str, Any]]:
         """列元数据（新改的在前）。
 
-        `limit<=0` = 不限条数；`where` 是**原始 SQL 片段**（拼在 WHERE 后面），只给内部调用方
-        用（`scraper`/`__init__` 拼的都是自己写死的条件，不要往里塞用户输入）。
+        `limit<=0` = 不限条数；`filters` 里**列名同名**的键按等值过滤（`completeness="full"`），
+        与 `item_list()` 同一套口径（不认识的列名直接忽略）。
+
+        ⚠️ P1-9：`where` **已废止** —— 它是"把调用方给的片段原样拼进 SQL"，是一个注入面
+        （amane `docs/dev/api.md` 明令禁止反射列名/拼串）。要过滤请加**列参数**：
+        老写法 `meta_list(where="completeness='full'")` 现在等价于 `meta_list(completeness="full")`。
         """
-        sql = f"SELECT {_META_SELECT} FROM meta"
-        clause = str(where or "").strip()
-        if clause:
-            sql += f" WHERE {clause}"
-        sql += " ORDER BY updated_at DESC, key ASC"
+        clause: List[str] = []
         args: List[Any] = []
+        for name, value in (filters or {}).items():
+            if name not in _META_COLUMN_SET:
+                continue
+            clause.append(f"{name} = ?")
+            args.append(value)
+        sql = f"SELECT {_META_SELECT} FROM meta"
+        raw = str(where or "").strip()
+        if raw:
+            logger.warning("AVHelper meta_list(where=…) 已废止（P1-9 去掉原始 SQL 拼串）："
+                           f"该片段被忽略 → {raw[:80]}；请改用列参数过滤")
+        if clause:
+            sql += " WHERE " + " AND ".join(clause)
+        sql += " ORDER BY updated_at DESC, key ASC"
         size = _to_int(limit)
         skip = _to_int(offset)
         if size > 0:
@@ -1629,8 +1675,11 @@ class Store:
                    "ORDER BY last_scraped_at ASC, updated_at ASC LIMIT ?")
             args: tuple = (size,)
         else:
+            # P1-9：`IFNULL(next_retry_at,'') <> ''` 会让 `next_retry_at` 上的**索引失效**
+            # （函数包住的列没法走索引），语义相同但索引可用的写法是 IS NOT NULL + <> ''。
             sql = (f"SELECT {_META_SELECT} FROM meta "
-                   "WHERE IFNULL(next_retry_at, '') <> '' AND next_retry_at <= ? "
+                   "WHERE next_retry_at IS NOT NULL AND next_retry_at <> '' "
+                   "AND next_retry_at <= ? "
                    "ORDER BY next_retry_at ASC LIMIT ?")
             args = (stamp, size)
         rows = self._exec(sql, args, fetch=True) or []
@@ -1704,8 +1753,12 @@ class Store:
 
         `key` 给作品 key 就只回该作品的实例；`filters` 里**列名同名**的键按等值过滤
         （如 `library_state='in_library'`、`emby_id='12598'`），另认三个保留键：
-        `limit` / `offset` / `order`（原始 SQL 排序片段，如 `"last_synced_at DESC"`）。
+        `limit` / `offset` / `order`（**排序白名单**，见 `_item_order()`）。
         不认识的过滤键**直接忽略**（列名拼错不该把整个读接口炸掉）。
+
+        ⚠️ P1-9：`order` 不再原样拼串（那是注入面），只认 `media_item` 的列名
+        （`"last_synced_at"`、`"-last_synced_at"`，以及老的 `"last_synced_at DESC"` 写法）；
+        `where` **已废止**（今天没有调用方，认不出的片段只记 warning）。
         """
         clause: List[str] = []
         args: List[Any] = []
@@ -1719,10 +1772,13 @@ class Store:
             clause.append(f"{name} = ?")
             args.append(value)
         raw_where = str(filters.get("where") or "").strip()
+        if raw_where:
+            logger.warning("AVHelper item_list(where=…) 已废止（P1-9 去掉原始 SQL 拼串）："
+                           f"该片段被忽略 → {raw_where[:80]}")
         sql = f"SELECT {_ITEM_SELECT} FROM media_item"
-        if clause or raw_where:
-            sql += " WHERE " + " AND ".join(clause + ([raw_where] if raw_where else []))
-        sql += f" ORDER BY {filters.get('order') or 'item_key ASC'}"
+        if clause:
+            sql += " WHERE " + " AND ".join(clause)
+        sql += f" ORDER BY {_item_order(filters.get('order'))}"
         size = _to_int(filters.get("limit"))
         skip = _to_int(filters.get("offset"))
         if size > 0:
