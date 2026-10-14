@@ -1262,7 +1262,31 @@ class TestScrapeConf:
             "trailerMode": "off",
             "autoScrapeTier1": True, "autoScrapeTier2": True,
             "cleanSuffixes": [], "nameTemplate": "{number}{badge} {title}",
+            # P1-2：每 host 请求间隔（调用方没显式给间隔时用）与逐 host/站点覆盖
+            "defaultRateLimit": "2", "rateLimits": {},
         }
+
+    def test_rate_limit_keys_are_read_and_clamped(self, plugin, store):
+        """`rateLimits` / `defaultRateLimit`：认数字、夹范围、丢掉非法项（间隔归零＝关限流，不许）。"""
+        store.kv_set("global_rule", {"defaultRateLimit": "3.5",
+                                     "rateLimits": {"javtxt.com": "4", "metatube": 0.1,
+                                                    "": "5", "bad": "abc"}})
+        conf = plugin.scrape_conf()
+        assert conf["defaultRateLimit"] == "3.5"
+        assert conf["rateLimits"] == {"javtxt.com": "4", "metatube": "0.2"}   # 0.1 夹到下限
+        store.kv_set("global_rule", {"defaultRateLimit": 0, "rateLimits": "不是字典"})
+        conf = plugin.scrape_conf()
+        assert conf["defaultRateLimit"] == "2" and conf["rateLimits"] == {}
+
+    def test_scrape_opts_pushes_rate_limits_to_limiter(self, plugin, store):
+        """配置经 `scrape_opts()` 推给那个长命的限流器实例（不需要重载插件）。"""
+        store.kv_set("global_rule", {"defaultRateLimit": "7", "rateLimits": {"j.test": "9"}})
+        opts = plugin.scrape_opts()
+        assert opts["default_rate_limit"] == "7" and opts["rate_limits"] == {"j.test": "9"}
+        lim = plugin.limiter
+        assert lim.default_rate_limit == 7
+        assert lim.interval_for("j.test") == 9
+        assert lim.interval_for("other.test") == 7
 
     def test_camel_case_keys_are_read(self, plugin, store):
         store.kv_set("global_rule", {"scrapeMode": "hybrid", "plotJavtxt": False,

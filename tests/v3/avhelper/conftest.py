@@ -123,6 +123,23 @@ def no_real_sleep(monkeypatch):
     monkeypatch.setattr(module, "_SLEEP", lambda _seconds: None)
 
 
+@pytest.fixture(autouse=True)
+def fresh_limiter():
+    """每个用例一个**干净的限流器**。
+
+    `scraper._LIMITER` 是模块级状态（P1-2 把它做成了"进程内唯一执行点"），而限流器里有
+    两类跨调用状态：每 host 的漏桶时刻、以及**被拦后的冷却**。不隔离的话，前一个用例里
+    "javtxt 被 CF 拦"会把 `j.test` 冷却 6 小时，后面所有用同一个假主机的用例全被跳过 ——
+    症状是"单独跑绿、一起跑红"。
+    """
+    try:
+        module = _load("scraper")
+        ratelimit = _load("ratelimit")
+    except Exception:                                           # pragma: no cover - 防御
+        return
+    module.set_limiter(ratelimit.RateLimiter(None, sleep=lambda _seconds: None))
+
+
 @pytest.fixture(scope="session")
 def store_mod():
     """store 模块。"""

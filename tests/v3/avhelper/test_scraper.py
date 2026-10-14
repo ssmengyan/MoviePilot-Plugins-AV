@@ -3047,6 +3047,90 @@ class TestSiteSnapshot:
         assert "plot_zh" not in keys                 # 第一段没拿到中文简介（javtxt 落空）
 
 
+class TestBlockCooldown:
+    """P1-2：被拦后**按 host 冷却**（老实现只对 PT 搜索生效，元数据侧从不冷却）。"""
+
+    CHALLENGE = ('<!DOCTYPE html><html><head><title>Just a moment...</title></head>'
+                 '<body><script>window._cf_chl_opt={cvId:"3"}</script>cloudflare</body></html>')
+
+    def test_blocked_host_is_cooled_then_skipped(self, scraper, monkeypatch):
+        store = FakeStore()
+        _patch_fetch(monkeypatch, lambda url, **k: (self.CHALLENGE.encode(), "", 200))
+        first = scraper.javtxt_lookup({"javtxt_interval": 0, "javtxt_hosts": ("https://j.test",)},
+                                      "SNOS-380", store=store, key="SNOS380")
+        assert first["status"] == "error" and first["reason"] == scraper.REASON_CF_CHALLENGE
+        assert scraper.host_cooling("j.test") == pytest.approx(6 * 3600, abs=30)
+
+        # 第二次：同一个 host 已在冷却里 → **一个请求都不发**
+        calls = []
+
+        def boom(url, **kwargs):
+            calls.append(url)
+            raise AssertionError("冷却中的 host 不该再打")
+
+        _patch_fetch(monkeypatch, boom)
+        second = scraper.javtxt_lookup({"javtxt_interval": 0, "javtxt_hosts": ("https://j.test",)},
+                                       "SNOS-380", store=store, key="SNOS380")
+        assert calls == []
+        assert second["status"] == "skipped" and "冷却" in second["error"]
+
+    def test_cooling_is_per_host_not_per_site(self, scraper, monkeypatch):
+        """冷却按 **host**：一个镜像被拦，另一个镜像照常用（轮换域名绕不过、也别一锅端）。"""
+        seen = []
+
+        def fake_get(url, **kwargs):
+            seen.append(url)
+            if "a.test" in url and "/search" in url:
+                return self.CHALLENGE.encode(), "", 200
+            if "/search" in url:
+                return JAVTXT_SEARCH_HTML.encode(), "", 200
+            return JAVTXT_DETAIL_HTML.encode(), "", 200
+
+        _patch_fetch(monkeypatch, fake_get)
+        got = scraper.javtxt_lookup(
+            {"javtxt_interval": 0, "javtxt_hosts": ("https://a.test", "https://b.test")},
+            "SNOS-380", store=FakeStore(), key="SNOS380")
+        assert got["ok"] is True and got["host"] == "https://b.test"
+        assert scraper.host_cooling("a.test") > 0
+        assert scraper.host_cooling("b.test") == 0.0
+
+        # 冷却生效后：只打 b.test，a.test 一次都不碰
+        seen.clear()
+        scraper.javtxt_lookup(
+            {"javtxt_interval": 0, "javtxt_hosts": ("https://a.test", "https://b.test")},
+            "SNOS-380", store=FakeStore(), key="SNOS380")
+        assert seen and all("a.test" not in url for url in seen)
+
+    def test_metatube_cooling(self, scraper, monkeypatch):
+        """MetaTube 同样：200 的拦截页 → 记冷却 → 下一次跳过。"""
+        _patch_fetch(monkeypatch, lambda url, **k: (self.CHALLENGE.encode(), "", 200))
+        opts = {"metatube_base": "http://mt.test:8080"}
+        first = scraper.metatube_lookup(opts, "SNOS-380", store=FakeStore(), key="SNOS380")
+        assert first["status"] == "error" and first["reason"] == scraper.REASON_CF_CHALLENGE
+        assert scraper.host_cooling("mt.test") > 0
+        _patch_fetch(monkeypatch, self_boom())
+        second = scraper.metatube_lookup(opts, "SNOS-380", store=FakeStore(), key="SNOS380")
+        assert second["status"] == "skipped" and "冷却" in second["error"]
+
+    def test_gather_warns_when_javtxt_cooling(self, scraper, monkeypatch):
+        """冷却时 `gather` 的告警要说清"是冷却，不是站点没收录"。"""
+        _patch_fetch(monkeypatch, lambda url, **k: (self.CHALLENGE.encode(), "", 200))
+        opts = {"javtxt_interval": 0, "javtxt_hosts": ("https://j.test",),
+                "write_images": False}
+        scraper.gather(FakeCli(detail=JAVDB_DETAIL), FakeStore(), "SNOS380", "SNOS-380", opts=opts)
+        _patch_fetch(monkeypatch, self_boom())
+        target = scraper.gather(FakeCli(detail=JAVDB_DETAIL), FakeStore(), "SNOS380", "SNOS-380",
+                                opts=opts)
+        assert target["sources"]["javtxt"]["status"] == "skipped"
+        assert any("冷却" in w for w in target["warnings"])
+
+
+def self_boom():
+    def boom(url, **kwargs):
+        raise AssertionError(f"不该发请求：{url}")
+    return boom
+
+
 # ---------------------------------------------------------------------------
 # 17. S11 全库实测落进 scraper 的四条（事实 1/2/3 + 设计缺口）
 # ---------------------------------------------------------------------------

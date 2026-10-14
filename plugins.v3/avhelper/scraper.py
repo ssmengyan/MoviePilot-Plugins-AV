@@ -65,13 +65,14 @@ import unicodedata
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
-from urllib.parse import quote, urlencode
+from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
+from urllib.parse import quote, urlencode, urlparse
 
 from app.sdk.logging import logger
 
 from . import emby
 from . import number_classify
+from . import ratelimit
 from . import scrape_graph
 
 # 延迟导入：S3 / S4 交付前本模块必须照常工作（降级见模块 docstring）。
@@ -707,6 +708,14 @@ RETRYABLE_STATUS = frozenset({408, 429, 503, 504})
 _SLEEP = time.sleep
 
 
+def urlparse_host(url: Any) -> str:
+    """从 URL 里取 host（被拦后的冷却按 host 记，轮换域名也绕不过）；解析不出来回空串。"""
+    try:
+        return str(urlparse(str(url or "")).hostname or "")
+    except Exception:                                          # pragma: no cover - 防御
+        return ""
+
+
 def _proxy_opener(proxy: str) -> Any:
     """按代理串建一个 urllib opener（空串 = 直连，不设任何 handler）。"""
     import urllib.request
@@ -833,24 +842,58 @@ def http_get(url: str, *, proxy: str = "", timeout: int = 30,
 
 
 # 站点节流（同一站点两次请求之间的最小间隔；跨线程也要守住）
-_SITE_LAST: Dict[str, float] = {}
-_SITE_LOCK = threading.Lock()
+#
+# P1-2（0.8.0）：**执行点搬到 `ratelimit.RateLimiter.wait_host()`** —— 元数据取数与 PT 站点搜索
+# 共用同一个限流器实例（插件 `init_plugin` 时 `set_limiter()` 注入），
+# 这里只留一个薄封装，签名不变（调用点与老单测都按 `throttle(host, interval)` 写）。
+_LIMITER: Any = None
+
+
+def set_limiter(limiter: Any) -> None:
+    """注入限流器（插件 `init_plugin` 调用；不注入时用一个不带 store 的默认实例）。
+
+    不注入也能跑：默认实例是**进程内内存态**（单测、启动早期、独立脚本都要能用）。
+    """
+    global _LIMITER
+    _LIMITER = limiter
+
+
+def limiter() -> ratelimit.RateLimiter:
+    """取当前限流器（没有就现造一个内存态的）。
+
+    ⚠️ 默认实例的 `sleep` 走 `_SLEEP`（而不是直接 `time.sleep`）：单测把它换成空实现，
+    否则每一个"调 javtxt"的用例都要真等 2 秒（`ratelimit` 自己的默认睡在它模块内，
+    这里必须显式接上注入点）。
+    """
+    global _LIMITER
+    if _LIMITER is None:
+        _LIMITER = ratelimit.RateLimiter(None, sleep=_sleep_now)
+    return _LIMITER
+
+
+def _sleep_now(seconds: float) -> None:
+    """`_SLEEP` 的**延迟读取**包装：单测改了 `scraper._SLEEP` 之后，已经建好的限流器也跟着变。"""
+    _SLEEP(seconds)
 
 
 def throttle(host: str, interval: float) -> float:
     """把「对 `host` 的下一次请求」推迟到距上次 ≥`interval` 秒；返回实际等待秒数。
 
-    等待走 `_SLEEP`（与重试退避同一个注入点）：单测里节流与退避一起被换成空实现。
+    等待走 `_SLEEP`（在限流器里注入），单测里被换成空实现。
     """
-    wait = 0.0
-    with _SITE_LOCK:
-        now = time.monotonic()
-        last = _SITE_LAST.get(host, 0.0)
-        wait = max(0.0, float(interval or 0) - (now - last))
-        if wait > 0:
-            _SLEEP(wait)
-        _SITE_LAST[host] = time.monotonic()
-    return wait
+    return limiter().wait_host(host, interval=interval)
+
+
+def host_cooling(host: str) -> float:
+    """该 host 还剩多少秒冷却（被拦后 `ratelimit.BLOCK_COOLDOWN_HOURS` 小时）。"""
+    return limiter().cooling(host)
+
+
+#: 视为"被拦"的原因（命中后按 host 冷却，下次不再打这个镜像）
+BLOCK_REASONS: FrozenSet[str] = frozenset({
+    REASON_CF_CHALLENGE, REASON_CF_BLOCKED, REASON_AGE, REASON_IP_BANNED,
+    REASON_GEO, REASON_RATE_LIMITED,
+})
 
 
 # ---------------------------------------------------------------------------
@@ -1061,6 +1104,18 @@ def javtxt_lookup(opts: Dict[str, Any], number: str, *, store: Any = None,
     }
     target = emby.parse_av_number(number)
     target_norm = target.norm_key if target.matched else emby.canon_key(number)
+    # 被拦过（CF/年龄墙/429）的镜像先别打 —— 冷却按 **host** 记，轮换域名也绕不过
+    lim = limiter()
+    cooled = [h for h in hosts if lim.cooling(h) > 0]
+    if hosts and len(cooled) == len(hosts):
+        wait_min = int(max(lim.cooling(h) for h in cooled) / 60) + 1
+        result.update({"status": "skipped", "reason": "", "latency_ms": 0,
+                       "error": f"镜像都在冷却中（约 {wait_min} 分钟后重试）"})
+        _log_source(store, SRC_JAVTXT, "skipped", key or number, 0, result["error"],
+                    reason=lim.blocked_reason(cooled[0]), run_id=run_id)
+        return result
+    if cooled:
+        hosts = [h for h in hosts if h not in cooled]
     # 只要有任何一次拿到"干净页面"（HTTP 成功且不是拦截页），"没有结果"就是真·收录缺口
     clean_seen = False
     detail_failed = False
@@ -1074,6 +1129,8 @@ def javtxt_lookup(opts: Dict[str, Any], number: str, *, store: Any = None,
             if not got.ok:
                 result["error"] = got.error or "搜索结果为空"
                 _remember_failure(result, got)
+                if got.reason in BLOCK_REASONS:          # 被拦 → 这个镜像歇一会儿
+                    lim.note_blocked(host, reason=got.reason)
                 continue
             text = got.body.decode("utf-8", "replace")
             blocked = classify_block(text[:FAILURE_BODY_LIMIT], got.status)
@@ -1082,6 +1139,7 @@ def javtxt_lookup(opts: Dict[str, Any], number: str, *, store: Any = None,
                 result["error"] = f"命中拦截页（{blocked}）"
                 result["reason"] = blocked
                 result["http_status"] = _to_int(got.status)
+                lim.note_blocked(host, reason=blocked)
                 continue
             clean_seen = True
             cards = parse_javtxt_search(text)
@@ -1094,6 +1152,8 @@ def javtxt_lookup(opts: Dict[str, Any], number: str, *, store: Any = None,
             if not detail.ok:
                 result["error"] = detail.error or "详情页拉取失败"
                 _remember_failure(result, detail)
+                if detail.reason in BLOCK_REASONS:
+                    lim.note_blocked(host, reason=detail.reason)
                 detail_failed = True
                 continue
             detail_text = detail.body.decode("utf-8", "replace")
@@ -1101,6 +1161,7 @@ def javtxt_lookup(opts: Dict[str, Any], number: str, *, store: Any = None,
             if blocked:
                 result["error"] = f"详情页命中拦截页（{blocked}）"
                 _remember_failure(result, detail)
+                lim.note_blocked(host, reason=blocked)
                 detail_failed = True
                 continue
             parsed = parse_javtxt_detail(detail_text)
@@ -1496,6 +1557,15 @@ def metatube_lookup(opts: Dict[str, Any], number: str, *, store: Any = None,
         out["error"] = "未配置 MetaTube 地址"
         out["reason"] = ""                      # 未配置不是请求失败：别算进失败率
         return out
+    # 被拦过就先别打（冷却按 host 记；MetaTube 在局域网里，冷却一般只在它自己被代理/上游拦时触发）
+    mt_host = urlparse_host(base)
+    if mt_host and limiter().cooling(mt_host) > 0:
+        wait_min = int(limiter().cooling(mt_host) / 60) + 1
+        out.update({"status": "skipped", "error": f"MetaTube 冷却中（约 {wait_min} 分钟后重试）",
+                    "latency_ms": 0})
+        _log_source(store, SRC_METATUBE, "skipped", key or number, 0, out["error"],
+                    reason=limiter().blocked_reason(mt_host), run_id=run_id)
+        return out
     target = emby.parse_av_number(number)
     target_norm = target.norm_key if target.matched else emby.canon_key(number)
     url = f"{base}/v1/movies/search?{urlencode({'q': number})}"      # 只带 q；不要 provider=
@@ -1509,12 +1579,18 @@ def metatube_lookup(opts: Dict[str, Any], number: str, *, store: Any = None,
             "http_status": 0 if status == 404 else _to_int(status),
             "latency_ms": int((time.time() - started) * 1000),
         })
+        if mt_host and out["reason"] in BLOCK_REASONS:
+            limiter().note_blocked(mt_host, reason=out["reason"])
         _log_source(store, SRC_METATUBE, out["status"], key or number, out["latency_ms"],
                     out["error"], reason=out["reason"], http_status=out["http_status"],
                     run_id=run_id)
         return out
     text = body.decode("utf-8", "replace")
     blocked = classify_block(text[:FAILURE_BODY_LIMIT], status)
+    if not blocked and reason in BLOCK_REASONS:
+        blocked = reason                              # 状态码/异常已经判成被拦了
+    if blocked and mt_host:
+        limiter().note_blocked(mt_host, reason=blocked)
     try:
         payload = json.loads(text)
     except ValueError:
@@ -2604,6 +2680,9 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
                 plot_zh = ""
                 plot_source = ""
                 field_sources.pop("plot_zh", None)          # 溯源也要跟着撤，别留下假来源
+        elif javtxt.get("status") == "skipped":
+            # P1-2：这个源在冷却里（被拦过），本次一个请求都没发 —— 与"站点没收录"分开说
+            warnings.append(f"Javtxt 已跳过：{javtxt.get('error', '') or '冷却中'}")
         elif javtxt.get("status") == "error":
             # 被拦与"站点挂了/改版了"处置不同：前者要冷却 + 换 UA，后者要修解析器
             if str(javtxt.get("reason") or "") in (REASON_CF_CHALLENGE, REASON_CF_BLOCKED,

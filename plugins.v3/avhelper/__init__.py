@@ -78,6 +78,13 @@ CACHE_SIZE_TTL = 60        # 缓存体积的内存缓存时长（秒）：前端
 # 逐站快照的保留天数（P0-3）：每晚 `job_cacheclean` 淘汰。90 天覆盖"重刮一轮"的窗口，
 # 也远长于 Tier1 的 14 天退避上限 —— 快照是"只重算不重抓"的凭据，删早了等于白存。
 SNAPSHOT_KEEP_DAYS = 90
+# 请求间隔（P1-2）：默认值 / 允许范围（秒）。**下限 0.2 秒**——间隔归零等于关掉限流，
+# 那是政策不允许的（执行方案 §8.2）；上限只是防手滑写个 3600。
+DEFAULT_RATE_LIMIT_TEXT = "2"
+RATE_LIMIT_MIN = 0.2
+RATE_LIMIT_MAX = 60.0
+#: `rateLimits` 最多认多少条（防呆：别让人把整个 host 表塞进来）
+RATE_LIMIT_MAX_ENTRIES = 50
 ONCE_JOB_ID = "subcheck_now"
 # 启动预热（§8.2）：MP/插件启动时先把「发现榜单」首屏要用的数据与封面落进缓存，
 # 用户第一次打开插件时直接命中缓存，不必现抓 javdb、也不必现拉几十张封面。
@@ -327,6 +334,34 @@ def is_keep_file(path: Path) -> bool:
     return path.name.startswith("avhelper.db")
 
 
+def _rate_value(value: Any, default: Any = None) -> str:
+    """请求间隔（秒）→ 规范化字符串；认不出/≤0 回 `default`（`None` 时回空串）。
+
+    夹在 `[RATE_LIMIT_MIN, RATE_LIMIT_MAX]`：**间隔归零等于关掉限流**（政策不允许），
+    所以 0 / 负数 / 乱填一律不当成"更快"，按默认或丢弃处理。
+    """
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "" if default is None else str(default)
+    if number <= 0:
+        return "" if default is None else str(default)
+    return f"{min(max(number, RATE_LIMIT_MIN), RATE_LIMIT_MAX):g}"
+
+
+def _rate_map(value: Any) -> Dict[str, str]:
+    """`rateLimits` → `{host 或站点: "秒"}`（键去空白、值走 `_rate_value`；最多 `RATE_LIMIT_MAX_ENTRIES` 条）。"""
+    if not isinstance(value, dict):
+        return {}
+    out: Dict[str, str] = {}
+    for key, raw in list(value.items())[:RATE_LIMIT_MAX_ENTRIES]:
+        name = str(key or "").strip()
+        text = _rate_value(raw)
+        if name and text and name not in out:
+            out[name] = text
+    return out
+
+
 class AVHelper(_PluginBase):
     """AV 资源助手：JAV 番号订阅、榜单浏览、PT 自动选种下载。"""
 
@@ -405,6 +440,9 @@ class AVHelper(_PluginBase):
         self._store = Store()
         self._store.init()
         self._limiter = RateLimiter(self._store)
+        # P1-2：把限流器交给刮削线 —— 元数据取数（javtxt / MetaTube）与 PT 搜索**共用同一个
+        # 执行点**（每 host 漏桶 + 被拦后的 host 冷却），不再是两套互不知道的节流。
+        self._wire_limiter()
         self._notifier = Notifier(self, self._store)
         self._engine = TaskEngine(self, self._store, self._limiter, self._notifier)
 
@@ -770,10 +808,23 @@ class AVHelper(_PluginBase):
 
     @property
     def limiter(self) -> RateLimiter:
-        """限流器入口。"""
+        """限流器入口（P1-2 起元数据取数也走它）。"""
         if self._limiter is None:
             self._limiter = RateLimiter(self.store)
         return self._limiter
+
+    def _wire_limiter(self) -> None:
+        """把限流器接到需要的模块上（P1-2：刮削线的取数节流与 PT 搜索共用一个执行点）。
+
+        模块可能还没就绪（并行施工期 / 装载失败）—— 接不上就跳过，**不要**为它把插件启动
+        打挂；没接到时 `scraper.limiter()` 会自己造一个进程内内存态的，功能不丢（只是冷却不跨重启）。
+        """
+        try:
+            mod = self.scrape_module()
+            if mod is not None and hasattr(mod, "set_limiter"):
+                mod.set_limiter(self.limiter)
+        except Exception as error:                              # noqa: BLE001 - 防御
+            logger.warning(f"AVHelper 接线限流器失败（刮削线退回内存态）：{error}")
 
     @property
     def notifier(self) -> Notifier:
@@ -923,7 +974,7 @@ class AVHelper(_PluginBase):
         return merge_rule(rule)
 
     def scrape_conf(self) -> Dict[str, Any]:
-        """刮削设置的 11 项（**存放在 kv 的 `global_rule` 里**，不是宿主插件配置）。
+        """刮削设置的 13 项（**存放在 kv 的 `global_rule` 里**，不是宿主插件配置）。
 
         口径（主统筹 2026-10-14 更正，覆盖任务书 E 段）：前端设置台 S9 已经在用这套
         camelCase 键名读写 `global_rule`，所以这里**只读不写**、缺键逐项回落默认值 ——
@@ -933,7 +984,12 @@ class AVHelper(_PluginBase):
         键名一个字母都不许改（前端按这套读）：`scrapeMode` / `plotJavtxt` / `plotMetatube` /
         `translateModel` / `translateModelFallback` / `trailerMode` /
         `autoScrapeTier1` / `autoScrapeTier2` / `cleanSuffixes` / `nameTemplate` /
-        `metatubeBase`（0.7.0 加：MetaTube 服务地址，**代码里不写死**，留空 = 不做 MetaTube 兜底）。
+        `metatubeBase`（0.7.0 加：MetaTube 服务地址，**代码里不写死**，留空 = 不做 MetaTube 兜底）/
+        `defaultRateLimit` + `rateLimits`（0.8.0 加，P1-2：每 host 请求间隔与逐 host/站点覆盖）。
+
+        ⚠️ **这两个限流键只改"调用方没显式给间隔"的那条路**：javtxt 的调用点仍固定传
+        `JAVTXT_MIN_INTERVAL=2.0`（政策硬要求 ≥2s），所以用户把默认间隔调到 0.5 也不会
+        让 javtxt 变快 —— 只影响新增源与 MetaTube 这类没写死间隔的调用。
         """
         rule = self.global_rule() or {}
         suffixes = rule.get("cleanSuffixes")
@@ -952,6 +1008,9 @@ class AVHelper(_PluginBase):
                              if isinstance(suffixes, list) else [],
             "nameTemplate": (str(rule.get("nameTemplate") or "").strip()
                              or "{number}{badge} {title}"),
+            "defaultRateLimit": _rate_value(rule.get("defaultRateLimit"),
+                                            DEFAULT_RATE_LIMIT_TEXT),
+            "rateLimits": _rate_map(rule.get("rateLimits")),
         }
 
     def magnets_cached(self, number: str) -> Optional[List[Dict[str, Any]]]:
@@ -2580,6 +2639,15 @@ class AVHelper(_PluginBase):
         opts["plot_sources"] = tuple(sources)
         # MetaTube 地址：留空就传空串（`_opt()` 认空串为"已给"→ 数据源自检回显"未配置"）
         opts["metatube_base"] = conf["metatubeBase"]
+        # 限流（P1-2）：驼峰 → 下划线，并**顺手把当前配置推给限流器** —— 那个实例是长命的
+        # （`init_plugin` 建一次），配置改了不必重载插件，也不为它造第二个执行点。
+        opts["default_rate_limit"] = conf["defaultRateLimit"]
+        opts["rate_limits"] = dict(conf["rateLimits"] or {})
+        try:
+            self.limiter.reconfigure(default_rate_limit=opts["default_rate_limit"],
+                                     rate_limits=opts["rate_limits"])
+        except Exception as error:                              # noqa: BLE001 - 防御
+            logger.warning(f"AVHelper 同步限流参数失败：{error}")
         opts["proxy"] = self._proxy
         host, apikey = self._emby_conn()
         opts["library"] = self.emby() if (host and apikey) else None
