@@ -117,11 +117,13 @@ def _load_entry():
 class FakeRequest:
     """FastAPI `Request` 的最小替身：处理器只用到 method/query_params/json/base_url。"""
 
-    def __init__(self, body=None, method="POST", query=None, base_url="http://127.0.0.1:3001/"):
+    def __init__(self, body=None, method="POST", query=None, headers=None,
+                 base_url="http://127.0.0.1:3001/"):
         self.method = method
         self._body = body
         self.query_params = dict(query or {})
         self.base_url = base_url
+        self.headers: dict = dict(headers or {})
 
     async def json(self):
         if self._body is None:
@@ -395,6 +397,13 @@ class TestRouteTable:
 # ---------------------------------------------------------------------------
 
 
+def img_req(if_none_match: str = "") -> FakeRequest:
+    """`/img` 的替身请求：只用到 `headers`（P1-10 的 ETag 条件请求要看它）。"""
+    request = FakeRequest(method="GET")
+    request.headers = {"if-none-match": if_none_match} if if_none_match else {}
+    return request
+
+
 class TestImageProxy:
     def test_url_branch_unchanged(self, plugin, api_mod, monkeypatch):
         seen = {}
@@ -405,7 +414,7 @@ class TestImageProxy:
             return b"\xff\xd8\xff\xe0jpeg"
 
         monkeypatch.setattr(api_mod.imgproxy, "fetch", fake_fetch)
-        response = plugin.api_img(url="https://tp.spfcas.com/x.jpg")
+        response = plugin.api_img(img_req(), url="https://tp.spfcas.com/x.jpg")
         assert response.status_code == 200
         assert response.body == b"\xff\xd8\xff\xe0jpeg"
         assert seen["url"] == "https://tp.spfcas.com/x.jpg"
@@ -419,7 +428,7 @@ class TestImageProxy:
             return b"\xff\xd8\xff\xe0emby"
 
         monkeypatch.setattr(api_mod.imgproxy, "emby_image", fake_emby_image)
-        response = plugin.api_img(emby="12598", type="Primary")
+        response = plugin.api_img(img_req(), emby="12598", type="Primary")
         assert response.status_code == 200
         assert response.body == b"\xff\xd8\xff\xe0emby"
         assert seen["item_id"] == "12598" and seen["img_type"] == "Primary"
@@ -432,7 +441,7 @@ class TestImageProxy:
         monkeypatch.setattr(api_mod.imgproxy, "emby_image",
                             lambda host, apikey, item_id, img_type="Primary":
                             seen.update(item_id=item_id, img_type=img_type) or b"\xff\xd8\xff\xe0p")
-        response = plugin.api_img(emby_person="10775")
+        response = plugin.api_img(img_req(), emby_person="10775")
         assert response.status_code == 200
         assert seen == {"item_id": "10775", "img_type": "Primary"}
 
@@ -441,7 +450,7 @@ class TestImageProxy:
         use_emby(plugin, apikey=secret)
         monkeypatch.setattr(api_mod.imgproxy, "emby_image",
                             lambda host, apikey, item_id, img_type="Primary": b"\xff\xd8\xff\xe0x")
-        response = plugin.api_img(emby="12598")
+        response = plugin.api_img(img_req(), emby="12598")
         assert secret not in str(dict(response.headers))
         assert secret.encode() not in response.body
 
@@ -450,9 +459,25 @@ class TestImageProxy:
         called = []
         monkeypatch.setattr(api_mod.imgproxy, "emby_image",
                             lambda *a, **k: called.append(a) or b"\xff\xd8\xff\xe0x")
-        response = plugin.api_img(emby="12598")
+        response = plugin.api_img(img_req(), emby="12598")
         assert response.status_code == 404
         assert called == []
+
+    def test_img_sets_etag_and_revalidates(self, plugin, api_mod, monkeypatch):
+        """★ P1-10：老口径是 30 天强缓存且**没有 ETag**，而插件每晚清缓存 —— 会拿到陈旧图。"""
+        monkeypatch.setattr(api_mod.imgproxy, "fetch",
+                            lambda url, proxy="": b"\xff\xd8\xff\xe0jpeg")
+        first = plugin.api_img(img_req(), url="https://tp.spfcas.com/x.jpg")
+        assert first.status_code == 200
+        etag = str(first.headers.get("etag") or "")
+        assert etag and first.headers.get("cache-control") == "public, no-cache"
+        again = plugin.api_img(img_req(if_none_match=etag), url="https://tp.spfcas.com/x.jpg")
+        assert again.status_code == 304 and again.body in (b"", None)
+        # ETag 跟着内容走：换一张图就该回 200（不是同一串）
+        monkeypatch.setattr(api_mod.imgproxy, "fetch",
+                            lambda url, proxy="": b"\xff\xd8\xff\xe0other")
+        other = plugin.api_img(img_req(), url="https://tp.spfcas.com/x.jpg")
+        assert other.headers.get("etag") != etag
 
     def test_emby_image_url_helper_shape(self, plugin):
         assert plugin.emby_image_url("12598") == "/api/v1/plugin/AVHelper/img?emby=12598&type=Primary"

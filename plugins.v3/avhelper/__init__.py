@@ -1951,8 +1951,8 @@ class AVHelper(_PluginBase):
         return Response(content=blob, media_type=ui_media_type(target),
                         headers={"Cache-Control": "no-cache"})
 
-    def api_img(self, url: str = "", emby: str = "", emby_person: str = "",
-                type: str = "Primary") -> Response:
+    def api_img(self, request: Request, url: str = "", emby: str = "",
+                emby_person: str = "", type: str = "Primary") -> Response:
         """图片代理：白名单内 URL → XOR 解包后的图片，否则 404。
 
         平时只服务 javdb 封面/预览图；长缩略图在浏览器直连失败时才退回这里（WebP 原样透传）。
@@ -1960,6 +1960,12 @@ class AVHelper(_PluginBase):
         3.7 起多两个分支（**服务端回源，仍然匿名**，契约 §3.5 / v4.1 C2）：
         `?emby={item_id}&type=Primary`（影片原图）与 `?emby_person={person_id}`（演员原图）。
         Emby 的 host/apikey 只在服务端用，**绝不进 URL**（URL 里那两个参数只是条目 id）。
+
+        0.8.0 / P1-10：换成 **ETag + `public, no-cache`**（照 amane `api/support/http_cache.py`）。
+        老口径是 `max-age=2592000`（30 天）**且没有 ETag**，而插件每晚 04:00 会清缓存 ——
+        用户点了「清理缓存」之后浏览器还拿着 30 天前的旧图，服务端再取也是重新下载。
+        `no-cache` + ETag 是"每次都校验、内容没变就 304（零正文）"：既不会拿到陈旧图，
+        也不会为同一张图反复付带宽（长图冷缓存 5–20 秒，热缓存 3 毫秒）。
         """
         target = str(emby_person or emby or "").strip()
         if target:
@@ -1971,8 +1977,14 @@ class AVHelper(_PluginBase):
             blob = imgproxy.fetch(url or "", proxy=self._proxy)
         if blob is None:
             return Response(status_code=404)
-        return Response(content=blob, media_type=imgproxy.media_type(blob),
-                        headers={"Cache-Control": "public, max-age=2592000"})
+        etag = f'"{hashlib.sha1(blob).hexdigest()[:16]}"'
+        headers = {"Cache-Control": "public, no-cache", "ETag": etag}
+        try:                                        # 条件请求：内容没变就 304（不传正文）
+            if str(request.headers.get("if-none-match") or "").strip() == etag:
+                return Response(status_code=304, headers=headers)
+        except Exception:                           # pragma: no cover - 防御（替身 Request 无 headers）
+            pass
+        return Response(content=blob, media_type=imgproxy.media_type(blob), headers=headers)
 
     # ---------- 运行概况（bootstrap 用） ----------
 
