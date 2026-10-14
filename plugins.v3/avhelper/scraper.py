@@ -15,7 +15,8 @@ scrape_one(key, *, store, cli, emby_client, opts=None) -> dict
 scrape_batch(keys, *, store, cli, emby_client, opts=None) -> list
 rollback_item(item_key, *, store, emby_client) -> dict
 sources_selfcheck(store, cli, opts=None) -> list
-sync_actor_avatars(store, emby_client, *, limit=0, dry_run=True, namemap_mod=None, opts=None) -> dict
+sync_actor_avatars(store, emby_client, *, limit=0, dry_run=True, namemap_mod=None, opts=None,
+                   names=None) -> dict
 ensure_namemap(store, opts=None) -> bool
 ```
 
@@ -3433,8 +3434,63 @@ def is_image_bytes(blob: Any) -> bool:
     return data[:4] == b"RIFF" and data[8:12] == b"WEBP"
 
 
+# Gfriends 兜底的 provider 名（MetaTube `/v1/actors/search` 返回的 `provider` 字段）
+GFRIENDS_PROVIDER = "Gfriends"
+
+
+def _gfriends_avatar(opts: Dict[str, Any], jp: Any,
+                     timeout: int = 0) -> Tuple[str, str, str]:
+    """Gfriends 兜底：javdb 没头像时，按**日文原名**去 MetaTube 的 `/v1/actors/search` 找一张。
+
+    返回 `(url, error, reason)`：
+
+    - 命中 → `("https://raw.githubusercontent.com/…", "", "")`（取 `data[].images[0]`）；
+    - **HTTP 404 / 没有 Gfriends 条目 = "该演员不在 Gfriends" = 没有头像**（`reason='not_found'`），
+      **绝不是错误**，调用方不许把它记进 `errors`；
+    - 未配置 `metatube_base` → `reason='unconfigured'`；演员行没有 `jp` → `reason='no_jp_name'`；
+    - 只有真异常（连不上 / 非 JSON）才把文案放进 `error`。
+
+    ⚠️ 地址**只从 `_opt(opts, "metatube_base")` 取，绝不写死**；查询用演员行的 `jp`
+    （日文原名），**不是规范名** `中文（日文）`（实测规范名带全角括号与中文，查不到）。
+    """
+    base = str(_opt(opts, "metatube_base") or "").rstrip("/")
+    if not base:
+        return "", "", "unconfigured"
+    query = _clean_text(jp)
+    if not query:
+        return "", "", "no_jp_name"
+    url = f"{base}/v1/actors/search?{urlencode({'q': query})}"
+    body, error, status = _metatube_fetch(opts, url,
+                                          _to_int(_opt(opts, "metatube_timeout")) or METATUBE_TIMEOUT)
+    if body is None:
+        if status == 404:                       # 业务空值：该演员不在 Gfriends，不重试也不记错误
+            return "", "", "not_found"
+        return "", error or "请求失败", ""
+    try:
+        payload = json.loads(body.decode("utf-8", "replace"))
+    except ValueError:
+        return "", "返回不是合法 JSON", ""
+    items = payload.get("data") if isinstance(payload, dict) else payload
+    if not isinstance(items, list):
+        return "", "", "not_found"
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("provider") or "").lower() != GFRIENDS_PROVIDER.lower():
+            continue
+        images = item.get("images")
+        if not isinstance(images, list):
+            continue
+        for image in images:
+            text = str(image or "").strip()
+            if text:
+                return text, "", ""
+    return "", "", "not_found"
+
+
 def sync_actor_avatars(store: Any, emby_client: Any, *, limit: int = 0, dry_run: bool = True,
-                       namemap_mod: Any = None, opts: Optional[Dict[str, Any]] = None
+                       namemap_mod: Any = None, opts: Optional[Dict[str, Any]] = None,
+                       names: Optional[List[str]] = None
                        ) -> Dict[str, Any]:
     """把演员头像同步到 Emby 的 **Person 实体**（P0-② / v4.1 §6.2 的落地版）。
 
@@ -3452,9 +3508,19 @@ def sync_actor_avatars(store: Any, emby_client: Any, *, limit: int = 0, dry_run:
     6. **`dry_run=True` 时零写请求**：只 `find_person`（读）+ 产出动作清单，一个字节都不上传；
     7. 找不到 Person（该演员的影片还没刮过 / 名字还没统一）→ `reason='person_missing'`，
        **不算错误**（这正是"先把影片 People 写对，Emby 自己收敛实体"的必然过渡态）。
+    8. **只写女演员**（R3，`_avatar_index()` 的行里已有 `gender`）：`1`（男）直接跳过；
+       `None`（旧数据缺字段）**保守跳过**并单独计入 `gender_unknown`（**不混进 `missing_person`**）；
+       只有 `0`（女）进上传流程。
+    9. **javdb 没有头像（行里 `avatar` 为空）时走 Gfriends 兜底**（R5）：按演员行的 `jp`
+       （**日文原名**）打 `{metatube_base}/v1/actors/search?q=`，命中取 `data[].images[0]`；
+       **404 = 该演员不在 Gfriends = 没有头像，不是错误**；两源都没有 → `action='skip'` +
+       `reason='no_avatar'`（另带 `gfriends` 原因码）。
+    10. `names` 给了就**只处理这些规范名**（单片刮完只同步本片演员；自动路径绝不走全表）；
+       `None` = 现有的全量行为。
 
-    返回 `{ok, dry_run, actors, planned:[{name, person_id, action, reason, url?}],
-    applied:[…], errors:[…], missing_person}`。
+    返回 `{ok, dry_run, actors, planned:[{name, person_id, action, reason, url?, source?}],
+    applied:[…], errors:[…], missing_person, gender_unknown}`；`actors` 是**过滤后真正进流程**的
+    条数（性别 + `names` 过滤在前，`limit` 在后）。
     """
     options = dict(opts or {})
     mod = namemap_mod if namemap_mod is not None else namemap
@@ -3463,19 +3529,47 @@ def sync_actor_avatars(store: Any, emby_client: Any, *, limit: int = 0, dry_run:
     errors: List[str] = []
     out: Dict[str, Any] = {
         "ok": False, "dry_run": bool(dry_run), "actors": 0, "planned": planned,
-        "applied": applied, "errors": errors, "missing_person": 0,
+        "applied": applied, "errors": errors, "missing_person": 0, "gender_unknown": 0,
     }
     if emby_client is None or not _emby_write_ok(emby_client):
         errors.append("未配置 Emby（emby_client 不可用）")
         return out
     index = _avatar_index(store, mod)
     rows = sorted(index.values(), key=lambda row: row["name"])
+    if names is not None:                       # R5：单片路径只处理这一片的演员
+        wanted = {_clean_text(item) for item in names}
+        wanted.discard("")
+        rows = [row for row in rows if row["name"] in wanted]
+        if not rows:
+            out["ok"] = True                    # 这些名字还不在 meta 索引里 = 无事可做，不是错误
+            return out
+    if not rows:
+        errors.append("meta 里还没有演员（先刮削几条再来同步头像）")
+        return out
+    # gender 过滤（R3，保守口径）：1=男 直接跳过；None=旧数据 保守跳过并单独计数；只有 0=女 进流程
+    female: List[Dict[str, Any]] = []
+    for row in rows:
+        gender = row.get("gender")
+        if gender in (None, ""):
+            gender = None
+        else:
+            try:
+                gender = int(gender)
+            except (TypeError, ValueError):
+                gender = None
+        if gender == 1:
+            continue
+        if gender is None:
+            out["gender_unknown"] += 1
+            continue
+        female.append(row)
+    rows = female
     size = _to_int(limit)
     if size > 0:
         rows = rows[:size]
     out["actors"] = len(rows)
     if not rows:
-        errors.append("meta 里还没有演员（先刮削几条再来同步头像）")
+        out["ok"] = not errors                  # 全被 gender 过滤掉：没有可同步的，不是错误
         return out
 
     writer = bool(_opt(options, "person_provider_ids", True))
@@ -3499,20 +3593,33 @@ def sync_actor_avatars(store: Any, emby_client: Any, *, limit: int = 0, dry_run:
             continue
         entry["person_id"] = str(person.get("Id"))
         has_image = bool((person.get("ImageTags") or {}).get("Primary"))
-        has_avatar = bool(row.get("avatar"))
         if has_image and not bool(_opt(options, "avatar_force", False)):
             entry["reason"] = "has_image"
             planned.append(entry)
             continue
-        if not has_avatar:
-            entry["reason"] = "no_avatar"
+        # 取图：javdb 头像是第一顺位；它没有时才按**日文原名**去 Gfriends 兜底（R5）
+        avatar_url = str(row.get("avatar") or "")
+        source = "javdb" if avatar_url else ""
+        if not avatar_url:
+            avatar_url, gfriends_error, gfriends_reason = _gfriends_avatar(options, row.get("jp"))
+            if gfriends_error:
+                entry["action"] = "failed"
+                entry["reason"] = f"Gfriends 兜底失败：{gfriends_error}"
+                errors.append(f"{name}：Gfriends 兜底失败 {gfriends_error}")
+                planned.append(entry)
+                continue
+            if avatar_url:
+                source = "gfriends"
+        if not avatar_url:
+            entry["reason"] = "no_avatar"        # 两源都没有：如实跳过（javdb 空 + Gfriends 无）
+            entry["gfriends"] = gfriends_reason
             planned.append(entry)
             continue
-        entry.update({"action": "upload_avatar", "url": row["avatar"]})
+        entry.update({"action": "upload_avatar", "url": avatar_url, "source": source})
         planned.append(entry)
         if dry_run:
             continue
-        raw, error = _image_bytes(row["avatar"], options)
+        raw, error = _image_bytes(avatar_url, options)
         if not raw:
             entry["action"] = "failed"
             entry["reason"] = error
