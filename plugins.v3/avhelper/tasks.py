@@ -1630,6 +1630,60 @@ class TaskEngine:
             logger.error(f"AVHelper 取重刮待办失败（tier={tier}）：{error}")
             return []
 
+    def _seed_library_meta(self) -> int:
+        """把「Emby 库里在、meta 表里还没有」的键登记成**空行**（R1 的另一半，只登记不刮）。
+
+        `store.meta_due(tier=2)` 是按 `last_scraped_at` 升序取的（空串最优先），所以新登记的空行
+        下一轮就排在队首，由既有的自动刮削接手 —— 用户报的「库里很多内容都没有」正是缺这一步：
+        刮削队列只认 meta 表，库里那 100+ 条从没进过表的番号永远排不上号。
+
+        三条纪律（都在下面各就各位）：
+
+        - 键必须用 `emby.best_keys(index)` 收敛后的**干净键**（一个 Emby 条目一个键）。Emby 索引
+          的键是「刮削 id + 文件名 + 标题」三套写法的并集（真机 148 键、canon 后 128 键），而库只有
+          112 条；直接遍历 `index.keys()` 会造重复行与标题派生的垃圾行（同 `__init__._library_items()`）；
+        - **只传 `display_number` 一个字段**：`meta_upsert()` 只覆盖传进来的列，整行覆盖会把已经刮到的
+          标题/演员/简介抹成空串（要显式清空某列才显式传空串）；
+        - 取索引包在 try/except 里，且**索引为空直接跳过**（索引为空 ≠ 库里没片：Emby 没配、离线、
+          失败负缓存都会给空字典，拿它当"库是空的"播种没意义）。Emby 不通、单键写库失败都只记日志，
+          绝不影响这一轮 tick 的其余逻辑。
+
+        已有 meta 行的键一律跳过（幂等）：本方法读的是 `meta_list()` 那份全表快照，比逐键
+        `meta_get()` 少 100+ 次 SQL。返回本次新登记的行数。
+        """
+        try:
+            index = self.plugin.emby().index() or {}
+        except Exception as error:
+            logger.error(f"AVHelper 读 Emby 索引失败（本轮不播种）：{error}")
+            return 0
+        if not index:
+            # 空索引绝不当"库里没片"用：不播种，也不写库
+            logger.info("AVHelper 重刮队列：Emby 索引为空（未配置/不通），本轮不播种")
+            return 0
+        library = emby.best_keys(index)
+        try:
+            existing = {str(row.get("key") or "") for row in (self.store.meta_list() or [])
+                        if isinstance(row, dict)}
+        except Exception as error:
+            logger.error(f"AVHelper 读 meta 表现有行失败（本轮不播种，避免造重复行）：{error}")
+            return 0
+        seeded, failed = 0, 0
+        for library_key in library.values():
+            key = str(library_key or "")
+            if not key or key in existing:
+                continue
+            entry = index.get(key) or {}
+            try:
+                self.store.meta_upsert(key, display_number=emby.shown_number(key, entry.get("name")))
+                seeded += 1
+            except Exception as error:      # 单键失败只记账，tick 其余逻辑接着跑
+                failed += 1
+                logger.error(f"AVHelper 播种 meta 空行失败（{key}）：{error}")
+        if seeded or failed:
+            logger.info(f"AVHelper 重刮队列：Emby 库 {len(library)} 个键（已登记 {len(existing)} 条），"
+                        f"本轮播种 {seeded} 条空行，失败 {failed} 条")
+        return seeded
+
     def _scrape_tick(self) -> Dict[str, Any]:
         """跑一轮 Tier 1 / Tier 2 定时重刮（S8 接线，契约 §3.6 / v4.1 §5.3）。
 
@@ -1660,6 +1714,9 @@ class TaskEngine:
         if str(conf.get("scrapeMode") or "fill").strip().lower() == "off":
             logger.info("AVHelper 重刮队列：scrapeMode=off，本轮跳过")
             return out
+        # 播种（R1 的另一半）：先把「Emby 库里在、meta 表里还没有」的条目登记成空行，
+        # 再取 due —— 新建行的 last_scraped_at 是空串，天然排在 tier2 队首，下一轮自动接手。
+        self._seed_library_meta()
         due1 = self._meta_due(1, limit=5) if bool(conf.get("autoScrapeTier1", True)) else []
         due2 = self._meta_due(2, limit=3) if bool(conf.get("autoScrapeTier2", True)) else []
         out["tier1"], out["tier2"] = len(due1), len(due2)
