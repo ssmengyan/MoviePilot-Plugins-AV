@@ -2221,6 +2221,27 @@ class Store:
             "reason": r[7] or "", "http_status": _to_int(r[8]), "run_id": text,
         } for r in rows]
 
+    def scrape_log_runs(self, key: str = "", limit: int = 5) -> List[Dict[str, Any]]:
+        """按 `run_id` 归组列出最近的刮削批次（P0-4：挑一次现场来离线回放）。
+
+        `key` 给了就只列这部片的批次；每行 `{run_id, started_at, ended_at, sources, failed}`。
+        没有 `run_id` 的老记录（0.8.0 之前写的）不列 —— 回放按 `run_id` 找不到它们的现场。
+        """
+        args: List[Any] = []
+        where = "run_id <> ''"
+        if str(key or "").strip():
+            where += " AND key = ?"
+            args.append(str(key).strip())
+        args.append(max(1, _to_int(limit) or 5))
+        rows = self._exec(
+            "SELECT run_id, MIN(created_at), MAX(created_at), COUNT(*), "
+            "SUM(CASE WHEN status IN ('error','miss','timeout','blocked') THEN 1 ELSE 0 END) "
+            f"FROM scrape_log WHERE {where} GROUP BY run_id "
+            "ORDER BY MAX(id) DESC LIMIT ?", tuple(args), fetch=True) or []
+        return [{"run_id": str(r[0] or ""), "started_at": str(r[1] or ""),
+                 "ended_at": str(r[2] or ""), "sources": _to_int(r[3]), "failed": _to_int(r[4])}
+                for r in rows]
+
     def scrape_log_summary(self) -> List[Dict[str, Any]]:
         """按数据源汇总：总数 / 成功 / 失败 / 平均耗时 / **各失败原因计数** / 最近一次状态与时间。
 

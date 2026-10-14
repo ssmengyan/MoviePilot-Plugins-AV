@@ -164,3 +164,15 @@ def test_describe_shape(graph):
     assert by_id["metatube"]["phase"] == 2
     # 链里只出现启用的站（前端按它渲染，不许自己拼）
     assert all(set(chain) <= {"javdb", "metatube"} for chain in info["chains"].values())
+
+
+def test_exec_order_matches_phases(graph):
+    """`EXEC_ORDER` 必须与 `SOURCES[*].phase` 的先后一致（`gather()` 就按它顺序问）。
+
+    给后人的提醒：改了 `gather()` 的执行顺序（或给源换 phase）就得同步改 `EXEC_ORDER`，
+    否则 `may_fill()` 的"留给优先源"会判错。
+    """
+    by_phase = tuple(spec.id for spec in
+                     sorted(graph.SOURCES.values(), key=lambda s: (s.phase, s.id)))
+    assert graph.EXEC_ORDER == by_phase
+    assert set(graph.EXEC_ORDER) == set(graph.SOURCES)

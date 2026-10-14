@@ -231,7 +231,8 @@ class FakeScraper:
         self.view = view
         self.sources = sources if sources is not None else [
             {"source": "javdb", "status": "ok", "latency_ms": 1200, "error": ""}]
-        self.calls = {"preview": [], "batch": [], "rollback": [], "view": [], "sources": 0}
+        self.calls = {"preview": [], "batch": [], "rollback": [], "view": [], "sources": 0,
+                      "replay": 0}
 
     def preview_one(self, key, **kwargs):
         self.calls["preview"].append((key, kwargs))
@@ -254,6 +255,15 @@ class FakeScraper:
     def sources_selfcheck(self, store, cli, opts=None):
         self.calls["sources"] += 1
         return [dict(row) for row in self.sources]
+
+    def replay_run(self, key, store, **kwargs):
+        """P0-4 回放替身。"""
+        self.calls["replay"] += 1
+        return {"ok": True, "key": key, "target": {"plot_zh": "假简介", "title_jp": "日文"},
+                "sources": {"javtxt": {"status": "ok", "from_cache": True}},
+                "field_sources": {"plot_zh": "javtxt"}, "warnings": [],
+                "snapshots": {"javtxt": "2026-10-15 04:00:00"}, "missing": ["metatube"],
+                "error": ""}
 
 
 class FakeTranslator:
@@ -1509,6 +1519,35 @@ class TestScrapeGraphApi:
         assert saved["fieldPriority"] == {}                  # 认不出的源 → 空
         assert saved["fieldBlacklist"] == {}                 # 认不出的字段 → 空
         assert saved["defaultRateLimit"] == "0.2"            # 夹到下限（不许关掉限流）
+
+
+class TestScrapeReplayApi:
+    """P0-4：批次列表 + 离线回放（都有端点，不只是内部函数）。"""
+
+    def test_runs_endpoint_lists_batches(self, plugin, store):
+        store.scrape_log_add("javdb", "ok", "SNOS380", 10, "", run_id="RUN1")
+        store.scrape_log_add("javtxt", "ok", "SNOS380", 20, "", run_id="RUN1")
+        store.scrape_log_add("javdb", "ok", "IPZZ961", 10, "", run_id="RUN2")
+        result = plugin.api_scrape_runs(key="SNOS380")
+        assert result["success"] is True
+        assert [row["run_id"] for row in result["runs"]] == ["RUN1"]
+        assert result["runs"][0]["sources"] == 2
+        assert [row["run_id"] for row in plugin.api_scrape_runs()["runs"]] == ["RUN2", "RUN1"]
+
+    def test_replay_endpoint_uses_scraper(self, plugin, api_mod, monkeypatch):
+        fake = with_scraper(api_mod, monkeypatch, FakeScraper())
+        result = plugin.api_scrape_replay({"key": "SNOS380"})
+        assert result["success"] is True and fake.calls["replay"] == 1
+        assert result["target"]["plot_zh"] == "假简介"
+
+    def test_replay_requires_key(self, plugin):
+        result = plugin.api_scrape_replay({})
+        assert result["success"] is False and "key" in result["message"]
+
+    def test_replay_without_scraper_is_reported(self, plugin, api_mod, monkeypatch):
+        no_scraper(api_mod, monkeypatch)
+        result = plugin.api_scrape_replay({"key": "SNOS380"})
+        assert result["success"] is False
 
 
 class _FakeEmbyWrite:

@@ -845,6 +845,14 @@ class AVHelper(_PluginBase):
              "auth": "bear", "summary": "取数图（当前生效的字段×站点链）",
              "description": "P1-5：设置台据此渲染「可选值」与「当前链」——站点/字段清单由后端下发，"
                             "前端不许自己拼；?key= 按那部片的内容类型渲染"},
+            {"path": "/scrape/runs", "endpoint": self.api_scrape_runs, "methods": ["GET"],
+             "auth": "bear", "summary": "最近的刮削批次（按 run_id）",
+             "description": "P0-4：?key= 只列那部片的批次；回放要按 run_id 找现场"},
+            {"path": "/scrape/replay", "endpoint": self.api_scrape_replay, "methods": ["POST"],
+             "auth": "bear", "summary": "离线回放（用快照重算，不发请求）",
+             "description": "P0-4：POST {key} → 拿 site_snapshot 里的现场数据重算聚合，"
+                            "一个站点请求都不发、一行都不写；改规则（字段优先级/黑名单/启用源）"
+                            "之后反复重算看结果怎么变"},
             {"path": "/scrape/selfcheck", "endpoint": self.api_scrape_selfcheck, "methods": ["POST"],
              "auth": "bear", "summary": "翻译模型自检",
              "description": "POST {model?} → translator.selfcheck()：「模型自检」按钮；"
@@ -2798,6 +2806,46 @@ class AVHelper(_PluginBase):
             if len(cleaned) != len(raw_map):
                 ignored.append(f"rateLimits 里有 {len(raw_map) - len(cleaned)} 项非法/重复")
         return out, ignored
+
+    def api_scrape_runs(self, key: str = "", limit: int = 5) -> Dict[str, Any]:
+        """`GET /scrape/runs?key=&limit=`：最近的刮削批次（P0-4）。
+
+        按 `run_id` 归组 —— 用户要"回放某一次现场"时先在这里挑一个批次。
+        0.8.0 之前的记录没有 `run_id`，不列（回放按它找不到现场）。
+        """
+        try:
+            runs = self.store.scrape_log_runs(key=key, limit=limit)
+        except Exception as error:                              # noqa: BLE001 - 防御
+            logger.error(f"AVHelper 读刮削批次失败：{error}")
+            return {"success": False, "runs": [], "message": "读刮削批次失败"}
+        return {"success": True, "runs": runs}
+
+    def api_scrape_replay(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """`POST /scrape/replay {key}`（P0-4）：用逐站快照**离线回放**一次取数聚合。
+
+        不发任何站点请求、不写任何一行（`scraper.replay_run()` 内部就是
+        `gather(..., use_cache="all", log_sources=False)`）。返回
+        `{success, key, target, sources, field_sources, warnings, snapshots, missing}`。
+
+        与 `/scrape/preview` 的分工：preview 是"**现在去抓**一遍再和 Emby 比"，
+        replay 是"**用上次抓到的现场**重算"，专治"某源静默返回空 / 改了规则想看效果"。
+        """
+        data = payload if isinstance(payload, dict) else {}
+        key = str(data.get("key") or "").strip()
+        if not key:
+            return {"success": False, "message": "缺少 key", "target": {}}
+        mod = self.scrape_module()
+        if mod is None or not callable(getattr(mod, "replay_run", None)):
+            return self.scrape_not_ready({"target": {}})
+        try:
+            view = mod.replay_run(key, self.store, number=str(data.get("number") or ""),
+                                  opts=self.scrape_opts())
+        except Exception as error:                              # noqa: BLE001 - 防御
+            logger.error(f"AVHelper 离线回放失败（{key}）：{error}")
+            return {"success": False, "message": f"回放失败：{error}", "target": {}}
+        ok = bool((view or {}).get("ok"))
+        return {"success": ok, "key": key, **(view or {}),
+                "message": "" if ok else str((view or {}).get("error") or "回放失败")}
 
     def api_scrape_graph(self, key: str = "") -> Dict[str, Any]:
         """`/scrape/graph`：当前生效的**取数图**（P1-5）。

@@ -1301,11 +1301,14 @@ def _javdb_from_cache(row: Any) -> Tuple[Optional[Dict[str, Any]], str]:
 # 于是"换字段聚合策略时只重算不重抓"能在**单个源**的粒度上成立。
 # ---------------------------------------------------------------------------
 
-#: 快照载荷保留的键（结果 + 排障线索；`tried`/`latency_ms` 这类过程信息不入库）
+#: 快照载荷保留的键（结果 + 排障线索；`tried`/`latency_ms` 这类过程信息不入库）。
+#: `raw` 是 javdb 那条的**原始 DTO**（P0-4 离线回放要用它重算骨架；它比 `meta.raw_json`
+#: 里那份受 5KB 上限的摘要完整）。
 _SNAPSHOT_KEYS: Tuple[str, ...] = (
     "ok", "status", "vid", "url", "host", "title_jp", "title_zh", "plot_jp", "plot_zh",
     "zh_is_machine", "actors", "release_date", "studio", "director", "number_written",
     "error", "reason", "http_status", "provider", "id", "candidates", "mismatch", "movie",
+    "raw",
 )
 
 
@@ -1412,6 +1415,53 @@ def partial_of(values: Dict[str, Any]) -> Dict[str, Any]:
             ("display_number", "title_jp", "title_zh", "plot_jp", "plot_zh", "cover_url",
              "actors", "tags")
             if values.get(name) not in (None, "", [], {})}
+
+
+def replay_run(key: str, store: Any, *, number: str = "", opts: Optional[Dict[str, Any]] = None,
+               existing: Any = None) -> Dict[str, Any]:
+    """**离线回放**（P0-4）：只用逐站快照重算一遍聚合，**一个站点请求都不发**。
+
+    治的就是"某源静默返回空"这类排查：现场数据（javdb 原始 DTO / javtxt 结果 / MetaTube 命中）
+    已经在 `site_snapshot` 里，改聚合规则（字段优先级、黑名单、启用源、链顺序）之后可以
+    **反复重算**看结果怎么变，不必为每次试验再抓一遍站点。
+
+    返回 `{ok, key, target, sources, field_sources, warnings, snapshots, missing}`：
+
+    - `target` 是这次重算出的字段值（与 `gather()` 的产出同一形状）；
+    - `sources` 每个源的 `status`/`from_cache`（回放时统统是 `cache`）；
+    - `missing` 是"快照里没有的源"（回放结果对它的字段不可信）。
+
+    ⚠️ **不写库**：`log_sources=False`（与 `preview_one()` 同一条纪律），也不碰 Emby。
+    """
+    name = str(key or "").strip()
+    if not name or store is None or not hasattr(store, "snapshot_map"):
+        return {"ok": False, "error": "缺少 key 或 store 不支持快照", "target": {}}
+    snapshots = store.snapshot_map(name) or {}
+    if not snapshots:
+        return {"ok": False, "target": {}, "snapshots": [],
+                "error": "库里没有这部片的站点快照（先刮一次再来回放）"}
+    raw = ((snapshots.get(SRC_JAVDB) or {}).get("payload") or {}).get("raw") or {}
+    options = dict(opts or {})
+    options["log_sources"] = False                     # 回放绝不写 scrape_log / 快照
+    options["use_cache"] = tuple(scrape_graph.SOURCES)  # 所有源都走快照
+    options["force"] = False
+    display = str(number or "").strip() or name
+    target = gather(None, store, name, display, existing=existing,
+                    javdb_raw=raw if isinstance(raw, dict) and raw else None, opts=options)
+    target_fields = {field: target.get(field) for field in scrape_graph.FIELDS
+                     if target.get(field) not in (None, "", [], {})}
+    return {
+        "ok": bool(target_fields) or bool(target.get("sources")),
+        "key": name, "number": str(target.get("number") or display),
+        "target": target_fields,
+        "sources": target.get("sources") or {},
+        "field_sources": target.get("field_sources") or {},
+        "warnings": target.get("warnings") or [],
+        "snapshots": {site: str((row or {}).get("fetched_at") or "")
+                      for site, row in snapshots.items()},
+        "missing": [site for site in scrape_graph.SOURCES if site not in snapshots],
+        "error": "",
+    }
 
 
 def _short_plot_zh(plot_zh: str, plot_jp: str, opts: Optional[Dict[str, Any]]) -> bool:
@@ -2522,6 +2572,31 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
     # 「这个字段最后是谁给的」——**在填值的那一刻打标**（事后按链反推会撒谎：
     # javtxt 的占位简介要丢弃、MetaTube 只补空、LLM 会覆盖前两者）。
     field_sources: Dict[str, str] = {}
+
+    def may_fill(field: str, site: str) -> bool:
+        """**链的裁决口**（P0-1 收口）：`site` 现在能不能给 `field` 赋值。
+
+        两条判据（都在 `scrape_graph.compile_chain()` 产出的链上）：
+
+        1. `site` 不在该字段的链里 → **不给**（这就是 `field_blacklist` 与"源被关掉"的执行力：
+           以前链算完就放着，填值时一点不看，配置写了等于没写）；
+        2. 链上排在 `site` **前面**、但执行顺序上还在它**后面**的源 → 说明"这个字段要优先问它"，
+           于是现在先别填，留给那个源（执行顺序是 javdb → javtxt → MetaTube，见 `EXEC_ORDER`）。
+
+        默认链（三种顺序一致）下两条恒真 → 行为与引入取数图之前**逐字一致**。
+        """
+        chain = chains.get(field)
+        if not chain:
+            return True
+        if site not in chain:
+            return False
+        here = scrape_graph.EXEC_ORDER.index(site) if site in scrape_graph.EXEC_ORDER else -1
+        for earlier in chain[:chain.index(site)]:
+            where = (scrape_graph.EXEC_ORDER.index(earlier)
+                     if earlier in scrape_graph.EXEC_ORDER else -1)
+            if where > here:
+                return False                    # 留给执行顺序更晚的那个优先源
+        return True
     # 逐站快照的复用名单（P0-3）：`force` 时不复用（"强制重抓"要真的重抓）
     use_snapshots = set() if bool(_opt(options, "force")) else snapshot_use(options)
 
@@ -2569,6 +2644,11 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
     else:
         skeleton = javdb_skeleton(cli, display_number, opts=options, store=logs, key=key,
                                   raw=cached_javdb if cached_javdb else None, run_id=run_id)
+        # P0-4：把**真抓到的** javdb 原始 DTO 也存成逐站快照 —— 它比 `meta.raw_json` 里那份
+        # 摘要完整（那份受 5KB 上限、还会被后续写入覆盖），离线回放要靠它重算骨架。
+        if skeleton.get("ok") and isinstance(skeleton.get("raw"), dict):
+            write_snapshot(logs, key, SRC_JAVDB,
+                           {"ok": True, "status": "ok", "raw": skeleton["raw"]}, run_id=run_id)
     if not skeleton.get("ok"):
         skeleton = dict(skeleton)
         skeleton.setdefault("display_number", display_number)
@@ -2596,6 +2676,7 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
     translation_status = "untranslated"
     plot_source = ""
     # javdb 的字段先全部打上"javdb"的标（有值才算），后面谁覆盖就改谁的标
+    # P0-1 收口：链上说这个字段不要 javdb（或要优先问后面的源）时，这里就不打标、值也清掉。
     for name in scrape_graph.SOURCES["javdb"].provides:
         if name == "plot_jp":
             value = plot_jp
@@ -2605,6 +2686,17 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
             value = origin_jp
         else:
             value = skeleton.get(name if name != "studio" else "maker")
+        if value and not may_fill(name, "javdb"):
+            if name in ("plot_jp", "title_jp", "origin_title"):
+                if name == "plot_jp":
+                    plot_jp = ""
+                elif name == "title_jp":
+                    title_jp = ""
+                else:
+                    origin_jp = ""
+            else:
+                skeleton[name if name != "studio" else "maker"] = ""
+            continue
         if value:
             mark(name, "javdb")
 
@@ -2649,9 +2741,12 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
         if javtxt.get("from_cache"):
             sources[SRC_JAVTXT]["from_cache"] = True
         if javtxt.get("ok"):
-            title_zh = _clean_text(javtxt.get("title_zh"))
-            plot_zh = _clean_text(javtxt.get("plot_zh"))
-            javtxt_jp = _clean_text(javtxt.get("plot_jp"))
+            # P0-1 收口：链是**用来裁决的**，不是算完就放着 —— 该字段被排除（黑名单）或
+            # 链上还有更靠前、但执行顺序上更晚的源时，这里就先别填，留给它。
+            title_zh = _clean_text(javtxt.get("title_zh")) if may_fill("title_zh", "javtxt") else ""
+            plot_zh = _clean_text(javtxt.get("plot_zh")) if may_fill("plot_zh", "javtxt") else ""
+            javtxt_jp = (_clean_text(javtxt.get("plot_jp")) if may_fill("plot_jp", "javtxt")
+                         else "")
             plot_jp = javtxt_jp or plot_jp
             if title_zh:
                 mark("title_zh", "javtxt")
@@ -2732,7 +2827,19 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
             sources[SRC_METATUBE]["from_cache"] = True
         if mt.get("movie"):
             plot_before = plot_jp
+            # P0-1 收口：链是**用来裁决的** —— MetaTube 补空之后，把"这个字段的链里不要它"的
+            # 那几项**还原**回去（`metatube_fill()` 是整批写骨架的，所以先记旧值再回滚）。
+            before = {field: skeleton.get(field) for field in set(_FILL_TO_FIELD.values())}
             filled = metatube_fill(skeleton, mt["movie"])
+            if filled:
+                allowed: List[str] = []
+                for name in filled:
+                    mapped = _FILL_TO_FIELD.get(name)
+                    if mapped and not may_fill(mapped, "metatube"):
+                        skeleton[mapped] = before.get(mapped)
+                        continue
+                    allowed.append(name)
+                filled = allowed
             if filled:
                 sources[SRC_METATUBE]["filled"] = filled
                 warnings.append(f"MetaTube 补上了 javdb 没给的字段：{'/'.join(filled)}")
@@ -2745,11 +2852,11 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
                 # 「只补空」：javtxt 已经给的简介不许被 MetaTube 顶掉
                 if not plot_before:
                     plot_jp = _clean_text(skeleton.get("summary_jp")) or plot_jp
-        if mt.get("plot_jp"):
+        if mt.get("plot_jp") and may_fill("plot_jp", "metatube"):
             plot_jp = mt["plot_jp"]
             plot_source = plot_source or "metatube"
             mark("plot_jp", "metatube")
-        if mt.get("title_jp") and not title_jp:
+        if mt.get("title_jp") and not title_jp and may_fill("title_jp", "metatube"):
             title_jp = mt["title_jp"]
             mark("title_jp", "metatube")
         if mt.get("mismatch"):

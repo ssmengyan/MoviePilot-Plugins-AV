@@ -104,6 +104,12 @@ DEFAULT_CHAIN: Dict[str, Tuple[str, ...]] = {
 }
 
 #: `javdb` 是骨架：任何链里都必须在，且不允许被开关关掉
+#: 源的实际**执行顺序**（`gather()` 里就是按这个顺序依次问的：javdb 骨架 → javtxt → MetaTube）。
+#: `may_fill()` 用它判断"链上排在前面的源是不是还没轮到执行" —— 是就先别填，留给那个优先源。
+#: **改了 `gather()` 的执行顺序，这里必须同步改**（有一条单测盯着它与 `SOURCES` 的 phase 一致）。
+EXEC_ORDER: Tuple[str, ...] = ("javdb", "javtxt", "metatube")
+
+#: 默认链（`DEFAULT_CHAIN`）里每个字段的落点；由 `compile_chain()` 使用
 ALWAYS_ON: FrozenSet[str] = frozenset({"javdb"})
 
 
