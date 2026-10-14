@@ -78,6 +78,29 @@ def scraper():
     return _load("scraper")
 
 
+#: ★ 0.7.2 回归用的**独立**合成包名：真 `namemap`（带 5351 行映射表）只进这个包。
+#: 不能塞进 conftest 那个包 —— `store._norm_lookup()` 会用
+#: `sys.modules[f"{__package__}.namemap"]` 取归一化口径，塞进去等于给所有碰台账的用例换口径
+#: （`test_namemap.py` 出于同一理由也另开了一个包）。
+REAL_NAMEMAP_PKG = "avhelper_real_namemap_probe"
+
+
+def _load_isolated(name: str):
+    """把插件模块加载进 `REAL_NAMEMAP_PKG` 那个合成包（相对导入需要父包）。"""
+    if REAL_NAMEMAP_PKG not in sys.modules:
+        package = types.ModuleType(REAL_NAMEMAP_PKG)
+        package.__path__ = [str(PLUGIN_DIR)]
+        sys.modules[REAL_NAMEMAP_PKG] = package
+    key = f"{REAL_NAMEMAP_PKG}.{name}"
+    if key in sys.modules:
+        return sys.modules[key]
+    spec = importlib.util.spec_from_file_location(key, PLUGIN_DIR / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[key] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 @pytest.fixture(autouse=True)
 def no_real_network(monkeypatch):
     """★ **零外网硬闸门**：任何真的 HTTP 调用都当场炸掉，而不是悄悄连出去。
@@ -1932,11 +1955,13 @@ class TestNamemapWiring:
         assert store.logs[0]["status"] == "error" and "表坏了" in store.logs[0]["error"]
 
     def test_actor_rows_shape(self, scraper, monkeypatch):
-        """`meta.actors_json` 必须同时带 avatar、javdb_actor_id（追加 2）与 gender（0.7.1 全链路透传）。"""
+        """`meta.actors_json` 必须同时带 avatar、javdb_actor_id（追加 2）、gender（0.7.1）与
+        `person`（0.7.2 修：写 Emby 的那个名字，供头像同步同链复用）。"""
         monkeypatch.setattr(scraper, "namemap", None)
         rows = scraper.actor_rows([{"id": "neAOa", "name": "雛形みくる",
                                     "avatar_url": "https://a/2.jpg", "gender": 0}])
-        assert rows == [{"name": "雛形みくる", "zh": "", "jp": "雛形みくる",
+        assert rows == [{"name": "雛形みくる", "person": "雛形みくる", "zh": "",
+                         "jp": "雛形みくる",
                          "avatar": "https://a/2.jpg", "javdb_actor_id": "neAOa",
                          "canonical_id": "", "gender": 0}]
 
@@ -1968,6 +1993,37 @@ class TestNamemapWiring:
         actors = store.meta_get("SNOS380")["actors"]
         assert [a["javdb_actor_id"] for a in actors] == ["YPKz", "neAOa"]
         assert all(a["avatar"] for a in actors)
+
+
+#: ★ 0.7.2 真机回归用的演员（真实映射表实测值，`_tmp/chain_probe.py`）：
+#: `namemap.actor_display()` 的 `name` 是**只有简中名**的短名，`zh`/`jp` 才是三语名，
+#: `person_name()` 拼出写进 Emby `People[].Name` 的规范名。
+MATSU_DISPLAY = {"name": "松本一香", "zh": "松本一香", "jp": "松本いちか"}
+MATSU_PERSON = "松本一香（松本いちか）"
+
+
+class MapMatsumoto:
+    """只认这一个演员的假映射模块（注入 `namemap_mod`）。
+
+    **故意不用 5351 行真实表**：断言不该随资源内容漂移（同 `nomap` 夹具的理由）。
+    真机事实由 `test_real_mapping_table_single_chain` 单独钉住。
+    """
+
+    NAMES = ("松本いちか", "松本一香", MATSU_PERSON)
+
+    @classmethod
+    def actor_display(cls, name, alias=""):
+        text = str(name or "").strip()
+        if text in cls.NAMES:
+            return dict(MATSU_DISPLAY, alias=str(alias or ""))
+        return {"name": text, "zh": "", "jp": text, "alias": str(alias or "")}
+
+    @classmethod
+    def actor_lookup(cls, name):
+        text = str(name or "").strip()
+        if text in cls.NAMES:
+            return dict(MATSU_DISPLAY, canonical_id="amane:松本一香", source="amane")
+        return None
 
 
 class TestSyncActorAvatars:
@@ -2098,6 +2154,116 @@ class TestSyncActorAvatars:
         report = scraper.sync_actor_avatars(store, self._persons({}), dry_run=True,
                                            namemap_mod=nomap)
         assert report["ok"] is False and report["actors"] == 0
+
+    # -----------------------------------------------------------------------
+    # ★ 0.7.2 修：匹配名与写入名必须同链（真机误报 `person_missing` 的回归）
+    #
+    # 真机证据（0.7.2 上线后批量刮削，反复出现）：
+    #   `AVHelper 没在 Emby 找到名为 '松本一香' 的 Person 实体`
+    # 而同一时刻 Emby 里 MIRD-270 的 People 是规范名 `松本一香（松本いちか）`（实体**存在**）
+    # → 精确匹配落空 → 头像没传上去。根因：头像侧拿的是 `actor_rows()['name']`
+    # （`actor_display()` 的简中名），写侧 `build_people()` 用的是 `person_name()` 的规范名。
+    # -----------------------------------------------------------------------
+
+    def test_short_name_row_matches_canonical_person(self, scraper, store_mod, tmp_path,
+                                                    monkeypatch, nomap):
+        """**存量行**（只有短名、没有 `person` 字段）也必须命中规范名实体并真的传头像。
+
+        行形状照线上 0.7.2 的 `meta.actors_json` 抄 —— 修复要能治老数据，
+        而不是只对修复后新刮的片生效。
+        """
+        store = self._seed_store(store_mod, tmp_path, [
+            {"name": "松本一香", "zh": "松本一香", "jp": "松本いちか",
+             "canonical_id": "amane:松本一香", "avatar": "https://tp.spfcas.com/a.jpg",
+             "javdb_actor_id": "AOqm", "gender": 0}])
+        emby = self._persons({MATSU_PERSON: {"Id": "12617", "Name": MATSU_PERSON,
+                                             "ImageTags": {}}})
+
+        class Proxy:
+            @staticmethod
+            def fetch(url, proxy=""):
+                return b"\xff\xd8\xffjpeg"
+
+        monkeypatch.setattr(scraper, "imgproxy", Proxy)
+        report = scraper.sync_actor_avatars(store, emby, dry_run=False, namemap_mod=MapMatsumoto,
+                                            opts={"proxy": "http://px:1"})
+        assert [row["name"] for row in report["planned"]] == [MATSU_PERSON]
+        assert report["missing_person"] == 0 and report["ok"] is True
+        assert emby.uploaded == [{"item_id": "12617", "type": "Primary",
+                                  "bytes": b"\xff\xd8\xffjpeg"}]
+        assert report["applied"] and report["applied"][0]["person_id"] == "12617"
+
+    def test_written_name_equals_avatar_index_key(self, scraper, store_mod, tmp_path,
+                                                 monkeypatch):
+        """同链断言：`build_people()` 写进 Emby 的名字 == `_avatar_index()` 的槽键。"""
+        monkeypatch.setattr(scraper, "namemap", MapMatsumoto)
+        raw = [{"id": "AOqm", "name": "松本いちか", "avatar_url": "https://a.jpg", "gender": 0}]
+        written = [person["Name"] for person in scraper.build_people(None, raw, "")]
+        assert written == [MATSU_PERSON]
+        rows = scraper.actor_rows(raw)
+        assert rows[0]["person"] == MATSU_PERSON        # 落库的行里记着写进去的那个名字
+        assert rows[0]["name"] == "松本一香"              # 展示名仍是简中名（界面用它）
+        assert rows[0]["person"] == scraper.person_from_actor(rows[0])   # 同链的显式不变量
+        store = self._seed_store(store_mod, tmp_path, rows)
+        index = scraper._avatar_index(store, MapMatsumoto)
+        assert list(index) == written                   # ★ 修复本身：槽键 = 写入名
+        assert index[MATSU_PERSON]["display"] == "松本一香"
+        assert index[MATSU_PERSON]["jp"] == "松本いちか"
+
+    def test_short_name_person_is_not_hit(self, scraper, store_mod, tmp_path, nomap):
+        """反向保险：Emby 里只有**短名**实体时不许挂上去（那就成了挂错人）。
+
+        D15：Person 实体以 `Name` 为唯一键，`松本一香` 与 `松本一香（松本いちか）` 是**两个**
+        实体。旧实体由"重刮把影片 `People` 统一成规范名 → 0 引用 → Emby 自己收敛"清理，
+        这里绝不能靠别名/子串匹配去抢它 —— 匹配只认写链那一个精确名字。
+        """
+        store = self._seed_store(store_mod, tmp_path, [
+            {"name": "松本一香", "zh": "松本一香", "jp": "松本いちか",
+             "avatar": "https://a.jpg", "gender": 0}])
+        emby = self._persons({"松本一香": {"Id": "999", "Name": "松本一香", "ImageTags": {}}})
+        report = scraper.sync_actor_avatars(store, emby, dry_run=False, namemap_mod=MapMatsumoto)
+        assert report["missing_person"] == 1 and report["ok"] is True
+        assert report["planned"][0]["reason"] == "person_missing"
+        assert report["planned"][0]["name"] == MATSU_PERSON
+        assert emby.calls["upload_image"] == 0
+
+    def test_names_filter_accepts_display_name(self, scraper, store_mod, tmp_path, nomap):
+        """`names` 过滤（单片路径 / 界面给的名字）认短名，但匹配实体仍只用规范名。"""
+        store = self._seed_store(store_mod, tmp_path, [
+            {"name": "松本一香", "zh": "松本一香", "jp": "松本いちか",
+             "avatar": "https://a.jpg", "gender": 0},
+            {"name": "别人", "zh": "", "jp": "別人", "avatar": "https://b.jpg", "gender": 0}])
+        emby = self._persons({MATSU_PERSON: {"Id": "1", "Name": MATSU_PERSON, "ImageTags": {}}})
+        report = scraper.sync_actor_avatars(store, emby, dry_run=True,
+                                           namemap_mod=MapMatsumoto, names=["松本一香"])
+        assert [row["name"] for row in report["planned"]] == [MATSU_PERSON]
+        assert report["planned"][0]["person_id"] == "1"
+        assert report["actors"] == 1
+
+    def test_real_mapping_table_single_chain(self, scraper, store_mod, tmp_path, monkeypatch):
+        """真机数据回归：**真实映射表**下，两条链都算出 `松本一香（松本いちか）`。
+
+        上面几条用假映射模块保证断言不随资源漂移，这一条反过来钉住真机事实
+        （`_tmp/chain_probe.py` 的实测输出）：修复前 `_avatar_index()` 的槽键是短名 `松本一香`。
+        """
+        real = _load_isolated("namemap")
+        real_paths = sys.modules[f"{REAL_NAMEMAP_PKG}.paths"]
+        monkeypatch.setattr(real_paths, "_DATA_ROOT", tmp_path)   # 只读随包资源，避开本机覆盖
+        real.load()
+        assert real.ready() is True
+        monkeypatch.setattr(scraper, "namemap", real)
+
+        raw = [{"id": "AOqm", "name": "松本いちか", "avatar_url": "https://a.jpg", "gender": 0}]
+        written = [person["Name"] for person in scraper.build_people(None, raw, "")]
+        assert written == [MATSU_PERSON]
+        store = self._seed_store(store_mod, tmp_path, scraper.actor_rows(raw))
+        index = scraper._avatar_index(store, real)
+        assert list(index) == written
+        emby = self._persons({MATSU_PERSON: {"Id": "12617", "Name": MATSU_PERSON,
+                                             "ImageTags": {}}})
+        report = scraper.sync_actor_avatars(store, emby, dry_run=True, namemap_mod=real)
+        assert report["missing_person"] == 0
+        assert report["planned"][0]["action"] == "upload_avatar"
 
 
 # ---------------------------------------------------------------------------

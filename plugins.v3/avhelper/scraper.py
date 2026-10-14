@@ -1699,12 +1699,13 @@ def _canonical_id_of(mod: Any, name: Any) -> str:
 def actor_rows(actors: Any, mod: Any = None) -> List[Dict[str, Any]]:
     """javdb `actors[]` → `meta.actors_json` 的**规范形状**（S7 追加口径，为头像治理服务）。
 
-    每行固定给全这七个键，下游（`film_view()` / `sync_actor_avatars()`）不再各自兼容：
+    每行固定给全这八个键，下游（`film_view()` / `sync_actor_avatars()`）不再各自兼容：
 
     | 键 | 来源 | 用途 |
     | --- | --- | --- |
-    | `name` | D13 规范名 `中文（日文）` | Emby `People[].Name`（**必须与写入值逐字一致**，D15） |
-    | `zh` / `jp` | 映射表 / 原名 | 展示、`name` 的构件 |
+    | `name` | `namemap.actor_display()` 的 `name`（**简中名**；无映射时原名） | 界面展示、`names` 过滤 |
+    | `person` | `person_name()` = D13 规范名 `中文（日文）` | Emby `People[].Name`（**必须与写入值逐字一致**，D15） |
+    | `zh` / `jp` | 映射表 / 原名 | 展示、`person` 的构件 |
     | `avatar` | javdb `actors[].avatar_url` | 头像同步（P0-②：javdb 头像是第一顺位） |
     | `javdb_actor_id` | javdb `actors[].id` | 之后可写进 Person 的 `ProviderIds.JavDB`（可选） |
     | `canonical_id` | `namemap.actor_lookup()` | 映射表主键，缺映射时是空串 |
@@ -1732,6 +1733,10 @@ def actor_rows(actors: Any, mod: Any = None) -> List[Dict[str, Any]]:
         seen.append(name)
         out.append({
             "name": name,
+            # Emby `People[].Name` 的取值：与写侧 `build_people()` **同一个函数**（D15 的
+            # 「逐字一致」要求）。0.7.2 真机误报 `person_missing` 就是这里缺了这一格，
+            # 下游只能退而拿只有简中名的 `name` 去 `find_person()`。
+            "person": person_name(display),
             "zh": display.get("zh") or "",
             "jp": display.get("jp") or _clean_text(raw),
             "avatar": str(avatar or ""),
@@ -1773,6 +1778,39 @@ def person_name(display: Dict[str, str], fallback: str = "") -> str:
     return zh or jp or name
 
 
+def person_from_actor(actor: Any, mod: Any = None) -> str:
+    """一行 actor → Emby `People[].Name`（**唯一取值链**：三语名 → D13 规范名）。
+
+    写侧（`build_people()`）与头像侧（`_avatar_index()` → `find_person()`）**必须都走
+    这一个函数**，否则两边会算出不同的名字。兼容两种输入：
+
+    - javdb 原始形状 `{id,name,avatar_url,gender}`（`name` 是站点给的原名）或裸字符串
+      → 走 `actor_display()` 查映射表，再 `person_name()` 拼 `中文（日文）`；
+    - `actor_rows()` 产出的行（自带 `zh`/`jp`）→ **直接用行里的三语名复算** `person_name()`，
+      不再查一次表：那正是写 Emby 那一刻映射出来的值（映射表被用户覆盖/换版、或名字本身
+      是歧义键时，再查一次可能给出另一个答案）。
+
+    ⚠️ **0.7.2 真机 bug 的根因**：头像侧原来拿的是 `actor_rows()['name']`，那是
+    `namemap.actor_display()` 的 `name` 字段 = **只有简中名**（`松本一香`），而 Emby 里的
+    Person 实体叫 `松本一香（松本いちか）`（写侧 `person_name()` 的结果）→ `find_person()`
+    精确匹配失败 → 误报 `person_missing`、头像永远传不上去（见 §`sync_actor_avatars`）。
+
+    **只做精确相等匹配**：本函数只负责"算出那一个名字"，Emby 侧绝不拿别名/子串去猜
+    （D15：Person 实体按 `Name` 精确建，模糊匹配会挂到别人的实体上）。
+    """
+    if isinstance(actor, dict):
+        if _clean_text(actor.get("jp")) or _clean_text(actor.get("zh")):
+            return person_name(actor)
+        raw: Any = actor.get("name")
+    else:
+        raw = actor
+    if mod is None:
+        # 走模块级 `actor_display()`（不是 `_display_with()`）：那是既有的注入点，
+        # 单测与调用方靠 monkeypatch 它来顶掉映射层。
+        return person_name(actor_display(raw))
+    return person_name(_display_with(mod, raw))
+
+
 def build_people(original: Any, actors: Any, director: Any) -> List[Dict[str, Any]]:
     """按契约 §3.6.1 重写 `People[]`（D13/D14）。
 
@@ -1783,6 +1821,9 @@ def build_people(original: Any, actors: Any, director: Any) -> List[Dict[str, An
     - **不再写导演**（`director` 参数保留只为兼容调用方，本函数不再使用）；
     - **保留原 DTO 里 `Type` 既非 Actor 也非 Director 的元素**（工作室人员/客串等），
       否则一次刮削就把 MetaTube 或用户手工加的其它人员抹掉了。
+
+    `Name` 由 `person_from_actor()` 算 —— 与头像侧 `_avatar_index()` **同一个函数**，
+    两边逐字一致是 D15 的硬要求（0.7.2 的 `person_missing` 误报就是两边走了不同的链）。
     """
     kept: List[Dict[str, Any]] = []
     for item in (original if isinstance(original, list) else []):
@@ -1802,8 +1843,7 @@ def build_people(original: Any, actors: Any, director: Any) -> List[Dict[str, An
                     continue
             except (TypeError, ValueError):
                 pass                      # 脏值判不了男女 → 保守保留
-        raw = actor.get("name") if isinstance(actor, dict) else actor
-        name = person_name(actor_display(raw))
+        name = person_from_actor(actor)
         if not name or name in seen:
             continue
         seen.append(name)
@@ -3115,7 +3155,11 @@ def scrape_one(key: Any, *, store: Any, cli: Any, emby_client: Any,
     # 本片女演员头像同步（R3/P0-②）：元数据写入成功后才做，**失败绝不能让刮削本身失败**
     if wrote:
         try:
-            names = [row["name"] for row in actor_rows(target.get("actors")) if row.get("name")]
+            # ★ 传给头像同步的必须是**写进 Emby 的那个名字**（`person`，与 `build_people()`
+            #   同链）：拿 `name`（简中名）会让单片路径必然 `person_missing`（0.7.2 真机 bug）。
+            names = [str(row.get("person") or person_from_actor(row))
+                     for row in actor_rows(target.get("actors"))]
+            names = [name for name in names if name]
             if names:
                 avatar_sync = sync_actor_avatars(
                     store, emby_client, names=names, dry_run=False, opts=options)
@@ -3464,6 +3508,11 @@ AVATAR_SOURCE = "emby_avatar"
 def _avatar_index(store: Any, mod: Any) -> Dict[str, Dict[str, Any]]:
     """汇总「规范名 → {avatar, javdb_actor_id, numbers[]}」（`meta.actors_json` 是唯一来源）。
 
+    **槽键就是 `find_person()` 的入参**：一律由 `person_from_actor()` 算（与写 Emby 的
+    `build_people()` 同一条链，D15）。行的 `name`（简中名）只留在 `display` 里给 `names`
+    过滤与界面用 —— 0.7.2 真机误报 `person_missing` 就是拿它去匹配实体导致的
+    （实体叫 `松本一香（松本いちか）`，简中名 `松本一香` 精确匹配必然落空）。
+
     同一演员出现在多部片里时合并；**头像取第一条非空的**（javdb 的演员头像是第一顺位，
     S0b：MetaTube 的 `actors` 只有名字、没有头像）。
     """
@@ -3482,10 +3531,11 @@ def _avatar_index(store: Any, mod: Any) -> Dict[str, Dict[str, Any]]:
         if not isinstance(raw_actors, list):
             raw_actors = _json_load_list(row.get("actors_json"))
         for actor in actor_rows(raw_actors, mod):
-            name = actor["name"]
+            name = person_from_actor(actor, mod)
             if not name:
                 continue
-            slot = index.setdefault(name, {"name": name, "zh": actor["zh"], "jp": actor["jp"],
+            slot = index.setdefault(name, {"name": name, "display": actor["name"],
+                                           "zh": actor["zh"], "jp": actor["jp"],
                                            "avatar": "", "javdb_actor_id": "",
                                            "gender": actor.get("gender"), "numbers": []})
             if not slot["avatar"] and actor["avatar"]:
@@ -3494,10 +3544,26 @@ def _avatar_index(store: Any, mod: Any) -> Dict[str, Dict[str, Any]]:
                 slot["javdb_actor_id"] = actor["javdb_actor_id"]
             if slot.get("gender") is None and actor.get("gender") is not None:
                 slot["gender"] = actor.get("gender")
+            if not slot.get("jp") and actor.get("jp"):
+                slot["jp"] = actor["jp"]
             number = str(row.get("display_number") or row.get("key") or "")
             if number and number not in slot["numbers"]:
                 slot["numbers"].append(number)
     return index
+
+
+def _wanted_slot(slot: Dict[str, Any], wanted: set) -> bool:
+    """这一索引槽是否被 `names` 点名（规范名 / 展示名 / 中文名 / 日文原名**任一相等**即算）。
+
+    放宽的**只是「挑哪几行」**：调用方（界面、单片路径）手里的名字可能是短名或日文原名。
+    真正交给 `find_person()` 的永远只有 `slot['name']` 这一个**精确**值 —— Emby 的 Person
+    实体按 `Name` 精确建（D15），拿别名/子串去搜等于把头像挂到别人的实体上，绝不这么做。
+    """
+    for key in ("name", "display", "zh", "jp"):
+        text = _clean_text(slot.get(key))
+        if text and text in wanted:
+            return True
+    return False
 
 
 def _json_load_list(text: Any) -> List[Any]:
@@ -3614,8 +3680,11 @@ def sync_actor_avatars(store: Any, emby_client: Any, *, limit: int = 0, dry_run:
     流程与依据（每一条都对应 `_tmp/p0/REPORT-2.md` 的实测）：
 
     1. 从 `store.meta_list()` 的 `actors_json` 汇总「规范名 → 头像 / javdb_actor_id」；
-    2. 规范名 = 契约 D13 的 `中文（日文）`（`person_name()`；只有一边时用那一边，
-       **映射表没有的演员只写日文原名，绝不音译**）；
+    2. 规范名 = 契约 D13 的 `中文（日文）`，**由 `person_from_actor()` 算出 —— 与写 Emby 的
+       `build_people()` 同一个函数**（只有一边时用那一边，映射表没有的演员只写日文原名，
+       绝不音译）。⚠️ 两边必须同链，否则就是这个函数的真机事故现场：
+       0.7.2 头像侧拿的是 `actor_rows()['name']`（简中名 `松本一香`），而 Emby 里写的是
+       `松本一香（松本いちか）` → 精确匹配落空 → 误报 `person_missing`、头像传不上去；
     3. `emby_client.find_person(规范名)` —— Emby 的 Person **以 `Name` 为唯一键、精确匹配**
        （D15：`SortName`/`ProviderIds` 一概不参与匹配，`People[].Id` 会被彻底忽略）；
     4. Person 存在且 `ImageTags.Primary` 为空 → 下头像 → `upload_image(pid, "Primary", raw)`；
@@ -3632,8 +3701,9 @@ def sync_actor_avatars(store: Any, emby_client: Any, *, limit: int = 0, dry_run:
        （**日文原名**）打 `{metatube_base}/v1/actors/search?q=`，命中取 `data[].images[0]`；
        **404 = 该演员不在 Gfriends = 没有头像，不是错误**；两源都没有 → `action='skip'` +
        `reason='no_avatar'`（另带 `gfriends` 原因码）。
-    10. `names` 给了就**只处理这些规范名**（单片刮完只同步本片演员；自动路径绝不走全表）；
-       `None` = 现有的全量行为。
+    10. `names` 给了就**只处理这些名字**（单片刮完只同步本片演员；自动路径绝不走全表）：
+        规范名 / 展示名 / 中英日任一写法相等即算点名（`_wanted_slot()`；**只影响挑哪几行**，
+        交给 `find_person()` 的仍只有规范名一个精确值）；`None` = 现有的全量行为。
 
     返回 `{ok, dry_run, actors, planned:[{name, person_id, action, reason, url?, source?}],
     applied:[…], errors:[…], missing_person, gender_unknown}`；`actors` 是**过滤后真正进流程**的
@@ -3656,7 +3726,7 @@ def sync_actor_avatars(store: Any, emby_client: Any, *, limit: int = 0, dry_run:
     if names is not None:                       # R5：单片路径只处理这一片的演员
         wanted = {_clean_text(item) for item in names}
         wanted.discard("")
-        rows = [row for row in rows if row["name"] in wanted]
+        rows = [row for row in rows if _wanted_slot(row, wanted)]
         if not rows:
             out["ok"] = True                    # 这些名字还不在 meta 索引里 = 无事可做，不是错误
             return out
