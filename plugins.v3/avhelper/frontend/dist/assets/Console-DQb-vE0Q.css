@@ -2028,39 +2028,39 @@
 }
 
 /* 与下载页/订阅页同一套工具条几何 */
-.avh-scrape__toolbar[data-v-2f236093] {
+.avh-scrape__toolbar[data-v-35b4009d] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 12px;
 }
-.avh-scrape__hint[data-v-2f236093] {
+.avh-scrape__hint[data-v-35b4009d] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-scrape__spacer[data-v-2f236093] {
+.avh-scrape__spacer[data-v-35b4009d] {
   flex: 1;
 }
-.avh-scrape__meta[data-v-2f236093] {
+.avh-scrape__meta[data-v-35b4009d] {
   display: flex;
   align-items: baseline;
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 10px;
 }
-.avh-scrape__actions[data-v-2f236093] {
+.avh-scrape__actions[data-v-35b4009d] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 10px;
 }
-.avh-scrape__checkall[data-v-2f236093] {
+.avh-scrape__checkall[data-v-35b4009d] {
   flex: none;
   max-width: 190px;
 }
-.avh-scrape__loading[data-v-2f236093] {
+.avh-scrape__loading[data-v-35b4009d] {
   padding: 44px 20px;
   text-align: center;
   font-size: 13px;
@@ -2068,13 +2068,13 @@
 }
 
 /* 状态卡片（照发现榜单那组 tabs 的胶囊观感，改成可点的方块） */
-.avh-stats[data-v-2f236093] {
+.avh-stats[data-v-35b4009d] {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
   gap: 10px;
   margin-bottom: 10px;
 }
-.avh-stat[data-v-2f236093] {
+.avh-stat[data-v-35b4009d] {
   padding: 10px 12px;
   cursor: pointer;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
@@ -2082,35 +2082,35 @@
   background: rgba(var(--v-theme-on-surface), 0.04);
   transition: 0.15s;
 }
-.avh-stat[data-v-2f236093]:hover {
+.avh-stat[data-v-35b4009d]:hover {
   border-color: rgb(var(--v-theme-primary));
 }
-.avh-stat--on[data-v-2f236093] {
+.avh-stat--on[data-v-35b4009d] {
   border-color: rgb(var(--v-theme-primary));
   background: rgba(var(--v-theme-primary), 0.16);
 }
-.avh-stat__num[data-v-2f236093] {
+.avh-stat__num[data-v-35b4009d] {
   font-size: 20px;
   font-weight: 700;
   line-height: 1.2;
 }
-.avh-stat__label[data-v-2f236093] {
+.avh-stat__label[data-v-35b4009d] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.6);
 }
 
 /* 表格（`table-layout: fixed` + 显式列宽：宽屏不把「操作」列挤出去，照 S6 候选表的教训） */
-.avh-tablewrap[data-v-2f236093] {
+.avh-tablewrap[data-v-35b4009d] {
   overflow-x: auto;
 }
-.avh-table[data-v-2f236093] {
+.avh-table[data-v-35b4009d] {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
   font-size: 12.5px;
 }
-.avh-table th[data-v-2f236093],
-.avh-table td[data-v-2f236093] {
+.avh-table th[data-v-35b4009d],
+.avh-table td[data-v-35b4009d] {
   padding: 6px 8px;
   text-align: left;
   vertical-align: middle;
@@ -2119,26 +2119,26 @@
   white-space: nowrap;
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
 }
-.avh-table th[data-v-2f236093] {
+.avh-table th[data-v-35b4009d] {
   font-weight: 600;
   color: rgba(var(--v-theme-on-surface), 0.6);
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.16);
 }
-.avh-table__right[data-v-2f236093] {
+.avh-table__right[data-v-35b4009d] {
   text-align: right;
 }
-.avh-table__num[data-v-2f236093] {
+.avh-table__num[data-v-35b4009d] {
   font-weight: 600;
 }
-.avh-table__ellipsis[data-v-2f236093] {
+.avh-table__ellipsis[data-v-35b4009d] {
   max-width: 0;
 }
-.avh-rowbtns[data-v-2f236093] {
+.avh-rowbtns[data-v-35b4009d] {
   display: flex;
   gap: 4px;
   justify-content: flex-end;
 }
-.avh-scrape__secttl[data-v-2f236093] {
+.avh-scrape__secttl[data-v-35b4009d] {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -2149,7 +2149,7 @@
 }
 
 /* 版本角标（与 `LibraryView` / `DownloadsView` 同一套观感） */
-.avh-vbadge[data-v-2f236093] {
+.avh-vbadge[data-v-35b4009d] {
   display: inline-block;
   padding: 1px 6px;
   font-size: 10px;
@@ -2159,7 +2159,7 @@
   background: rgba(var(--v-theme-secondary), 0.9);
   border: 1px solid rgba(255, 255, 255, 0.14);
 }
-.avh-vbadge--inline[data-v-2f236093] {
+.avh-vbadge--inline[data-v-35b4009d] {
   margin-left: 4px;
 }
 
@@ -2170,7 +2170,7 @@
  */
 
 /* 页签胶囊：与「下载」栏那组同一套（两份 scoped CSS 各有作用域，本项目既有做法） */
-.avh-tabs[data-v-2f236093] {
+.avh-tabs[data-v-35b4009d] {
   display: flex;
   gap: 4px;
   padding: 3px;
@@ -2178,7 +2178,7 @@
   border-radius: 8px;
   background: rgba(var(--v-theme-on-surface), 0.04);
 }
-.avh-tabs button[data-v-2f236093] {
+.avh-tabs button[data-v-35b4009d] {
   padding: 4px 12px;
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
@@ -2187,7 +2187,7 @@
   border-radius: 6px;
   cursor: pointer;
 }
-.avh-tabs__on[data-v-2f236093] {
+.avh-tabs__on[data-v-35b4009d] {
   color: rgb(var(--v-theme-on-primary)) !important;
   background: rgb(var(--v-theme-primary)) !important;
 }
