@@ -11,6 +11,7 @@
  * | 交互 | 点卡片 = 打开在线详情（与发现榜单同一个抽屉：简介 / 资料 / 预览图 / 磁力 / 长图）； |
  * |      | 卡片上的「▶ 观看」= 直达 Emby（MB）观看地址（`lib.url`，新标签页）； |
  * |      | 已入库的片子进详情页本来就有「在 Emby 中打开 ↗」（0.2.3 就有，本轮不动它） |
+ * | 翻页 | 只渲染**前 60 条**，滚到底自动追加下一批（`composables/usePagedList.ts`：纯前端分段渲染，数据仍一次取回） |
  *
  * 与「下载历史」的分工（用户 2026-10-12 重新定义过，别混）：
  * - 这一栏 = **库里现在有什么**（实时，删了就没有）；
@@ -30,8 +31,15 @@
  *    （`createDetailPrefetcher` 的串行 + 限量），预热回来的详情会顺手把封面写进后端索引，
  *    所以第二趟进来能多出几张图 —— 但绝不为了铺满封面去逐个番号起 javdb 子进程。
  *
+ * 列表**翻页**（2026-10-15 加，方案 §2.4 P4）：用户口径是「这个列表没有翻页功能，库里很多内容
+ * 都没有这种翻页」—— 早先那句"本机 109 条，一次画完比翻页好用"**已被用户否决**，别再改回去。
+ * 现在的口径：数据仍然一次取回（`GET /library` 不动），但**只渲染前 60 条**，滚到底自动追加下一批
+ * （`composables/usePagedList.ts`，纯前端分段渲染；末尾哨兵那行同时兼作进度提示）。
+ * 先不上虚拟滚动 / 服务端分页的理由见 `usePagedList.ts` 的文件头：卡片墙一屏几十张、量级还在几百，
+ * 分段渲染就够；等库里到几千条再上服务端分页 + 虚拟滚动。**筛选 / 排序 / 搜索的语义不受影响**：
+ * 这一层只做"前缀切片"，源头数组仍是下面那份**全量过滤结果**。
+ *
  * 刻意**不做**：
- * - 不做分页/虚拟滚动：本机 109 条，一次画完比翻页好用（真到几千条再说）；
  * - 不在卡片上做「移除/删除」：这一栏是 Emby 的实时投影，要删片得去 Emby 里删，
  *   插件里给一个"看起来能删"的按钮只会误导（台账那边的「移除记录」是另一回事）；
  * - 不显示磁力/发行日/时长：库索引里没有这些（要抓一遍 javdb 才有），
@@ -48,6 +56,7 @@ import ErrorState from '../common/ErrorState.vue'
 import NumCard from '../common/NumCard.vue'
 import type { CardMovie } from '../common/NumCard.vue'
 import { createDetailPrefetcher } from '../../composables/prefetchDetail'
+import { usePagedList } from '../../composables/usePagedList'
 import { errorText, hostToast, unwrap, type PluginApi } from '../../composables/usePluginApi'
 
 const props = withDefaults(
@@ -71,6 +80,12 @@ const t = hostToast(props.toast as any)
 
 /** 端点：契约 §4 的 `GET /library`。 */
 const ENDPOINT = 'plugin/library'
+
+/**
+ * 每批渲染多少张（用户口径 **60**，与 `usePagedList` 的默认值同数；这里显式写出来，
+ * 以后这一栏想调批次只改这一处，别去动通用件的默认值）。
+ */
+const LIBRARY_PAGE_SIZE = 60
 
 /** 库列表（后端已按入库时间新→旧给好，前端不再排序）。 */
 const items = ref<CardMovie[]>([])
@@ -108,6 +123,32 @@ const rows = computed<CardMovie[]>(() => {
 
 /** 是否带过滤条件 —— 决定空态说"库里没有片子"还是"没匹配到"。 */
 const filtered = computed(() => !!String(query.value || '').trim())
+
+/**
+ * 卡片墙**分段渲染**（2026-10-15 加）：源数组仍是上面那份**全量过滤结果**（`rows`），
+ * 这一层只决定"画多少" —— 首屏 60 张，滚到底自动追加下一批（见 `usePagedList.ts`）。
+ *
+ * 三条边界：
+ * 1. **不给后端加 `page`/`limit`**：库列表本来就一次取回，服务端分页留给"到几千条"那一版；
+ * 2. **不改筛选/排序/搜索语义**：`rows`（计数、空态判定、详情预热都还用它）一字未动，
+ *    这里只拿它的前缀；
+ * 3. **换筛选词 = 源数组换身份** → `usePagedList` 自动回到第一批（`shown` 重置为 60），
+ *    不会出现"筛出 300 张一口气全画"。
+ */
+const {
+  rows: pagedRows,
+  shown: shownRows,
+  total: pagedTotal,
+  hasMore,
+  sentinel,
+} = usePagedList(rows, { pageSize: LIBRARY_PAGE_SIZE })
+
+/** 末尾哨兵那行文案：还有下一批就报进度，到底了就说加载完了。 */
+const pagedHint = computed(() => (
+  hasMore.value
+    ? `已显示 ${shownRows.value} / ${pagedTotal.value} 部 · 继续下滑自动加载`
+    : `已全部加载（${pagedTotal.value} 部）`
+))
 
 /** 工具条那句计数：`共 N 部`；有过滤时补一句「已筛出 M 部」。 */
 const summary = computed(() => {
@@ -278,27 +319,39 @@ void load(false, false)
       hint="试试清空搜索词，或者换个番号 / 演员名"
     />
 
-    <div v-else class="avh-library__grid">
-      <!--
-        卡片右上角的版本角标（v4.1 §9.2-6）：`NumCard` 自己不认识 `version_tags` / `badge`，
-        所以包一层定位盒子把徽标画在卡片右上角 —— 不动 `NumCard`（它是六栏共用的通用件）。
-        `versionBadgeOf()` 缺字段时返回空串，那颗 `<span>` 整个不渲染（老后端行为不变）。
-      -->
-      <div
-        v-for="(movie, index) in rows"
-        :key="cardKey(movie, index)"
-        class="avh-library__cell"
-      >
-        <NumCard
-          :movie="movie"
-          :plugin-id="pluginId"
-          mode="library"
-          @select="openCard(movie)"
-          @hover="hoverCard(movie)"
-        />
-        <span v-if="versionBadgeOf(movie)" class="avh-vbadge">{{ versionBadgeOf(movie) }}</span>
+    <template v-else>
+      <div class="avh-library__grid">
+        <!--
+          卡片右上角的版本角标（v4.1 §9.2-6）：`NumCard` 自己不认识 `version_tags` / `badge`，
+          所以包一层定位盒子把徽标画在卡片右上角 —— 不动 `NumCard`（它是六栏共用的通用件）。
+          `versionBadgeOf()` 缺字段时返回空串，那颗 `<span>` 整个不渲染（老后端行为不变）。
+          列表源是 `pagedRows`（`usePagedList` 的已渲染段，首屏 60 张），**不是**全量的 `rows`。
+        -->
+        <div
+          v-for="(movie, index) in pagedRows"
+          :key="cardKey(movie, index)"
+          class="avh-library__cell"
+        >
+          <NumCard
+            :movie="movie"
+            :plugin-id="pluginId"
+            mode="library"
+            @select="openCard(movie)"
+            @hover="hoverCard(movie)"
+          />
+          <span v-if="versionBadgeOf(movie)" class="avh-vbadge">{{ versionBadgeOf(movie) }}</span>
+        </div>
       </div>
-    </div>
+
+      <!--
+        末尾哨兵（`usePagedList` 的 `sentinel`，2026-10-15 加）：
+        滚到底自动追加下一批就靠它往上找**真正在滚的那一层**（判定照抄 `common/BackToTop.vue`），
+        所以它**必须待在滚动层内部**，不能挪到视图外面去。顺带兼作进度提示。
+      -->
+      <div ref="sentinel" class="avh-library__more">
+        <span class="avh-library__hint">{{ pagedHint }}</span>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -355,6 +408,12 @@ void load(false, false)
   position: relative;
   display: flex;
   flex-direction: column;
+}
+
+/* 末尾哨兵（`usePagedList` 的 `sentinel`）：只画一行进度提示；滚动到底自动追加靠它定位滚动层 */
+.avh-library__more {
+  padding: 14px 4px 2px;
+  text-align: center;
 }
 
 .avh-library__cell :deep(.avh-card) {

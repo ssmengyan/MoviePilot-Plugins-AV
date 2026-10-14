@@ -7,7 +7,7 @@
  * 2. `openActorPicker()` 的「从演员榜挑选」卡片 —— 无星标、点击就地加收藏，
  *    已收藏的换成 `<span class="tag on">✓ 已收藏</span>`。
  *
- * DOM/文案逐字对齐：
+ * DOM/文案对照（老实现）：
  * ```
  * <div class="actor">
  *   <div class="star">⭐</div>
@@ -18,6 +18,10 @@
  * ```
  * 差异：老实现用 `data-n`/`data-av`/`data-zh` + 事件委托，Vue 里改成 props + emit，
  * 行为（点卡片 = 打开作品史 / 加收藏）不变。
+ *
+ * 0.7.2 起改为「三个互不顶替的显示项」（老实现的 `/ zh` 斜杠后缀已取消）：
+ * 主位 = 中文名优先（无中文名才退回原名）；辅位 = 仅当主位是中文名时另画一行原名；
+ * 附加行 = 备注（有才画），**永不占用主位**。
  */
 import Thumb from './Thumb.vue'
 
@@ -29,7 +33,7 @@ const props = withDefaults(
     zh?: string
     /**
      * 自定义备注（后端 `/aliases` 的 `{演员原名: 备注}` 查出来的，不是后端字段）。
-     * 非空时在**原先那两行下面**另起一行显示，原名位置不变。
+     * 非空时在卡片下方**独立另起一行**显示（比辅位更小更浅）；**永不占用主位**。
      */
     alias?: string
     /** 头像地址（后端 `avatar`，通常是插件图片代理地址）。 */
@@ -86,9 +90,11 @@ function onSelect(): void {
       :alt="name"
       :plugin-id="pluginId"
     />
-    <div class="avh-actor__nm">{{ name }}</div>
-    <div class="avh-actor__zh">{{ zh || '' }}</div>
-    <!-- 备注只在非空时画：空行会把没备注的卡片撑高，网格里两种卡片就对不齐了 -->
+    <!-- 主位（大字）：有中文名就上中文名，没有才退回原名 —— 备注永远进不来 -->
+    <div class="avh-actor__nm">{{ zh || name }}</div>
+    <!-- 辅位（小字）：仅当主位已经是中文名时，才在下面另画一行原名；主位已是原名就不重复画 -->
+    <div v-if="zh" class="avh-actor__zh">{{ name }}</div>
+    <!-- 附加行：备注独立成行（更小更浅），有才画 —— 空行会把没备注的卡片撑高，网格里两种卡片就对不齐了 -->
     <div v-if="alias" class="avh-actor__alias">{{ alias }}</div>
     <div v-if="picker" class="avh-actor__tag">
       <span class="avh-tag" :class="favorited ? 'avh-tag--on' : ''">

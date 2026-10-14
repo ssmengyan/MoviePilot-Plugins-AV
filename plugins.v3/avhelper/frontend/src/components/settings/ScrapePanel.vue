@@ -3,7 +3,7 @@
  * 设置台 · 刮削（v4 刮削线 S9 新增）。
  *
  * 这一栏是 `docs/AVHelper-最终方案-v4.1.md` §10.1 与 `docs/AVHelper-刮削v4-模块契约.md` §3.8
- * 要求的「刮削」设置栏：**刮削模式 / 简介源开关 / 翻译模型 + 模型自检 / 封面裁切锚点 /
+ * 要求的「刮削」设置栏：**刮削模式 / 简介源开关 / 翻译模型 + 模型自检 /
  * 预告片模式 / 定时重刮**。观感与写法照 `RulePanel.vue`（同一套 `v-card` + `v-btn-toggle` +
  * `v-switch` + 「说明一句在控件下面」的排布），数据进 `ScrapeSettings`（`./panels.ts`）。
  *
@@ -19,7 +19,7 @@
  */
 import { computed, ref } from 'vue'
 import { errorText, hostToast, unwrap, type PluginApi } from '../../composables/usePluginApi'
-import type { CropAnchor, ScrapeMode, ScrapeSettings, TrailerMode } from './panels'
+import type { ScrapeMode, ScrapeSettings, TrailerMode } from './panels'
 
 const props = withDefaults(
   defineProps<{
@@ -52,18 +52,6 @@ const MODES: { value: ScrapeMode; label: string; hint: string }[] = [
 
 const modeHint = computed(
   () => MODES.find(item => item.value === props.settings.scrapeMode)?.hint || '',
-)
-
-const ANCHORS: { value: CropAnchor; label: string; hint: string }[] = [
-  { value: 'auto', label: '自动', hint: '按图源判断：封套展开图贴右取封面，FC2 / VR / 素人取中间。' },
-  { value: 'right', label: '贴右', hint: '永远取最右那一段（javdb 封套展开图的封面就在右边）。' },
-  { value: 'center', label: '居中', hint: '永远取中间窗口（适合横版剧照改的封面）。' },
-  { value: 'left', label: '贴左', hint: '永远取最左那一段。' },
-  { value: 'raw', label: '不裁切', hint: '原图直传，比例由 Emby 自己处理。' },
-]
-
-const anchorHint = computed(
-  () => ANCHORS.find(item => item.value === props.settings.cropAnchor)?.hint || '',
 )
 
 const TRAILERS: { value: TrailerMode; label: string; hint: string }[] = [
@@ -231,21 +219,6 @@ async function runSelfcheck(): Promise<void> {
         density="compact"
         class="text-caption mb-3"
       >{{ check.text }}</v-alert>
-
-      <!-- ===== 封面裁切锚点 ===== -->
-      <div class="text-caption text-medium-emphasis mb-1">封面裁切锚点</div>
-      <v-btn-toggle
-        :model-value="props.settings.cropAnchor"
-        mandatory
-        density="comfortable"
-        variant="outlined"
-        color="primary"
-        class="mb-1"
-        @update:model-value="(value: any) => value && patch('cropAnchor', value)"
-      >
-        <v-btn v-for="item in ANCHORS" :key="item.value" :value="item.value">{{ item.label }}</v-btn>
-      </v-btn-toggle>
-      <p class="text-caption text-medium-emphasis mb-4">{{ anchorHint }}</p>
 
       <!-- ===== 预告片模式 ===== -->
       <div class="text-caption text-medium-emphasis mb-1">预告片</div>

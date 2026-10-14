@@ -3,8 +3,9 @@
  * 视图：刮削（数据台第八栏，v4 刮削线 S9 新增）。
  *
  * 两个页签（契约 §3.8 / v4.1 §10.2）：
- * 1. **全库刮削工作台** —— 顶部状态卡片（`full` / `missing_plot` / `missing_core` / `unscraped` / `total`，
- *    点一下筛选）、行列表（番号 / 标题 / 状态徽标 / 裁切锚点 / 预览·刮削·回滚）、字段级 diff 面板、
+ * 1. **全库刮削工作台** —— 首屏「搜索刮削」入口（`common/SearchScrapePanel.vue`）+
+ *    顶部状态卡片（`full` / `missing_plot` / `missing_core` / `unscraped` / `total`，
+ *    点一下筛选）、行列表（番号 / 标题 / 状态徽标 / 预览·刮削）、
  *    全选 + 批量刮削（**二次确认，文案写明「将写入 Emby」**）；
  * 2. **数据源自检** —— `sources[]` 表格（源名 / 最近状态 / 耗时 / 错误摘要 / 检查时间）、
  *    「立即自检」按钮、`scrape_log` 最近 50 条流水。
@@ -15,22 +16,33 @@
  * | 状态 + 列表 | `GET /scrape/status`（`{stats, sources, queue, last_run, items}`） |
  * | 列表回落 | `GET /library`（`items[]` 缺失时用它，行里已带 `states` / `version_tags`） |
  * | 字段级 diff | `GET /scrape/preview?key=` |
- * | 单条 / 批量刮削 | `POST /scrape/run {keys?, all?, force?, anchor?, confirm?}` |
- * | 回滚 | `POST /scrape/rollback {item_key}` |
+ * | 单条 / 批量刮削 | `POST /scrape/run {keys?, all?, force?, confirm?}` |
  * | 流水 | `GET /scrape/log?limit=50` |
  *
  * `items[]` 的字段名由主统筹 2026-10-14 定死：
  * `{key, number, title, emby_id, completeness, scrape_state, has_backup, crop_anchor, version_tags[], updated_at}`
- * —— 缺字段一律容错（`—` / 不画），**不猜**。
+ * —— 缺字段一律容错（`—` / 不画），**不猜**。本视图只消费 `key` / `number` / `title` / `emby_id` /
+ * `completeness` / `scrape_state` / `version_tags` / `updated_at`；`has_backup` / `crop_anchor` 仍由
+ * 后端返回与使用（写前留底闸门、裁切自判），但**界面不展示、也不再提交**（见下条）。
  *
- * 三处刻意的口径（都有实测/裁决依据，改之前先读文档）：
+ * 四处刻意的口径（都有实测/裁决依据，改之前先读文档）：
  * - **「立即自检」只重读 `GET /scrape/status`**：契约 §3.7 **没有**触发式自检端点
  *   （`scraper.sources_selfcheck()` 是 Python 侧函数），所以这里把「刷新各源最近状态」如实
  *   说成「重新读取 `/scrape/status`」，不发明端点名。
- * - **回滚禁用判据 = `has_backup === false`**（主统筹裁决）：禁用 + 提示「无 Emby 备份，无法回滚」；
- *   字段**缺失**时放行（否则 S8 没上线时整列按钮都是灰的）但每次都要二次确认。
  * - **批量刮削必须二次确认**（宿主 `moviepilot:confirm`，拿不到就 `window.confirm` 降级），
- *   文案写明「将写入 Emby（可回滚）」；载荷带 `confirm: true`（后端对 `all=true` 要求它）。
+ *   文案写明「将写入 Emby」；载荷带 `confirm: true`（后端对 `all=true` 要求它）。
+ * - **2026-10-15 界面减负**（用户要求「裁切锚点不需要出现、备份这些也都可以取消掉」）：
+ *   锚点固定 `auto`、由后端裁切逻辑自判，界面不出现，`POST /scrape/run` 也不带 `anchor`；
+ *   行内「回滚」按钮与「备份」列一并撤掉，文案不再提备份/回滚。**写前留底闸门
+ *   （`has_backup`）与 `POST /scrape/rollback` 端点在后端原样保留**——只是界面不给入口。
+ * - **2026-10-16 手动刮削改搜索式交互**（用户原话要义：「手动刮削预览信息过多；希望像搜索
+ *   一样只显示几个搜到的结果；找到想要的点确认，数据直接导入；自动刮削无所谓」）：
+ *   工作台首屏多一个**「搜索刮削」入口**（`common/SearchScrapePanel.vue`：输入番号或关键词 →
+ *   回车即搜 `GET /search` → 只列几条候选卡片 → 点一条出**精简确认卡**（只画将写入的
+ *   中文标题 / 原名 / 演员数 / 封面缩略 / 发行日）→ 「确认导入」走 `POST /scrape/run`）。
+ *   **`GET /scrape/preview` 与字段级 diff 表原样保留，只是降级为默认收起的「高级」折叠**
+ *   （展开后点一下才请求），行内那颗「预览」按钮也改由该面板承载 —— 全页只有一份 diff 表实现，
+ *   所以本文件不再持有预览状态。**自动刮削（Tier 1/2 定时）相关交互一律未动**（用户："无所谓"）。
  *
  * 降级纪律（本线的硬要求）：接口 404 / 网络失败 / 字段缺失 → 空态或错误态 + 一句原因，
  * **不白屏、不抛未捕获异常**、不因为一个端点坏了就把另一块也画成坏的（两块各自 try/catch）。
@@ -38,6 +50,7 @@
 import { computed, ref } from 'vue'
 import EmptyState from '../common/EmptyState.vue'
 import ErrorState from '../common/ErrorState.vue'
+import SearchScrapePanel from '../common/SearchScrapePanel.vue'
 import { errorText, hostToast, unwrap, type PluginApi } from '../../composables/usePluginApi'
 import { useHostConfirm } from '../../composables/useHostDialogs'
 import { shortTime } from '../../composables/storeTypes'
@@ -136,8 +149,6 @@ interface WorkRow {
   itemKey: string
   status: StatusKey
   statusRaw: string
-  hasBackup: boolean | null
-  anchor: string
   versionTags: unknown
   updatedAt: string
   raw: Record<string, any>
@@ -153,7 +164,7 @@ function statusKeyOf(raw: unknown): { key: StatusKey; raw: string } {
   return { key: 'unscraped', raw: value }
 }
 
-/** `item_key` 缺省时按契约 §4 的格式从 `emby_id` 拼（`emby:<id>`）——回滚要用它。 */
+/** `item_key` 缺省时按契约 §4 的格式从 `emby_id` 拼（`emby:<id>`）——勾选与选中集的去重身份。 */
 function itemKeyOf(row: Record<string, any>): string {
   const direct = text(row.item_key || row.itemKey)
   if (direct) return direct
@@ -166,8 +177,6 @@ function normalizeRow(row: Record<string, any>): WorkRow {
   const number = text(row.number || row.display_number || row.key)
   const key = text(row.key || number)
   const status = statusKeyOf(row.completeness ?? row.scrape_state ?? row.status ?? row.states?.scrape)
-  const backup = row.has_backup ?? row.hasBackup
-  const anchor = text(row.crop_anchor || row.cropAnchor || 'auto') || 'auto'
   return {
     key,
     number: number || key,
@@ -176,8 +185,6 @@ function normalizeRow(row: Record<string, any>): WorkRow {
     itemKey: itemKeyOf(row),
     status: status.key,
     statusRaw: status.raw,
-    hasBackup: typeof backup === 'boolean' ? backup : null,
-    anchor,
     versionTags: row.version_tags ?? row.versionTags ?? null,
     updatedAt: text(row.updated_at || row.updatedAt),
     raw: row,
@@ -212,7 +219,7 @@ const queueInfo = computed<{ tier1: number | null; tier2: number | null }>(() =>
 })
 const lastRun = computed(() => text(statusData.value?.last_run))
 
-// ---------------------------------------------------------------- 筛选 / 选择 / 锚点
+// ---------------------------------------------------------------- 筛选 / 选择
 
 /** 当前筛选（`''` = 全部）；点已选中的卡片再点一下取消。 */
 const filter = ref<'' | StatusKey>('')
@@ -258,32 +265,6 @@ function toggleAll(): void {
   }
   selected.value = next
 }
-
-/** 每行可改的裁切锚点草稿（改完点「刮削」时随 `anchor` 发给后端；`/scrape/run` 接受该字段）。 */
-const anchorEdits = ref<Record<string, string>>({})
-
-function anchorOf(row: WorkRow): string {
-  return text(anchorEdits.value[rowId(row)] || row.anchor || 'auto') || 'auto'
-}
-
-function setAnchor(row: WorkRow, value: string): void {
-  anchorEdits.value = { ...anchorEdits.value, [rowId(row)]: value }
-}
-
-const ANCHOR_OPTIONS = [
-  { value: 'auto', title: '自动（按图源判断）' },
-  { value: 'right', title: '贴右（封套展开图取封面）' },
-  { value: 'center', title: '居中' },
-  { value: 'left', title: '贴左' },
-  { value: 'raw', title: '不裁切（原图直传）' },
-]
-
-/** 批量刮削用哪一档锚点：选中行一致就用它，不一致就不传（由后端按 auto 处理）。 */
-const batchAnchor = computed(() => {
-  const chosen = visibleRows.value.filter(row => isSelected(row)).map(row => anchorOf(row))
-  const unique = Array.from(new Set(chosen))
-  return unique.length === 1 ? unique[0]! : ''
-})
 
 // ---------------------------------------------------------------- 读数据
 
@@ -359,82 +340,21 @@ void load(false)
 
 // ---------------------------------------------------------------- 预览（字段级 diff）
 
-interface PreviewField {
-  name: string
-  current: string
-  target: string
-  changed: boolean
+/**
+ * 字段级 diff 已**降级为搜索面板里的「高级」折叠**（0.7.2）：预览状态、请求与那张
+ * diff 表全部搬到了 `common/SearchScrapePanel.vue`，本视图的行内按钮只把番号交给它。
+ *
+ * 为什么不留两份：`GET /scrape/preview` 的回包同时喂着「确认卡的关键字段」与「diff 表」，
+ * 分成两处持有就会出现"刚看过的那份值"和"确认卡上那份值"不一致。全页一份实现，
+ * 行内「预览」与折叠里的「预览字段差异」也就天然同源。
+ */
+const pickRef = ref<InstanceType<typeof SearchScrapePanel> | null>(null)
+
+function openPreview(row: WorkRow): void {
+  void pickRef.value?.openPreview({ key: row.key, number: row.number })
 }
 
-const preview = ref<{
-  open: boolean
-  loading: boolean
-  error: string
-  key: string
-  number: string
-  fields: PreviewField[]
-  warnings: string[]
-  sources: Record<string, any> | null
-}>({
-  open: false,
-  loading: false,
-  error: '',
-  key: '',
-  number: '',
-  fields: [],
-  warnings: [],
-  sources: null,
-})
-
-/** 值 → 一行文本（对象/数组压成 JSON，null 显示 `—`）。 */
-function valueText(value: unknown): string {
-  if (value === null || value === undefined || value === '') return '—'
-  if (typeof value === 'object') {
-    try {
-      return JSON.stringify(value)
-    } catch {
-      return String(value)
-    }
-  }
-  return String(value)
-}
-
-async function openPreview(row: WorkRow): Promise<void> {
-  preview.value = {
-    open: true,
-    loading: true,
-    error: '',
-    key: row.key,
-    number: row.number,
-    fields: [],
-    warnings: [],
-    sources: null,
-  }
-  try {
-    const payload: any = await getJson('plugin/scrape/preview', { key: row.key })
-    const list = firstArray(payload, ['fields']) || []
-    preview.value.fields = list.map((item: any) => ({
-      name: text(item?.name),
-      current: valueText(item?.current),
-      target: valueText(item?.target),
-      changed: item?.changed === true,
-    }))
-    preview.value.warnings = Array.isArray(payload?.warnings)
-      ? payload.warnings.map((item: any) => text(item))
-      : []
-    preview.value.sources =
-      payload?.sources && typeof payload.sources === 'object' ? payload.sources : null
-    if (payload?.number) preview.value.number = text(payload.number)
-  } catch (err) {
-    preview.value.error = errorText(err)
-  } finally {
-    preview.value.loading = false
-  }
-}
-
-const previewChanged = computed(() => preview.value.fields.filter(item => item.changed).length)
-
-// ---------------------------------------------------------------- 刮削 / 回滚
+// ---------------------------------------------------------------- 刮削
 
 /** 在飞的动作（`''` = 空闲）：给对应按钮转圈，避免重复点。 */
 const busy = ref('')
@@ -475,7 +395,6 @@ async function runOne(row: WorkRow): Promise<void> {
     const payload: any = await postJson('plugin/scrape/run', {
       keys: [row.key || row.number],
       force: false,
-      anchor: anchorOf(row),
     })
     const summary = summarizeRun(payload)
     runResult.value = summary
@@ -492,7 +411,7 @@ async function runOne(row: WorkRow): Promise<void> {
 }
 
 /**
- * 批量「刮削选中」：**必须二次确认**（会写 Emby），文案写明「将写入 Emby（可回滚）」。
+ * 批量「刮削选中」：**必须二次确认**（会写 Emby），文案写明「将写入 Emby」。
  * 载荷带 `confirm: true`（后端对 `all=true` 要求该字段；这里也一并发，语义一致）。
  */
 async function runSelected(): Promise<void> {
@@ -504,9 +423,9 @@ async function runSelected(): Promise<void> {
     type: 'warn',
     title: '批量刮削',
     content:
-      `将写入 Emby（可回滚）：共 ${keys.length} 部影片。\n\n` +
-      '插件会先给每一条落一份完整 Emby DTO 备份，再写标题 / 原名 / 简介 / 演员 / 封面 / 发行日等字段；' +
-      '写坏了可以在本页用「回滚」还原。确认现在开始？',
+      `将写入 Emby：共 ${keys.length} 部影片。\n\n` +
+      '插件会向这些影片写入标题 / 原名 / 简介 / 演员 / 封面 / 发行日等字段，' +
+      '覆盖它们在 Emby 里的现有取值。确认现在开始？',
     confirmText: '开始刮削',
     cancelText: '取消',
   })
@@ -516,7 +435,6 @@ async function runSelected(): Promise<void> {
   t.info(`正在批量刮削 ${keys.length} 部…`)
   try {
     const body: Record<string, unknown> = { keys, all: false, force: false, confirm: true }
-    if (batchAnchor.value) body.anchor = batchAnchor.value
     const payload: any = await postJson('plugin/scrape/run', body)
     const summary = summarizeRun(payload)
     runResult.value = summary
@@ -528,59 +446,6 @@ async function runSelected(): Promise<void> {
   } catch (err) {
     runResult.value = { ok: false, text: '批量刮削请求失败', errors: [errorText(err)] }
     t.warning(`批量刮削失败：${errorText(err)}`)
-  } finally {
-    busy.value = ''
-  }
-}
-
-/** 回滚禁用判据：`has_backup === false` 或压根没有 `item_key`。字段缺失时放行（见文件头）。 */
-function rollbackDisabled(row: WorkRow): boolean {
-  return row.hasBackup === false || !row.itemKey
-}
-
-function rollbackHint(row: WorkRow): string {
-  if (!row.itemKey) return '这一行没有 item_key，无法定位要回滚的 Emby 条目'
-  if (row.hasBackup === false) return '无 Emby 备份，无法回滚'
-  if (row.hasBackup === null) return '不确定有没有备份：点了会先由后端校验'
-  return '用写入前那份完整 DTO 还原这一条'
-}
-
-/** 回滚：破坏性操作（会覆盖 Emby 现字段），每次都要二次确认。 */
-async function rollback(row: WorkRow): Promise<void> {
-  if (busy.value || rollbackDisabled(row)) return
-  const ok = await confirm({
-    type: 'warn',
-    title: '回滚这一条',
-    content:
-      `将用写入前保存的那份完整 Emby DTO 覆盖「${row.number || row.key}」，` +
-      '期间在这部片上手改过的字段也会一起还原。此操作不可撤销，确认继续？',
-    confirmText: '回滚',
-    cancelText: '取消',
-  })
-  if (!ok) return
-  const id = rowId(row)
-  busy.value = `rollback:${id}`
-  runResult.value = null
-  try {
-    const payload: any = await postJson('plugin/scrape/rollback', { item_key: row.itemKey })
-    const restored = Array.isArray(payload?.restored) ? payload.restored.map((x: any) => text(x)) : []
-    const failure = text(payload?.error)
-    if (payload?.ok === false || failure) {
-      runResult.value = { ok: false, text: '回滚失败', errors: [failure || '后端返回 ok=false'] }
-      t.warning(`回滚失败：${failure || '原因未知'}`)
-    } else {
-      runResult.value = {
-        ok: true,
-        text: `已回滚${restored.length ? `：${restored.join('、')}` : ''}`,
-        errors: [],
-      }
-      t.success('已回滚')
-    }
-    emit('refreshSide')
-    await load(false)
-  } catch (err) {
-    runResult.value = { ok: false, text: '回滚请求失败', errors: [errorText(err)] }
-    t.warning(`回滚失败：${errorText(err)}`)
   } finally {
     busy.value = ''
   }
@@ -707,7 +572,8 @@ function logStatusColor(status: unknown): string {
       </div>
 
       <span v-if="tab === 'workbench'" class="avh-scrape__hint">
-        行内「刮削」写 Emby（先落备份，可回滚）· 列表来源：{{
+        搜索刮削走 GET /search · 行内「刮削」与「确认导入」同一条写入链路 ·
+        列表来源：{{
           listSource === 'library' ? 'GET /library（/scrape/status 没有 items）'
             : listSource === 'status' ? 'GET /scrape/status'
               : '暂无（两个端点都没读到）'
@@ -727,6 +593,20 @@ function logStatusColor(status: unknown): string {
 
     <!-- ================= 页签 1：全库刮削工作台 ================= -->
     <template v-if="tab === 'workbench'">
+      <!--
+        搜索刮削入口（0.7.2，首屏第一块）：输入番号或关键词 → 候选卡片 → 精简确认卡 → 确认导入。
+        `GET /scrape/preview` 与字段级 diff 表在这个组件里降级为默认收起的「高级」折叠；
+        行内「预览」按钮也走它的 `openPreview()`（`ref` 见 `<script>` 里的 `pickRef`）。
+      -->
+      <SearchScrapePanel
+        ref="pickRef"
+        :api="api"
+        :plugin-id="pluginId"
+        :toast="toast"
+        @refresh-side="emit('refreshSide')"
+        @done="load(false)"
+      />
+
       <!-- 状态卡片：点一下筛选，再点一下取消；「全部」清筛选 -->
       <div class="avh-stats">
         <div
@@ -829,8 +709,6 @@ function logStatusColor(status: unknown): string {
             <col style="width:152px">
             <col>
             <col style="width:96px">
-            <col style="width:80px">
-            <col style="width:178px">
             <col style="width:190px">
           </colgroup>
           <thead>
@@ -839,8 +717,6 @@ function logStatusColor(status: unknown): string {
               <th>番号</th>
               <th>标题</th>
               <th>状态</th>
-              <th>备份</th>
-              <th>裁切锚点</th>
               <th class="avh-table__right">操作</th>
             </tr>
           </thead>
@@ -867,23 +743,6 @@ function logStatusColor(status: unknown): string {
                   {{ row.statusRaw }}
                 </span>
               </td>
-              <td>
-                <span v-if="row.hasBackup === true" class="avh-scrape__ok">有</span>
-                <span v-else-if="row.hasBackup === false" class="avh-scrape__bad">无</span>
-                <span v-else class="avh-scrape__hint">—</span>
-              </td>
-              <td>
-                <v-select
-                  :model-value="anchorOf(row)"
-                  :items="ANCHOR_OPTIONS"
-                  item-title="title"
-                  item-value="value"
-                  density="compact"
-                  variant="outlined"
-                  hide-details
-                  @update:model-value="(value: any) => setAnchor(row, String(value))"
-                />
-              </td>
               <td class="avh-table__right">
                 <div class="avh-rowbtns">
                   <v-btn size="x-small" variant="outlined" @click="openPreview(row)">预览</v-btn>
@@ -895,25 +754,12 @@ function logStatusColor(status: unknown): string {
                     :disabled="!!busy"
                     @click="runOne(row)"
                   >刮削</v-btn>
-                  <v-btn
-                    size="x-small"
-                    variant="outlined"
-                    color="warning"
-                    :disabled="rollbackDisabled(row) || !!busy"
-                    :title="rollbackHint(row)"
-                    @click="rollback(row)"
-                  >回滚</v-btn>
                 </div>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
-
-      <p class="avh-scrape__hint mt-2">
-        裁切锚点是<strong>每行草稿</strong>：改了之后点这一行的「刮削」才会随 <code>anchor</code> 提交给后端（<code>POST /scrape/run</code>）。
-        行内「回滚」在 <code>has_backup === false</code> 时禁用并提示「无 Emby 备份，无法回滚」。
-      </p>
     </template>
 
     <!-- ================= 页签 2：数据源自检 ================= -->
@@ -1061,102 +907,11 @@ function logStatusColor(status: unknown): string {
       </div>
     </template>
 
-    <!-- ================= 字段级 diff 预览 ================= -->
-    <v-dialog v-model="preview.open" max-width="880" scrollable>
-      <v-card>
-        <v-toolbar density="comfortable" color="surface">
-          <v-icon icon="mdi-compare-horizontal" color="primary" class="ms-2" />
-          <v-toolbar-title class="text-body-1">
-            刮削预览 · {{ preview.number || preview.key }}
-          </v-toolbar-title>
-          <v-spacer />
-          <v-chip v-if="!preview.loading && !preview.error" size="small" variant="tonal" class="me-2">
-            变更 {{ previewChanged }} / {{ preview.fields.length }} 项
-          </v-chip>
-          <v-btn variant="text" icon="mdi-close" @click="preview.open = false" />
-        </v-toolbar>
-
-        <v-divider />
-
-        <v-card-text>
-          <div v-if="preview.loading" class="avh-scrape__loading">正在计算字段差异…</div>
-
-          <v-alert
-            v-else-if="preview.error"
-            type="warning"
-            variant="tonal"
-            density="compact"
-            class="text-caption"
-          >预览失败（GET /scrape/preview）：{{ preview.error }}</v-alert>
-
-          <template v-else>
-            <v-alert
-              v-for="(line, index) in preview.warnings"
-              :key="`warn#${index}`"
-              type="warning"
-              variant="tonal"
-              density="compact"
-              class="text-caption mb-2"
-            >{{ line }}</v-alert>
-
-            <div v-if="preview.fields.length" class="avh-tablewrap">
-              <table class="avh-table avh-table--diff">
-                <colgroup>
-                  <col style="width:150px">
-                  <col>
-                  <col>
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>字段</th>
-                    <th>当前值</th>
-                    <th>目标值</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="field in preview.fields"
-                    :key="field.name"
-                    :class="{ 'avh-diff__changed': field.changed }"
-                  >
-                    <td>
-                      <span>{{ field.name }}</span>
-                      <v-chip v-if="field.changed" size="x-small" color="warning" variant="tonal" class="ms-1">
-                        有变化
-                      </v-chip>
-                    </td>
-                    <td class="avh-diff__cell">{{ field.current }}</td>
-                    <td class="avh-diff__cell">{{ field.target }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <EmptyState
-              v-else
-              text="没有可预览的字段"
-              hint="GET /scrape/preview 返回的 fields 里没有条目（或后端还没算）"
-            />
-
-            <div v-if="preview.sources" class="avh-scrape__secttl">本次取值来源</div>
-            <div v-if="preview.sources" class="avh-srcgrid">
-              <div v-for="(value, key) in preview.sources" :key="String(key)" class="avh-srcgrid__item">
-                <span class="avh-srcgrid__k">{{ key }}</span>
-                <span>{{ valueText(value) }}</span>
-              </div>
-            </div>
-          </template>
-        </v-card-text>
-
-        <v-divider />
-        <v-card-actions>
-          <span class="avh-scrape__hint">
-            预览不写任何东西；点下面那颗才真正写 Emby（先落备份）。
-          </span>
-          <v-spacer />
-          <v-btn variant="text" @click="preview.open = false">关闭</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+    <!--
+      字段级 diff 表（0.7.2）：**已搬进 `SearchScrapePanel.vue`** ——
+      它默认收在「高级」折叠里，工作台行内「预览」与折叠里的按钮共用同一份实现与状态。
+      这里不再放第二张表（原因见 `<script>` 里 `pickRef` 那段注释）。
+    -->
   </div>
 </template>
 
@@ -1301,14 +1056,6 @@ function logStatusColor(status: unknown): string {
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
 
-.avh-scrape__ok {
-  color: rgb(var(--v-theme-success));
-}
-
-.avh-scrape__bad {
-  color: rgb(var(--v-theme-error));
-}
-
 /* 版本角标（与 `LibraryView` / `DownloadsView` 同一套观感） */
 .avh-vbadge {
   display: inline-block;
@@ -1325,40 +1072,11 @@ function logStatusColor(status: unknown): string {
   margin-left: 4px;
 }
 
-/* diff 表：`changed` 的行整行高亮（当前值/目标值两列都看得见） */
-.avh-table--diff td {
-  white-space: normal;
-  word-break: break-word;
-  vertical-align: top;
-}
-
-.avh-diff__changed {
-  background: rgba(var(--v-theme-warning), 0.16);
-}
-
-.avh-diff__cell {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.avh-srcgrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 6px 16px;
-}
-
-.avh-srcgrid__item {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 12px;
-}
-
-.avh-srcgrid__k {
-  color: rgba(var(--v-theme-on-surface), 0.6);
-}
+/*
+ * `.avh-table--diff` / `.avh-diff__changed` / `.avh-diff__cell` / `.avh-srcgrid*` 五条规则
+ * 随 diff 表一起搬去了 `SearchScrapePanel.vue`（0.7.2）：scoped CSS 不会跨组件生效，
+ * 留在这里就是五条永远选不中任何元素（本文件模板里已经没有 `--diff` / `srcgrid` 的类名了）。
+ */
 
 /* 页签胶囊：与「下载」栏那组同一套（两份 scoped CSS 各有作用域，本项目既有做法） */
 .avh-tabs {
