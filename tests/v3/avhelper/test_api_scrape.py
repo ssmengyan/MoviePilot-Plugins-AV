@@ -818,11 +818,41 @@ class TestScrapeLog:
     def test_items_use_contract_keys(self, plugin, store):
         store.scrape_log_add("javdb", "ok", "SNOS380", 1200, "")
         result = plugin.api_scrape_log(limit=5)
+        # 0.8.0 加了 reason / http_status / run_id 三个键（契约 §3.7 同步更新）：
+        # 老前端只读它认识的那几个，多出来的键不影响
         assert set(result["items"][0]) == {"source", "status", "key", "latency_ms", "error",
-                                           "created_at"}
+                                           "created_at", "reason", "http_status", "run_id"}
         assert result["items"][0]["source"] == "javdb"
         assert result["items"][0]["latency_ms"] == 1200
         assert "summary" in result
+
+    def test_reason_survives_to_the_api(self, plugin, store):
+        """`reason` 必须一路透到接口：界面靠它回答"这个源到底是没收录还是被拦"。"""
+        store.scrape_log_add("javtxt", "error", "SNOS380", 30000, "HTTP 429",
+                             reason="rate_limited", http_status=429, run_id="RUN123")
+        item = plugin.api_scrape_log(limit=5)["items"][0]
+        assert item["reason"] == "rate_limited" and item["http_status"] == 429
+        assert item["run_id"] == "RUN123"
+
+    def test_run_filter_returns_one_run_in_order(self, plugin, store):
+        """`?run=<id>` 取**某一次刮削**的全部记录，且按发生顺序（旧→新）。"""
+        store.scrape_log_add("javdb", "ok", "SNOS380", 100, "", run_id="RUN1")
+        store.scrape_log_add("javtxt", "miss", "SNOS380", 200, "", run_id="RUN1")
+        store.scrape_log_add("metatube", "ok", "SNOS380", 10000, "", run_id="RUN2")
+        result = plugin.api_scrape_log(run="RUN1")
+        assert result["run_id"] == "RUN1"
+        assert [row["source"] for row in result["items"]] == ["javdb", "javtxt"]
+        assert all(row["run_id"] == "RUN1" for row in result["items"])
+
+    def test_summary_carries_reason_counts(self, plugin, store):
+        """汇总带 `reasons` 计数：`parse_error` 连续上涨 = 站点改版。"""
+        store.scrape_log_add("javtxt", "error", "A", 1, "", reason="parse_error")
+        store.scrape_log_add("javtxt", "ok", "C", 1, "")
+        store.scrape_log_add("javtxt", "error", "B", 1, "", reason="parse_error")
+        row = [r for r in plugin.api_scrape_log(limit=5)["summary"] if r["source"] == "javtxt"][0]
+        assert row["reasons"] == {"parse_error": 2}
+        assert row["reason"] == "parse_error"          # = 最近一次的原因
+        assert row["last_reason"] == "parse_error"
 
     def test_limit_is_clamped(self, plugin, store):
         for index in range(3):

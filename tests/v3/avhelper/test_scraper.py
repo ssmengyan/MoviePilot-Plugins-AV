@@ -102,11 +102,11 @@ def _load_isolated(name: str):
 
 
 @pytest.fixture(autouse=True)
-def no_real_network(monkeypatch):
+def no_real_network(monkeypatch, scraper):
     """★ **零外网硬闸门**：任何真的 HTTP 调用都当场炸掉，而不是悄悄连出去。
 
-    顶掉的是 `urllib.request` 的两个入口（`scraper.http_get` 与 `imgproxy.fetch` 都走它）；
-    用例自己 monkeypatch `scraper.http_get` 时，这个闸门对它自然失效（那正是我们要的假响应）。
+    顶掉的是 `urllib.request` 的两个入口（`scraper.http_fetch` 与 `imgproxy.fetch` 都走它）；
+    用例自己 `_patch_fetch()` 时，这个闸门对它自然失效（那正是我们要的假响应）。
     """
     import urllib.request
 
@@ -115,6 +115,9 @@ def no_real_network(monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", boom)
     monkeypatch.setattr(urllib.request, "build_opener", boom)
+    # 重试的退避是**真睡**（2±1 秒起）：单测把它换成不睡的假函数，
+    # 否则每个"失败 + 重试"的用例都要白等几秒（重试逻辑本身另有专门用例覆盖）。
+    monkeypatch.setattr(scraper, "_SLEEP", lambda _seconds: None)
 
 
 @pytest.fixture(autouse=True)
@@ -201,10 +204,41 @@ class FakeStore:
         self.backup = str(dto_json or "")
         return bool(self.backup)
 
-    def scrape_log_add(self, source_name, status, key="", latency_ms=0, error_summary=""):
+    def scrape_log_add(self, source_name, status, key="", latency_ms=0, error_summary="",
+                       reason="", http_status=0, run_id=""):
         self.calls["scrape_log_add"] += 1
         self.logs.append({"source": source_name, "status": status, "key": key,
-                          "error": error_summary})
+                          "error": error_summary, "reason": reason,
+                          "http_status": http_status, "run_id": run_id})
+
+
+def _fetch_mod():
+    """取"被单测加载的那份" `scraper` 模块。
+
+    ⚠️ 模块级名字 `scraper` 已经被**同名 fixture** 占住了（夹具里的 `scraper` 参数是模块，
+    模块级的 `scraper` 是夹具函数本身）—— 所以这里只能按包名从 `sys.modules` 取，
+    写 `scraper.FetchResult` 会报 `fixture has no attribute 'FetchResult'`。
+    """
+    return sys.modules[f"{PKG_NAME}.scraper"]
+
+
+def _patch_fetch(monkeypatch, fake):
+    """把老的 `(body, error, status)` 假响应接到 `scraper.http_fetch` 上。
+
+    0.8.0 起取数链的唯一出站函数是 `http_fetch()`（回 `FetchResult`），而用例写假响应时
+    仍以三元组最省事 —— 这里统一适配一次，省掉二十多处重写。`reason` 用**真**
+    `classify_block()` 算，所以"假响应是一张拦截页"这类用例照样成立。
+    """
+    mod = _fetch_mod()
+
+    def wrapper(url, **kwargs):
+        body, error, status = fake(url, **kwargs)
+        text = body.decode("utf-8", "replace")[:mod.FAILURE_BODY_LIMIT] if body else ""
+        return mod.FetchResult(url=url, status=status, body=body, error=error,
+                               kind="http_status", attempts=1,
+                               reason=mod.classify_block(text, status))
+    monkeypatch.setattr(mod, "http_fetch", wrapper)
+    return wrapper
 
 
 WRITE_METHODS = ("update_item", "upload_image", "delete_image")
@@ -639,7 +673,7 @@ class TestJavtxt:
             body = JAVTXT_SEARCH_HTML if "q=SNOS-380" in url else JAVTXT_SEARCH_EMPTY
             return body.encode(), "", 200
 
-        monkeypatch.setattr(scraper, "http_get", fake_get)
+        _patch_fetch(monkeypatch, fake_get)
         got = scraper.javtxt_lookup({"javtxt_interval": 0}, "SNOS-380")
         assert got["ok"] and got["status"] == "ok"
         assert got["title_zh"] and got["plot_zh"]
@@ -648,7 +682,7 @@ class TestJavtxt:
 
     def test_zero_hit_returns_empty_not_guessed(self, scraper, monkeypatch):
         """实测 `IPZZ-912`/`CAWB-040` 0 命中：如实回空，交给 MetaTube 兜底。"""
-        monkeypatch.setattr(scraper, "http_get",
+        _patch_fetch(monkeypatch,
                             lambda url, **k: (JAVTXT_SEARCH_EMPTY.encode(), "", 200))
         got = scraper.javtxt_lookup({"javtxt_interval": 0, "javtxt_hosts": ("https://j.test",)},
                                     "CAWB-040")
@@ -656,21 +690,74 @@ class TestJavtxt:
         assert got["title_zh"] == "" and got["plot_zh"] == ""
 
     def test_wrong_number_search_is_miss(self, scraper, monkeypatch):
-        monkeypatch.setattr(scraper, "http_get",
+        _patch_fetch(monkeypatch,
                             lambda url, **k: (JAVTXT_SEARCH_WRONG.encode(), "", 200))
         got = scraper.javtxt_lookup({"javtxt_interval": 0, "javtxt_hosts": ("https://j.test",)},
                                     "SNOS-380")
         assert got["ok"] is False and got["status"] == "miss"
 
     def test_http_error_is_logged_not_raised(self, scraper, monkeypatch):
-        monkeypatch.setattr(scraper, "http_get", lambda url, **k: (None, "HTTP 429", 429))
+        """★ 0.8.0 改了这里的口径：429 **不是**"站点收录缺口"，而是被限流。
+
+        老版把 429 也记成 `miss`，于是在 `scrape_log` 里与"站点确实没收录这部片"
+        长得一模一样 —— 排障时会去改解析器（其实什么都没坏），
+        也会让"这个源收录率低"的统计凭空变差。
+        """
+        _patch_fetch(monkeypatch, lambda url, **k: (None, "HTTP 429", 429))
+        store = FakeStore()
+        got = scraper.javtxt_lookup({"javtxt_interval": 0, "javtxt_hosts": ("https://j.test",)},
+                                    "SNOS-380", store=store, key="SNOS380", run_id="RUN123")
+        assert got["ok"] is False and got["status"] == "error"
+        assert got["reason"] == scraper.REASON_RATE_LIMITED
+        assert got["http_status"] == 429
+        assert "429" in got["error"]
+        assert [row["status"] for row in store.logs] == ["error"]
+        assert store.logs[0]["source"] == "javtxt"
+        assert store.logs[0]["reason"] == scraper.REASON_RATE_LIMITED
+        assert store.logs[0]["http_status"] == 429
+        assert store.logs[0]["run_id"] == "RUN123"
+
+    def test_blocked_page_is_error_not_miss(self, scraper, monkeypatch):
+        """★ 最贵的那个 bug：200 的 CF 挑战页会解析出 0 张卡片。
+
+        老实现把它写成「站点收录缺口（miss）」—— 一个"被拦"的源就此伪装成
+        "这个站没有这部片"，于是换源/重试策略全做错。
+        """
+        challenge = ('<!DOCTYPE html><html><head><title>Just a moment...</title></head>'
+                     '<body><script>window._cf_chl_opt={cvId:"3"}</script>'
+                     'cloudflare</body></html>')
+        _patch_fetch(monkeypatch,
+                     lambda url, **k: (challenge.encode(), "", 200))
         store = FakeStore()
         got = scraper.javtxt_lookup({"javtxt_interval": 0, "javtxt_hosts": ("https://j.test",)},
                                     "SNOS-380", store=store, key="SNOS380")
-        assert got["ok"] is False and got["status"] == "miss"
-        assert "429" in got["error"]
-        assert [row["status"] for row in store.logs] == ["miss"]
-        assert store.logs[0]["source"] == "javtxt"
+        assert got["ok"] is False and got["status"] == "error"
+        assert got["reason"] == scraper.REASON_CF_CHALLENGE
+        assert store.logs[0]["status"] == "error"
+        assert store.logs[0]["reason"] == scraper.REASON_CF_CHALLENGE
+
+    def test_clean_page_zero_hit_stays_miss(self, scraper, monkeypatch):
+        """反例：**读到过干净页面**的 0 命中仍然是 miss，reason 必须清空。
+
+        否则"站点没收录"会被显示成"被拦"，界面提示就反了。
+        """
+        _patch_fetch(monkeypatch,
+                     lambda url, **k: (JAVTXT_SEARCH_EMPTY.encode(), "", 200))
+        store = FakeStore()
+        got = scraper.javtxt_lookup({"javtxt_interval": 0, "javtxt_hosts": ("https://j.test",)},
+                                    "CAWB-040", store=store, key="CAWB040")
+        assert got["status"] == "miss" and got["reason"] == ""
+        assert store.logs[0]["status"] == "miss"
+        assert store.logs[0]["reason"] == ""
+
+    def test_first_failure_reason_wins(self, scraper, monkeypatch):
+        """多变体 × 多主机的循环里只记**第一个**原因（最后一个通常是"另一个镜像也连不上"）。"""
+        _patch_fetch(monkeypatch, lambda url, **k: (None, "HTTP 429", 429))
+        got = scraper.javtxt_lookup(
+            {"javtxt_interval": 0, "javtxt_hosts": ("https://a.test", "https://b.test")},
+            "SNOS-380")
+        assert got["reason"] == scraper.REASON_RATE_LIMITED
+        assert got["http_status"] == 429
 
     def test_real_saved_html_if_present(self, scraper):
         """仓库里若留着 S0a 的真实取证 HTML，就顺手在真实页面上验一遍选择器。"""
@@ -685,6 +772,142 @@ class TestJavtxt:
         got = scraper.parse_javtxt_detail(detail.read_text(encoding="utf-8", errors="replace"))
         assert got["title_zh"] and got["plot_zh"] and got["title_jp"]
         assert [a["name"] for a in got["actors"]] == ["雛形みくる"]
+
+
+# ---------------------------------------------------------------------------
+# 3b. 失败原因与拦截判定（0.8.0 的 P0-2：借 amane 的 `classify_block` + 闭枚举 reason）
+# ---------------------------------------------------------------------------
+
+class TestFailureReasons:
+    """`classify_block` / `reason_from_text` / `http_fetch` 的重试与正文留档。
+
+    枚举值是**落库契约**（`scrape_log.reason`），所以这里逐条钉死。
+    """
+
+    def test_reason_enum_is_closed_and_unique(self, scraper):
+        assert isinstance(scraper.REASONS, frozenset)
+        assert scraper.REASON_CF_CHALLENGE in scraper.REASONS
+        assert len(scraper.REASONS) == 15
+        assert all(isinstance(v, str) and v for v in scraper.REASONS)
+
+    def test_classify_status_fallbacks(self, scraper):
+        assert scraper.classify_block("", 404) == scraper.REASON_NOT_FOUND
+        assert scraper.classify_block("", 429) == scraper.REASON_RATE_LIMITED
+        assert scraper.classify_block("", 500) == scraper.REASON_SERVER_ERROR
+        assert scraper.classify_block("", 503) == scraper.REASON_SERVER_ERROR
+        assert scraper.classify_block("", 403) == scraper.REASON_HTTP_ERROR
+        assert scraper.classify_block("", 200) == scraper.REASON_EMPTY
+        assert scraper.classify_block("", None) == scraper.REASON_EMPTY
+
+    def test_classify_clean_page_is_not_a_block(self, scraper):
+        """正常页面必须判成"没发现问题"，否则会把每一个正常响应都记成被拦。"""
+        assert scraper.classify_block(JAVTXT_SEARCH_HTML, 200) == ""
+        assert scraper.classify_block('{"data": []}', 200) == ""
+
+    def test_classify_strong_markers_on_200(self, scraper):
+        """挑战页是 **200** 回来的 —— 只有正文能认出来，所以强特征必须认 200。"""
+        assert scraper.classify_block("<html>_cf_chl_opt</html>", 200) == \
+            scraper.REASON_CF_CHALLENGE
+        assert scraper.classify_block("<title>Just a moment...</title>cloudflare", 200) == \
+            scraper.REASON_CF_CHALLENGE
+        assert scraper.classify_block("banned your access", 403) == scraper.REASON_IP_BANNED
+        assert scraper.classify_block("not available in your region", 200) == scraper.REASON_GEO
+
+    def test_classify_challenge_before_blocked(self, scraper):
+        """顺序是精华：挑战页也带 ray-id，**必须先判挑战页**。
+
+        反过来判会把"能自己过盾的挑战页"当成"永久封禁"，直接放弃这个源。
+        """
+        page = '<html>_cf_chl_opt ray-id cf-ray</html>'
+        assert scraper.classify_block(page, 200) == scraper.REASON_CF_CHALLENGE
+        assert scraper.classify_block("<html>ray-id cf-</html>", 200) == \
+            scraper.REASON_CF_BLOCKED
+
+    def test_classify_weak_markers_only_on_failure(self, scraper):
+        """弱特征只在失败响应上认：正常页的引用里也可能出现「年齢認証」。"""
+        assert scraper.classify_block("年齢認証", 403) == scraper.REASON_AGE
+        assert scraper.classify_block("年齢認証", 200) == ""
+
+    def test_reason_from_text(self, scraper):
+        assert scraper.reason_from_text("读超时") == scraper.REASON_TIMEOUT
+        assert scraper.reason_from_text("HTTP 429") == scraper.REASON_RATE_LIMITED
+        assert scraper.reason_from_text("HTTP 503") == scraper.REASON_SERVER_ERROR
+        assert scraper.reason_from_text("javdb 未返回详情") == ""
+        assert scraper.reason_from_text("javdb 未返回详情", scraper.REASON_UNEXPECTED) == \
+            scraper.REASON_UNEXPECTED
+
+    def test_backoff_is_jittered_and_growing(self, scraper):
+        first = [scraper._backoff_wait(0) for _ in range(20)]      # 第 1 次重试：2±1
+        second = [scraper._backoff_wait(1) for _ in range(20)]     # 第 2 次重试：5±1
+        assert all(1 <= w <= 3 for w in first)
+        assert all(4 <= w <= 6 for w in second)
+        assert len(set(first)) > 1                      # 有抖动，不是定值
+
+    def test_http_fetch_retries_then_succeeds(self, scraper, monkeypatch):
+        """可重试状态重试后成功：尝试次数与最终结果都要对得上。"""
+        import urllib.error
+
+        calls = []
+
+        class _Res:
+            status = 200
+
+            def read(self):
+                return b"ok"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        class _Opener503:
+            def open(self, req, timeout=None):
+                calls.append(1)
+                if len(calls) < 3:
+                    raise urllib.error.HTTPError(req.full_url, 503, "busy", {}, None)
+                return _Res()
+
+        monkeypatch.setattr(scraper, "_proxy_opener", lambda _p: _Opener503())
+        got = scraper.http_fetch("https://x.test/a", retries=2, sleeper=lambda _s: None)
+        assert got.ok and got.body == b"ok" and got.status == 200
+        assert got.attempts == 3 and len(calls) == 3
+
+    def test_http_fetch_does_not_retry_404_or_403(self, scraper, monkeypatch):
+        """404/403 **不重试**：前者是"没有"，后者是"被拦"（重试只会更冷）。"""
+        import urllib.error
+
+        calls = []
+
+        class _Opener:
+            def open(self, req, timeout=None):
+                calls.append(1)
+                raise urllib.error.HTTPError(req.full_url, 403, "forbidden", {}, None)
+
+        monkeypatch.setattr(scraper, "_proxy_opener", lambda _p: _Opener())
+        got = scraper.http_fetch("https://x.test/b", retries=2, sleeper=lambda _s: None)
+        assert not got.ok and got.status == 403 and got.attempts == 1 and len(calls) == 1
+
+    def test_http_fetch_keeps_failure_body_for_block_detection(self, scraper, monkeypatch):
+        """失败正文必须留档：CF 挑战页就是靠它认出来的（老实现直接丢掉 body）。"""
+        import io
+        import urllib.error
+
+        class _Opener:
+            def open(self, req, timeout=None):
+                raise urllib.error.HTTPError(
+                    req.full_url, 403, "forbidden", {},
+                    io.BytesIO(b"<html>_cf_chl_opt</html>"))
+
+        monkeypatch.setattr(scraper, "_proxy_opener", lambda _p: _Opener())
+        got = scraper.http_fetch("https://x.test/c", retries=0, sleeper=lambda _s: None)
+        assert got.reason == scraper.REASON_CF_CHALLENGE and got.status == 403
+
+    def test_http_get_keeps_old_three_tuple(self, scraper, monkeypatch):
+        """兼容外壳：老调用点与老单测都按三元组写，改造期间不能变。"""
+        monkeypatch.setattr(scraper, "http_fetch",
+                            lambda url, **k: scraper.FetchResult(body=b"x", status=200))
+        assert scraper.http_get("https://x.test/d") == (b"x", "", 200)
 
 
 # ---------------------------------------------------------------------------
@@ -706,7 +929,7 @@ class TestMetaTube:
         assert count == 2 and mismatch is False
 
     def test_lookup_reports_mismatch(self, scraper, monkeypatch):
-        monkeypatch.setattr(scraper, "http_get",
+        _patch_fetch(monkeypatch,
                             lambda url, **k: (json.dumps(METATUBE_MISMATCH).encode(), "", 200))
         store = FakeStore()
         got = scraper.metatube_lookup({"metatube_base": "http://mt:8080"}, "SNOS-380",
@@ -719,13 +942,13 @@ class TestMetaTube:
     def test_lookup_ok(self, scraper, monkeypatch):
         payload = {"data": [{"number": "SNOS-380", "provider": "JAV321", "id": "snos00380",
                              "summary": "日文简介", "title": "日文标题"}]}
-        monkeypatch.setattr(scraper, "http_get",
+        _patch_fetch(monkeypatch,
                             lambda url, **k: (json.dumps(payload).encode(), "", 200))
         got = scraper.metatube_lookup({"metatube_base": "http://mt:8080"}, "SNOS-380")
         assert got["ok"] and got["plot_jp"] == "日文简介" and got["provider"] == "JAV321"
 
     def test_empty_result_is_miss_not_error(self, scraper, monkeypatch):
-        monkeypatch.setattr(scraper, "http_get", lambda url, **k: (b'{"data":[]}', "", 200))
+        _patch_fetch(monkeypatch, lambda url, **k: (b'{"data":[]}', "", 200))
         got = scraper.metatube_lookup({"metatube_base": "http://mt:8080"}, "SNOS-380")
         assert got["status"] == "miss" and got["mismatch"] is False
 
@@ -738,8 +961,8 @@ class TestMetaTube:
             calls.append(url)
             return None, "HTTP 404", 404
 
-        monkeypatch.setattr(scraper, "http_get", fake_get)
-        monkeypatch.setattr(scraper.time, "sleep", lambda s: sleeps.append(s))
+        _patch_fetch(monkeypatch, fake_get)
+        monkeypatch.setattr(scraper, "_SLEEP", lambda s: sleeps.append(s))
         got = scraper.metatube_lookup({"metatube_base": "http://mt:8080"}, "SNOS-380")
         assert got["status"] == "empty" and got["error"] == ""
         assert len(calls) == 1 and sleeps == []              # 一次就是一次
@@ -755,8 +978,8 @@ class TestMetaTube:
                 return None, "HTTP 503", 503
             return b'{"data":[]}', "", 200
 
-        monkeypatch.setattr(scraper, "http_get", fake_get)
-        monkeypatch.setattr(scraper.time, "sleep", lambda s: sleeps.append(s))
+        _patch_fetch(monkeypatch, fake_get)
+        monkeypatch.setattr(scraper, "_SLEEP", lambda s: sleeps.append(s))
         got = scraper.metatube_lookup({"metatube_base": "http://mt:8080"}, "SNOS-380")
         assert len(calls) == 3 and sleeps == [1.0, 3.0]
         assert got["status"] == "miss"
@@ -768,8 +991,8 @@ class TestMetaTube:
             calls.append(url)
             return None, "TimeoutError: timed out", 0
 
-        monkeypatch.setattr(scraper, "http_get", fake_get)
-        monkeypatch.setattr(scraper.time, "sleep", lambda s: None)
+        _patch_fetch(monkeypatch, fake_get)
+        monkeypatch.setattr(scraper, "_SLEEP", lambda s: None)
         got = scraper.metatube_lookup({"metatube_base": "http://mt:8080"}, "SNOS-380")
         assert got["status"] == "error" and len(calls) == 3
         assert "TimeoutError" in got["error"]
@@ -782,7 +1005,7 @@ class TestMetaTube:
     def test_whole_source_down_is_tolerated(self, scraper, monkeypatch):
         """S0b：JAV321 上游已删目录，将来整源不可用要能容忍（空 + 记日志，不抛）。"""
         store = FakeStore()
-        monkeypatch.setattr(scraper, "http_get", lambda url, **k: (None, "HTTP 404", 404))
+        _patch_fetch(monkeypatch, lambda url, **k: (None, "HTTP 404", 404))
         got = scraper.metatube_lookup({"metatube_base": "http://mt:8080"}, "SNOS-380",
                                       store=store, key="SNOS380")
         assert got["ok"] is False and got["movie"] == {}
@@ -1231,7 +1454,7 @@ class TestPreview:
                 return json.dumps({"data": []}).encode(), "", 200
             raise AssertionError(f"不该请求 {url}")
 
-        monkeypatch.setattr(scraper, "http_get", fake_get)
+        _patch_fetch(monkeypatch, fake_get)
 
     def test_preview_makes_zero_write_calls(self, scraper, monkeypatch):
         self._patch_http(scraper, monkeypatch)
@@ -1276,7 +1499,7 @@ class TestPreview:
                 return JAVTXT_SEARCH_EMPTY.encode(), "", 200        # javtxt 0 命中
             raise AssertionError("0 命中时不该抓 Javtxt 详情")
 
-        monkeypatch.setattr(scraper, "http_get", fake_get)
+        _patch_fetch(monkeypatch, fake_get)
         monkeypatch.setattr(scraper, "javdb_assets", lambda *a, **k: [])
         report = scraper.preview_one("SNOS-380", store=FakeStore(),
                                      cli=FakeCli(detail=dict(JAVDB_DETAIL, title="日文标题")),
@@ -1296,7 +1519,7 @@ class TestPreview:
                 return json.dumps({"data": []}).encode(), "", 200
             return JAVTXT_SEARCH_EMPTY.encode(), "", 200
 
-        monkeypatch.setattr(scraper, "http_get", fake_get)
+        _patch_fetch(monkeypatch, fake_get)
         report = scraper.preview_one("SNOS-380", store=FakeStore(),
                                      cli=FakeCli(detail=dict(JAVDB_DETAIL, title="日文标题")),
                                      emby_client=None,
@@ -1324,7 +1547,7 @@ class TestScrapeOne:
                                                   monkeypatch):
         store = make_store(store_mod, tmp_path)
         store.item_upsert("emby:12598", "SNOS380", display_number="SNOS-380", emby_id="12598")
-        monkeypatch.setattr(scraper, "http_get", lambda url, **k: (
+        _patch_fetch(monkeypatch, lambda url, **k: (
             JAVTXT_SEARCH_HTML.encode() if "/search" in url else JAVTXT_DETAIL_HTML.encode(),
             "", 200))
         emby = FakeEmby(dto=EMPTY_DTO)
@@ -1347,7 +1570,7 @@ class TestScrapeOne:
         """★ 硬性验收：`missing_plot` → retry_count=1、next_retry_at=now+6h。"""
         store = make_store(store_mod, tmp_path)
         store.item_upsert("emby:12598", "SNOS380", display_number="SNOS-380", emby_id="12598")
-        monkeypatch.setattr(scraper, "http_get", lambda url, **k: (
+        _patch_fetch(monkeypatch, lambda url, **k: (
             JAVTXT_SEARCH_EMPTY.encode(), "", 200))
         emby = FakeEmby(dto=EMPTY_DTO)
         report = scraper.scrape_one(
@@ -1360,7 +1583,7 @@ class TestScrapeOne:
         """连续 5 轮 `missing_plot` → 6h/24h/72h/7d/14d，第 6 轮不再排。"""
         store = make_store(store_mod, tmp_path)
         store.item_upsert("emby:12598", "SNOS380", display_number="SNOS-380", emby_id="12598")
-        monkeypatch.setattr(scraper, "http_get", lambda url, **k: (
+        _patch_fetch(monkeypatch, lambda url, **k: (
             JAVTXT_SEARCH_EMPTY.encode(), "", 200))
         want = ["2026-10-14T06:00:00", "2026-10-15T00:00:00", "2026-10-17T00:00:00",
                 "2026-10-21T00:00:00", "2026-10-28T00:00:00"]
@@ -1387,7 +1610,7 @@ class TestScrapeOne:
         store.meta_upsert("SNOS380", display_number="SNOS-380", raw_json={"javdb": raw},
                           completeness="missing_plot")
         before = cli.calls["detail"]
-        monkeypatch.setattr(scraper, "http_get", lambda url, **k: (
+        _patch_fetch(monkeypatch, lambda url, **k: (
             JAVTXT_SEARCH_HTML.encode() if "/search" in url else JAVTXT_DETAIL_HTML.encode(),
             "", 200))
         report = scraper.scrape_one("SNOS-380", store=store, cli=cli,
@@ -1406,7 +1629,7 @@ class TestScrapeOne:
     def test_scrape_batch_isolation(self, scraper, store_mod, tmp_path, monkeypatch):
         """一条炸掉不影响其它条（返回与入参同序）。"""
         store = make_store(store_mod, tmp_path)
-        monkeypatch.setattr(scraper, "http_get", lambda url, **k: (
+        _patch_fetch(monkeypatch, lambda url, **k: (
             JAVTXT_SEARCH_EMPTY.encode(), "", 200))
 
         def boom(key, **kwargs):
@@ -1491,7 +1714,7 @@ class TestScrapeNumberForSite:
                                                          monkeypatch):
         store = make_store(store_mod, tmp_path)
         store.item_upsert("emby:12598", "CAWB40", display_number="CAWB-040", emby_id="12598")
-        monkeypatch.setattr(scraper, "http_get", lambda url, **k: (b"", "", 200))
+        _patch_fetch(monkeypatch, lambda url, **k: (b"", "", 200))
         library = _NameLibrary({"CAWB40": {"id": "12598", "name": "CAWB-040 人妻の… 中文字幕",
                                            "path": "/Media/9kg/avi/CAWB-040.mp4", "url": ""}})
         cli, seen = self._recording_cli(scraper, dict(JAVDB_DETAIL, number="CAWB-040"))
@@ -1505,7 +1728,7 @@ class TestScrapeNumberForSite:
         """同一形态的另一条真机样本：`IPOK025` → `IPOK-025`（不是 `IPOK-25`）。"""
         store = make_store(store_mod, tmp_path)
         store.item_upsert("emby:12597", "IPOK25", display_number="IPOK-025", emby_id="12597")
-        monkeypatch.setattr(scraper, "http_get", lambda url, **k: (b"", "", 200))
+        _patch_fetch(monkeypatch, lambda url, **k: (b"", "", 200))
         cli, seen = self._recording_cli(scraper, dict(JAVDB_DETAIL, number="IPOK-025"))
         scraper.scrape_one("IPOK025", store=store, cli=cli,
                            emby_client=FakeEmby(dto=EMPTY_DTO), opts=self._opts())
@@ -1520,7 +1743,7 @@ class TestScrapeNumberForSite:
         """
         store = make_store(store_mod, tmp_path)
         store.item_upsert("emby:12598", "CAWB40", display_number="CAWB-40", emby_id="12598")
-        monkeypatch.setattr(scraper, "http_get", lambda url, **k: (b"", "", 200))
+        _patch_fetch(monkeypatch, lambda url, **k: (b"", "", 200))
         library = _NameLibrary({"CAWB40": {"id": "12598", "name": "CAWB-040 人妻の…",
                                            "path": "/Media/9kg/avi/CAWB-040.mp4", "url": ""}})
         cli, seen = self._recording_cli(scraper, dict(JAVDB_DETAIL, number="CAWB-040"))
@@ -1534,7 +1757,7 @@ class TestScrapeNumberForSite:
         store = make_store(store_mod, tmp_path)
         store.item_upsert("emby:12598", "CAWB40", display_number="CAWB-40", emby_id="12598")
         store.meta_upsert("CAWB40", display_number="CAWB-040")
-        monkeypatch.setattr(scraper, "http_get", lambda url, **k: (b"", "", 200))
+        _patch_fetch(monkeypatch, lambda url, **k: (b"", "", 200))
         cli, seen = self._recording_cli(scraper, dict(JAVDB_DETAIL, number="CAWB-040"))
         scraper.scrape_one("CAWB40", store=store, cli=cli,
                            emby_client=FakeEmby(dto=EMPTY_DTO), opts=self._opts())
@@ -1861,7 +2084,7 @@ class TestSelfcheck:
                 return JAVTXT_DETAIL_HTML.encode(), "", 200
             raise AssertionError(f"不该请求 {url}")
 
-        monkeypatch.setattr(scraper, "http_get", fake_get)
+        _patch_fetch(monkeypatch, fake_get)
         rows = scraper.sources_selfcheck(store, FakeCli(detail=JAVDB_DETAIL),
                                         {"javtxt_interval": 0,
                                          "javtxt_hosts": ("https://j.test",),
@@ -1981,7 +2204,7 @@ class TestNamemapWiring:
                                                   monkeypatch):
         store = make_store(store_mod, tmp_path)
         store.item_upsert("emby:12598", "SNOS380", display_number="SNOS-380", emby_id="12598")
-        monkeypatch.setattr(scraper, "http_get", lambda url, **k: (
+        _patch_fetch(monkeypatch, lambda url, **k: (
             JAVTXT_SEARCH_EMPTY.encode(), "", 200))
         monkeypatch.setattr(scraper, "namemap", None)
         scraper.scrape_one("SNOS-380", store=store, cli=FakeCli(detail=JAVDB_DETAIL),
@@ -2152,7 +2375,7 @@ class TestSyncActorAvatars:
             {"name": "A", "avatar": "https://a.jpg", "gender": 0}])
         emby = self._persons({"A": {"Id": "9", "ImageTags": {}}})
         monkeypatch.setattr(scraper, "imgproxy", None)
-        monkeypatch.setattr(scraper, "http_get",
+        _patch_fetch(monkeypatch,
                             lambda url, **k: (b"not-an-image-at-all", "", 200))
         report = scraper.sync_actor_avatars(store, emby, dry_run=False, namemap_mod=nomap)
         assert emby.calls["upload_image"] == 0
@@ -2456,7 +2679,7 @@ class TestMetatubeMapping:
 
     def test_empty_summary_still_usable(self, scraper, monkeypatch):
         """`summary` 空不代表这次调用白费：标题/片商/时长/封面都是可用的。"""
-        monkeypatch.setattr(scraper, "http_get",
+        _patch_fetch(monkeypatch,
                             lambda url, **k: (json.dumps({"data": [self.ITEM]}).encode(),
                                               "", 200))
         got = scraper.metatube_lookup({"metatube_base": "http://mt:8080"}, "MIDV-946")
@@ -2482,7 +2705,7 @@ class TestMetatubeMapping:
             seen["url"] = url
             return json.dumps({"data": [self.ITEM]}).encode(), "", 200
 
-        monkeypatch.setattr(scraper, "http_get", fake_get)
+        _patch_fetch(monkeypatch, fake_get)
         scraper.metatube_lookup({"metatube_base": "http://mt:8080"}, "MIDV-946")
         assert seen["url"] == "http://mt:8080/v1/movies/search?q=MIDV-946"
         assert "lazy" not in seen["url"] and "provider" not in seen["url"]
@@ -2504,7 +2727,7 @@ class TestGatherOrder:
                         else JAVTXT_SEARCH_EMPTY).encode(), "", 200
             return JAVTXT_DETAIL_HTML.encode(), "", 200
 
-        monkeypatch.setattr(scraper, "http_get", fake_get)
+        _patch_fetch(monkeypatch, fake_get)
         return hits
 
     def test_javtxt_hit_skips_metatube(self, scraper, monkeypatch):
@@ -2541,7 +2764,7 @@ class TestGatherOrder:
                 return JAVTXT_SEARCH_HTML.encode(), "", 200
             return JAVTXT_DETAIL_HTML.encode(), "", 200
 
-        monkeypatch.setattr(scraper, "http_get", fake_get)
+        _patch_fetch(monkeypatch, fake_get)
         target = scraper.gather(FakeCli(detail=None, error="javdb 挂了"), FakeStore(),
                                 "SNOS380", "SNOS-380",
                                 opts={"javtxt_interval": 0,
@@ -2684,7 +2907,7 @@ class TestFetchCache:
             calls.append(url)
             raise AssertionError("命中缓存时不该发请求")
 
-        monkeypatch.setattr(scraper, "http_get", fake_get)
+        _patch_fetch(monkeypatch, fake_get)
         cli = FakeCli(detail=JAVDB_DETAIL)
         target = scraper.gather(cli, FakeStore(), "SNOS380", "SNOS-380",
                                 opts={"fetch_cache": s11_cache(), "write_images": False,
@@ -2708,7 +2931,7 @@ class TestFetchCache:
                 return midv_search.encode(), "", 200
             return JAVTXT_DETAIL_HTML.encode(), "", 200
 
-        monkeypatch.setattr(scraper, "http_get", fake_get)
+        _patch_fetch(monkeypatch, fake_get)
         cli = FakeCli(detail=JAVDB_DETAIL)
         target = scraper.gather(cli, FakeStore(), "MIDV946", "MIDV-946",
                                 opts={"fetch_cache": s11_cache(), "javtxt_interval": 0,
@@ -2718,7 +2941,7 @@ class TestFetchCache:
         assert target["title_zh"] and target["plot_zh"]
 
     def test_cache_row_without_javdb_uses_javtxt_only(self, scraper, monkeypatch):
-        monkeypatch.setattr(scraper, "http_get",
+        _patch_fetch(monkeypatch,
                             lambda url, **k: (_ for _ in ()).throw(
                                 AssertionError("javtxt 命中缓存时不该发请求")))
         cache = s11_cache()
@@ -2730,7 +2953,7 @@ class TestFetchCache:
         assert target["plot_zh"] and target["sources"]["javdb"]["status"] == "error"
 
     def test_force_ignores_cache(self, scraper, monkeypatch):
-        monkeypatch.setattr(scraper, "http_get", lambda url, **k: (
+        _patch_fetch(monkeypatch, lambda url, **k: (
             JAVTXT_SEARCH_HTML.encode() if "/search" in url
             else JAVTXT_DETAIL_HTML.encode(), "", 200))
         cli = FakeCli(detail=JAVDB_DETAIL)
@@ -2882,7 +3105,7 @@ class TestCacheOnly:
         def boom(*args, **kwargs):
             raise AssertionError("cache_only 不许发任何请求")
 
-        monkeypatch.setattr(scraper, "http_get", boom)
+        _patch_fetch(monkeypatch, boom)
         monkeypatch.setattr(scraper, "javdb_assets", boom)
         monkeypatch.setattr(scraper.subprocess, "run", boom)
         cli = FakeCli(detail=JAVDB_DETAIL)
@@ -2941,7 +3164,7 @@ class TestCacheOnly:
         """缓存里没这条时，`cache_only` 不该把它变成"什么都刮不到"——照常走真链路。"""
         midv_search = JAVTXT_SEARCH_HTML.replace("SNOS-380", "MIDV-946").replace(
             "/v/558149", "/v/490714")
-        monkeypatch.setattr(scraper, "http_get", lambda url, **k: (
+        _patch_fetch(monkeypatch, lambda url, **k: (
             midv_search.encode() if "/search" in url else JAVTXT_DETAIL_HTML.encode(),
             "", 200))
         cli = FakeCli(detail=JAVDB_DETAIL)
@@ -3270,14 +3493,14 @@ class TestCoverFallback:
     def test_cover_url_without_imgproxy_checks_magic(self, scraper, monkeypatch):
         """缺 `imgproxy` 时退回裸 http_get —— 必须靠魔数挡住 XOR 包装数据（否则 Emby 500）。"""
         monkeypatch.setattr(scraper, "imgproxy", None)
-        monkeypatch.setattr(scraper, "http_get",
+        _patch_fetch(monkeypatch,
                             lambda url, **k: (b"not-an-image", "", 200))
         emby = FakeEmby(dto=EMPTY_DTO)
         report, _store = self._write(scraper, monkeypatch, emby, [], self.COVER_URL)
         assert emby.calls["upload_image"] == 0 and report["ok"] is True
         assert any("不是图片" in n for n in report["notes"])
         # 真的 JPEG 就走通（`is_image_bytes` 要求 ≥12 字节，别拿 8 字节的假货糊弄它）
-        monkeypatch.setattr(scraper, "http_get",
+        _patch_fetch(monkeypatch,
                             lambda url, **k: (b"\xff\xd8\xff\xe0" + b"real-jpeg-body", "", 200))
         emby2 = FakeEmby(dto=EMPTY_DTO)
         report2, _s2 = self._write(scraper, monkeypatch, emby2, [], self.COVER_URL)

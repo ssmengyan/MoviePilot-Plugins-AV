@@ -174,8 +174,13 @@ CREATE TABLE IF NOT EXISTS scrape_log(
     status TEXT NOT NULL,
     latency_ms INTEGER DEFAULT 0,
     error_summary TEXT DEFAULT '',
-    created_at TEXT DEFAULT ''
+    created_at TEXT DEFAULT '',
+    reason TEXT DEFAULT '',
+    http_status INTEGER DEFAULT 0,
+    run_id TEXT DEFAULT ''
 );
+CREATE INDEX IF NOT EXISTS idx_scrape_log_source ON scrape_log(source_name, id DESC);
+CREATE INDEX IF NOT EXISTS idx_scrape_log_run ON scrape_log(run_id);
 """
 
 # 老库动态补列（SQLite 的 ALTER TABLE ADD COLUMN 没有 IF NOT EXISTS，先看 PRAGMA table_info 再补）。
@@ -185,6 +190,15 @@ _DL_ADD_COLUMNS = (
     ("version_tags", "TEXT DEFAULT '{}'"),
     ("emby_id", "TEXT DEFAULT ''"),
     ("failed_reason", "TEXT DEFAULT ''"),
+)
+
+# 0.8.0 的 P0-2：scrape_log 补三列（**追加在末尾**，保证「新库建全」与「老库 ALTER」两条路径的
+# 列顺序逐字相同 —— 0.6.3 定的口径）。`reason` 是机器可读的失败原因（`scraper.REASONS`），
+# `http_status` 是 HTTP 状态码（0 = 没拿到响应），`run_id` 把同一次刮削的各源记录串成一组。
+_SL_ADD_COLUMNS = (
+    ("reason", "TEXT DEFAULT ''"),
+    ("http_status", "INTEGER DEFAULT 0"),
+    ("run_id", "TEXT DEFAULT ''"),
 )
 
 # 台账行固定的列顺序：`download_list` 的 SELECT 与 `_download_row` 的下标都按它来，
@@ -705,6 +719,16 @@ class Store:
                 continue
             try:
                 conn.execute(f"ALTER TABLE downloads ADD COLUMN {name} {decl}")
+            except sqlite3.OperationalError:
+                pass
+        # 兼容旧库：scrape_log 的后加列（0.8.0 的 reason / http_status / run_id，见 `_SL_ADD_COLUMNS`）。
+        # 同上：先看列在不在再 ALTER，绝不 DROP 重建 —— 日志是排障凭据。
+        log_cols = {r[1] for r in conn.execute("PRAGMA table_info(scrape_log)").fetchall()}
+        for name, decl in _SL_ADD_COLUMNS:
+            if name in log_cols:
+                continue
+            try:
+                conn.execute(f"ALTER TABLE scrape_log ADD COLUMN {name} {decl}")
             except sqlite3.OperationalError:
                 pass
 
@@ -1826,17 +1850,24 @@ class Store:
     # ---------- 数据源自检日志（scrape_log，v4 刮削层） ----------
 
     def scrape_log_add(self, source_name: str, status: str, key: str = "", latency_ms: int = 0,
-                       error_summary: str = "") -> None:
+                       error_summary: str = "", reason: str = "", http_status: int = 0,
+                       run_id: str = "") -> None:
         """记一条数据源调用结果（自检页与排障用）。
 
         `error_summary` 裁到 500 字符：这是给界面看的一句话摘要，不是堆栈仓库；
         表本身顺手裁到最近 `_SCRAPE_LOG_KEEP` 条（同 notice 只留 200 条的思路）。
+
+        `reason` 是**机器可读**的失败原因（封闭枚举，值见 `scraper.REASONS`）：`status` 说
+        "成没成"，`reason` 说"为什么" —— 只靠 status 分不清「站点没收录这部片（miss）」与
+        「被 CF / 年龄墙拦了（error）」，而这两种的处置完全相反（前者换源，后者冷却 + 换 UA）。
+        `run_id` 把同一次刮削的各源记录串成一组（`scrape_log_run()` 取回）。
         """
         self._exec(
             "INSERT INTO scrape_log(source_name, key, status, latency_ms, error_summary, "
-            "created_at) VALUES(?,?,?,?,?,?)",
+            "created_at, reason, http_status, run_id) VALUES(?,?,?,?,?,?,?,?,?)",
             (str(source_name or ""), str(key or ""), str(status or ""), _to_int(latency_ms),
-             str(error_summary or "")[:500], _now()),
+             str(error_summary or "")[:500], _now(), str(reason or ""),
+             _to_int(http_status), str(run_id or "")),
         )
         self._exec(
             "DELETE FROM scrape_log WHERE id NOT IN "
@@ -1849,10 +1880,11 @@ class Store:
 
         行里 `source`/`error` 与 `source_name`/`error_summary` 两份键都给：REST 契约
         （§3.7 `/scrape/log`）写的是前者，表列名是后者，两边调用方都不用再改名。
+        `reason` / `http_status` / `run_id` 照表列名给（0.8.0 加的排障字段）。
         """
         size = _to_int(limit) or 50
-        sql = ("SELECT id, source_name, key, status, latency_ms, error_summary, created_at "
-               "FROM scrape_log")
+        sql = ("SELECT id, source_name, key, status, latency_ms, error_summary, created_at, "
+               "reason, http_status, run_id FROM scrape_log")
         args: List[Any] = []
         source = str(source_name or "").strip()
         if source:
@@ -1865,10 +1897,38 @@ class Store:
             "id": r[0], "source_name": r[1] or "", "source": r[1] or "", "key": r[2] or "",
             "status": r[3] or "", "latency_ms": _to_int(r[4]),
             "error_summary": r[5] or "", "error": r[5] or "", "created_at": r[6] or "",
+            "reason": r[7] or "", "http_status": _to_int(r[8]), "run_id": r[9] or "",
+        } for r in rows]
+
+    def scrape_log_run(self, run_id: str, limit: int = 200) -> List[Dict[str, Any]]:
+        """取一次刮削（`run_id`）的全部站点记录，**旧→新**（按发生顺序读"当时发生了什么"）。
+
+        与 `scrape_log_recent()` 的区别只在顺序与过滤：这里是"一次 run 的叙事"，
+        那里是"最近发生了什么"。
+        """
+        text = str(run_id or "").strip()
+        if not text:
+            return []
+        rows = self._exec(
+            "SELECT id, source_name, key, status, latency_ms, error_summary, created_at, "
+            "reason, http_status FROM scrape_log WHERE run_id = ? ORDER BY id ASC LIMIT ?",
+            (text, max(_to_int(limit) or 200, 1)), fetch=True,
+        ) or []
+        return [{
+            "id": r[0], "source_name": r[1] or "", "source": r[1] or "", "key": r[2] or "",
+            "status": r[3] or "", "latency_ms": _to_int(r[4]),
+            "error_summary": r[5] or "", "error": r[5] or "", "created_at": r[6] or "",
+            "reason": r[7] or "", "http_status": _to_int(r[8]), "run_id": text,
         } for r in rows]
 
     def scrape_log_summary(self) -> List[Dict[str, Any]]:
-        """按数据源汇总：总数 / 成功 / 失败 / 平均耗时 / 最近一次状态与时间。"""
+        """按数据源汇总：总数 / 成功 / 失败 / 平均耗时 / **各失败原因计数** / 最近一次状态与时间。
+
+        `reasons` 是 0.8.0 加的那一维：`{"cloudflare_challenge": 3, "no_usable_metadata": 41}`。
+        它把"这个源最近一直失败"从一句中文 error_summary 变成可分组的事实 ——
+        `parse_error` 连着涨 = 站点改版，`cloudflare_challenge` 连着涨 = 被拦，
+        `no_usable_metadata` 连着涨 = 站点确实没收录（换源，不是修解析器）。
+        """
         rows = self._exec(
             "SELECT source_name, COUNT(*), "
             "SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END), AVG(latency_ms) "
@@ -1878,18 +1938,25 @@ class Store:
         out: List[Dict[str, Any]] = []
         for source, total, ok, avg in rows:
             last = self._exec(
-                "SELECT status, error_summary, created_at FROM scrape_log "
+                "SELECT status, error_summary, created_at, reason FROM scrape_log "
                 "WHERE source_name=? ORDER BY id DESC LIMIT 1",
                 (source,), fetch=True,
-            ) or [("", "", "")]
+            ) or [("", "", "", "")]
             count = _to_int(total)
             good = _to_int(ok)
+            reason_rows = self._exec(
+                "SELECT reason, COUNT(*) FROM scrape_log WHERE source_name=? AND reason<>'' "
+                "GROUP BY reason ORDER BY COUNT(*) DESC, reason",
+                (source,), fetch=True,
+            ) or []
             out.append({
                 "source_name": source, "source": source,
                 "total": count, "ok": good, "fail": max(count - good, 0),
                 "avg_latency_ms": int(_to_float(avg)),
                 "last_status": last[0][0] or "", "last_error": last[0][1] or "",
                 "last_created_at": last[0][2] or "",
+                "last_reason": (last[0][3] if len(last[0]) > 3 else "") or "",
+                "reasons": {str(r[0] or ""): _to_int(r[1]) for r in reason_rows if r[0]},
             })
         return out
 

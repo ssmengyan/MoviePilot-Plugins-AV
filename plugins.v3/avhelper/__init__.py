@@ -334,7 +334,7 @@ class AVHelper(_PluginBase):
     # 版本：0.7.3 = 修头像同步误报 person_missing（匹配名与写入名走同一条链，存量 actors_json 建索引时复算）
     # + 0.7.2 基座：自建刮削层（0.7.0 起：番号解析/中文简介/翻译/封面裁切/Emby 安全写入与回滚）
     # + 界面减负：手动刮削改搜索式、演员三显示项、列表翻页、刮削台去裁切锚点与回滚入口、设置台去裁切锚点
-    plugin_version = "0.7.4"
+    plugin_version = "0.8.0"
     plugin_label = "发现"
     plugin_author = "ssmengyan"
     plugin_config_prefix = "avhelper_"
@@ -2650,6 +2650,13 @@ class AVHelper(_PluginBase):
             item["latency_ms"] = to_int(row.get("avg_latency_ms") or row.get("latency_ms"))
             item["error"] = str(row.get("last_error") or row.get("error") or "")
             item["checked_at"] = str(row.get("last_created_at") or row.get("checked_at") or "")
+            # 0.8.0：把"为什么"也带给界面 —— `reasons` 是各失败原因的计数，
+            # `reason` 是最近一次的原因。`parse_error` 连续上涨 = 站点改版，
+            # `cloudflare_challenge` 上涨 = 被拦；两者都涨而 `no_usable_metadata` 不涨时
+            # **不要**去改解析器（那是在追一个不存在的 bug）。
+            item["reason"] = str(row.get("last_reason") or row.get("reason") or "")
+            reasons = row.get("reasons")
+            item["reasons"] = dict(reasons) if isinstance(reasons, dict) else {}
             out.append(item)
         return out
 
@@ -2952,15 +2959,23 @@ class AVHelper(_PluginBase):
         return {"success": bool(data.get("ok")), "ok": bool(data.get("ok")),
                 "restored": restored, "error": str(data.get("error") or "")}
 
-    def api_scrape_log(self, limit: int = 50) -> Dict[str, Any]:
+    def api_scrape_log(self, limit: int = 50, run: str = "") -> Dict[str, Any]:
         """`/scrape/log`：最近若干条刮削日志 + 各源汇总（契约 §3.7）。
 
         `items[]` 的键名照契约（`source`/`status`/`key`/`latency_ms`/`error`/`created_at`）；
         S1 的行里 `source`/`error` 与 `source_name`/`error_summary` 两份都给，这里取前者。
+
+        0.8.0 的两处补充：① 每行多带 `reason` / `http_status` / `run_id`
+        （`status` 说"成没成"，`reason` 说"为什么"）；② `?run=<run_id>` 取**某一次刮削的
+        全部站点记录**（旧→新，按发生顺序读"当时发生了什么"），此时 `limit` 不生效。
         """
         size = min(max(to_int(limit, 50), 1), 500)
+        run_id = str(run or "").strip()
         try:
-            rows = self.store.scrape_log_recent(limit=size) or []
+            if run_id:
+                rows = self.store.scrape_log_run(run_id, limit=size) or []
+            else:
+                rows = self.store.scrape_log_recent(limit=size) or []
         except Exception as error:
             logger.error(f"AVHelper 读刮削日志失败：{error}")
             return {"success": False, "message": "刮削日志读取失败", "items": [], "summary": []}
@@ -2974,9 +2989,13 @@ class AVHelper(_PluginBase):
                 "key": str(row.get("key") or ""),
                 "latency_ms": to_int(row.get("latency_ms")),
                 "error": str(row.get("error") or row.get("error_summary") or ""),
+                "reason": str(row.get("reason") or ""),
+                "http_status": to_int(row.get("http_status")),
+                "run_id": str(row.get("run_id") or ""),
                 "created_at": str(row.get("created_at") or ""),
             })
-        return {"success": True, "items": items, "summary": self._scrape_sources()}
+        return {"success": True, "items": items, "run_id": run_id,
+                "summary": self._scrape_sources()}
 
     async def api_scrape_selfcheck(self, request: Request) -> Dict[str, Any]:
         """`/scrape/selfcheck`：翻译模型自检（设置台的「模型自检」按钮）。

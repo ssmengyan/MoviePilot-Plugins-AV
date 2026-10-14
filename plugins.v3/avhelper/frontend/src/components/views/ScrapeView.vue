@@ -679,6 +679,24 @@ function sourceError(row: Record<string, any>): string {
   return text(row?.error ?? row?.error_summary) || '—'
 }
 
+/** 失败原因（`reason`，机器可读的 `REASON_*`；老后端没有这个键就是空串）。 */
+function sourceReason(row: Record<string, any>): string {
+  return text(row?.reason)
+}
+
+/** 汇总行的原因分布：`{parse_error: 3, no_usable_metadata: 41}` → `no_usable_metadata×41、parse_error×3`。 */
+function reasonText(row: Record<string, any>): string {
+  const counts = row?.reasons
+  if (!counts || typeof counts !== 'object') return '—'
+  const pairs = Object.entries(counts as Record<string, unknown>)
+    .filter(([, n]) => Number(n) > 0)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+  if (!pairs.length) return '—'
+  const head = pairs.slice(0, 3).map(([key, n]) => `${key}×${Number(n)}`)
+  const rest = pairs.length - head.length
+  return rest > 0 ? `${head.join('、')} +${rest}` : head.join('、')
+}
+
 function sourceCheckedAt(row: Record<string, any>): string {
   return shortTime(row?.checked_at ?? row?.updated_at ?? row?.at ?? row?.time ?? row?.created_at)
 }
@@ -1034,7 +1052,10 @@ function logStatusColor(status: unknown): string {
                 </v-chip>
               </td>
               <td>{{ latencyText(row?.latency_ms ?? row?.latency ?? row?.ms) }}</td>
-              <td class="avh-table__ellipsis" :title="sourceError(row)">{{ sourceError(row) }}</td>
+              <td class="avh-table__ellipsis" :title="sourceError(row)">
+                <code v-if="sourceReason(row)" class="avh-scrape__reason">{{ sourceReason(row) }}</code>
+                {{ sourceError(row) }}
+              </td>
               <td>{{ sourceCheckedAt(row) }}</td>
             </tr>
           </tbody>
@@ -1093,6 +1114,7 @@ function logStatusColor(status: unknown): string {
                 <v-chip size="x-small" :color="logStatusColor(row?.status)" variant="tonal">
                   {{ text(row?.status) || '—' }}
                 </v-chip>
+                <code v-if="sourceReason(row)" class="avh-scrape__reason ms-1">{{ sourceReason(row) }}</code>
               </td>
               <td>{{ text(row?.key) || '—' }}</td>
               <td>{{ latencyText(row?.latency_ms) }}</td>
@@ -1112,13 +1134,17 @@ function logStatusColor(status: unknown): string {
               <th>源</th>
               <th>条数</th>
               <th>失败</th>
+              <th>原因分布</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="(row, index) in logSummary" :key="`sum#${index}`">
               <td>{{ sourceName(row) }}</td>
-              <td>{{ text(row?.count ?? row?.total ?? '—') }}</td>
-              <td>{{ text(row?.failed ?? row?.errors ?? '—') }}</td>
+              <td>{{ text(row?.total ?? row?.count ?? '—') }}</td>
+              <td>{{ text(row?.fail ?? row?.failed ?? row?.errors ?? '—') }}</td>
+              <!-- 「这一列就是排障的入口」：parse_error 连着涨 = 站点改版，
+                   cloudflare_challenge 涨 = 被拦，no_usable_metadata 涨 = 站点真没收录（换源）。 -->
+              <td class="avh-table__ellipsis" :title="reasonText(row)">{{ reasonText(row) }}</td>
             </tr>
           </tbody>
         </table>
@@ -1293,6 +1319,14 @@ function logStatusColor(status: unknown): string {
   font-size: 12px;
   letter-spacing: 0.4px;
   color: rgba(var(--v-theme-on-surface), 0.5);
+}
+
+/* 失败原因（`scrape_log.reason`）：等宽小字、弱化色，只作"为什么"的注脚，
+   不与状态 chip 抢视觉 —— 状态说"成没成"，它说"为什么"。 */
+.avh-scrape__reason {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: rgba(var(--v-theme-on-surface), 0.6);
 }
 
 /* 版本角标（与 `LibraryView` / `DownloadsView` 同一套观感） */

@@ -55,12 +55,15 @@ from __future__ import annotations
 import html as _html
 import json
 import os
+import random
 import re
 import subprocess
 import tempfile
 import threading
 import time
 import unicodedata
+import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 from urllib.parse import quote, urlencode
@@ -114,6 +117,9 @@ SRC_IMAGE = "javdb_assets"
 JAVTXT_HOSTS: Tuple[str, ...] = ("https://javtxt.com", "https://javtxt.net", "https://javtxt.org")
 # 单站点请求间隔（契约 §4.2 硬要求 ≥2s）。搜索要试多个变体，不节流会打爆站点。
 JAVTXT_MIN_INTERVAL = 2.0
+# javtxt 的重试次数（0.8.0 加）：只对 `RETRYABLE_STATUS` + 超时/连接类异常生效，
+# 403（被拦）/ 404（地址没了）**不重试**。退避 2±1 秒起，不比 `JAVTXT_MIN_INTERVAL` 更密。
+JAVTXT_RETRIES = 2
 
 # MetaTube Server 地址：**代码里不留坐标**（同 `DEFAULT_PROXY` 的公开分发口径，0.7.0 起），
 # 只从插件设置「刮削」栏的 `metatubeBase` 来；留空 = 混合模式不做 MetaTube 兜底，
@@ -562,8 +568,142 @@ def _fallback_number(resolved: Dict[str, Any], options: Dict[str, Any],
 
 
 # ---------------------------------------------------------------------------
+# 失败原因（封闭枚举）与拦截判定
+#
+# 分工：`status` 说"成没成"，`reason` 说"为什么"。只靠 status 分不清「站点没收录这部片」
+# 与「被 CF / 年龄墙拦了」，而这两件事的处置**相反** —— 前者换源，后者冷却 + 换 UA。
+# 枚举照 amane `net/errors.py:37-63` 裁剪到我们真正会产出的取值；**只加不改**。
+# ---------------------------------------------------------------------------
+
+REASON_NOT_FOUND = "not_found"                  # HTTP 404：地址没了 / 番号不存在
+REASON_RATE_LIMITED = "rate_limited"            # 429
+REASON_SERVER_ERROR = "server_error"            # 5xx
+REASON_HTTP_ERROR = "http_error"                # 其余 4xx
+REASON_TIMEOUT = "timeout"                      # 连上了但没在超时内回话
+REASON_NETWORK = "network"                      # 连不上 / DNS / TLS / 代理
+REASON_EMPTY = "empty_response"                 # 200 但正文是空的
+REASON_CF_CHALLENGE = "cloudflare_challenge"    # "Just a moment" 挑战页
+REASON_CF_BLOCKED = "cloudflare_blocked"        # Ray ID 拦截页（无挑战）
+REASON_IP_BANNED = "ip_banned"
+REASON_GEO = "geo_restricted"
+REASON_AGE = "age_verification"                 # 年龄墙
+REASON_NO_USABLE = "no_usable_metadata"         # 请求成功、页面干净，但没有可用内容
+REASON_PARSE = "parse_error"                    # 响应与我们的读模型不符 = 站点可能改版
+REASON_UNEXPECTED = "unexpected"
+
+#: 全部合法取值（`scrape_log.reason` 的取值域；界面按它分组）
+REASONS = frozenset({
+    REASON_NOT_FOUND, REASON_RATE_LIMITED, REASON_SERVER_ERROR, REASON_HTTP_ERROR,
+    REASON_TIMEOUT, REASON_NETWORK, REASON_EMPTY, REASON_CF_CHALLENGE, REASON_CF_BLOCKED,
+    REASON_IP_BANNED, REASON_GEO, REASON_AGE, REASON_NO_USABLE, REASON_PARSE,
+    REASON_UNEXPECTED,
+})
+
+#: 强特征：**HTTP 200 也认** —— 挑战页/封锁页本来就是 200 回来的，
+#: 而正常页里不会出现这些串。
+_BLOCK_STRONG: Tuple[Tuple[str, str], ...] = (
+    ("not available in your region", REASON_GEO),
+    ("お住まいの地域からはご利用になれません", REASON_GEO),
+    ("banned your access", REASON_IP_BANNED),
+    # `_cf_chl_opt` 只在挑战页出现；`challenge-platform` 在正常页也加载，**不能**当判据。
+    ("_cf_chl_opt", REASON_CF_CHALLENGE),
+)
+#: 弱特征：**只在失败响应上认**。实测踩过：维基演员页的引用里带「年齢認証」，
+#: 拿它判 200 会把正常页误判成年龄墙。
+_BLOCK_WEAK: Tuple[Tuple[str, str], ...] = (
+    ("driver-verify", REASON_AGE),
+    ("年齢認証", REASON_AGE),
+    ("age verification", REASON_AGE),
+)
+
+
+def classify_block(text: Any = "", status: Optional[int] = None) -> str:
+    """这次失败/拦截到底是什么 —— 回 `REASON_*` 之一，**没发现问题时空串**。
+
+    顺序（照 amane `net/errors.py:120-156`，是精华，别重排）：
+
+    1. 正文强特征：地域封锁 / IP 封禁 / CF 挑战页；
+    2. CF 封禁页（`ray-id` + `cf-`）—— **必须在挑战页之后判**：挑战页同样带 ray-id；
+    3. 正文弱特征（年龄墙）—— 只在 `status` 缺失或 ≥400 时认（见 `_BLOCK_WEAK`）；
+    4. 状态码兜底：429 / 5xx / 404 / 其余 4xx；
+    5. 正文为空 → `empty_response`。
+    """
+    lower = str(text or "").lower()
+    if lower:
+        for marker, reason in _BLOCK_STRONG:
+            if marker in lower:
+                return reason
+        if "just a moment" in lower and "cloudflare" in lower:
+            return REASON_CF_CHALLENGE
+        if "ray-id" in lower and "cf-" in lower:
+            return REASON_CF_BLOCKED
+        if status is None or _to_int(status) >= 400:
+            for marker, reason in _BLOCK_WEAK:
+                if marker in lower:
+                    return reason
+    code = _to_int(status)
+    if code == 404:
+        return REASON_NOT_FOUND
+    if code == 429:
+        return REASON_RATE_LIMITED
+    if 500 <= code < 600:
+        return REASON_SERVER_ERROR
+    if 400 <= code < 500:
+        return REASON_HTTP_ERROR
+    if not lower:
+        return REASON_EMPTY
+    return ""
+
+
+def reason_from_text(text: Any, default: str = "") -> str:
+    """从**自由文本**里猜一个机器原因（兜底用）。
+
+    只在拿不到结构化信号的地方用（javdb 走子进程，只有一句中文说明）。猜不出给 `default`。
+    规则按"先具体后笼统"排；**别加宽泛的关键词**（`error` / `fail` 这类），
+    否则"站点收录缺口"又会被猜成"请求失败"。
+    """
+    low = str(text or "").lower()
+    if not low:
+        return default
+    if "timeout" in low or "timed out" in low or "超时" in low:
+        return REASON_TIMEOUT
+    if "频繁" in low or "too many" in low or "rate limit" in low:
+        return REASON_RATE_LIMITED
+    if "冷却" in low or "cool" in low:
+        return REASON_RATE_LIMITED
+    found = re.search(r"\b([45]\d{2})\b", low)
+    if found:
+        return classify_block("", _to_int(found.group(1))) or default
+    if "未找到" in low or "不存在" in low or "not found" in low:
+        return REASON_NOT_FOUND
+    return default
+
+
+# ---------------------------------------------------------------------------
 # HTTP（javtxt / MetaTube）：一律走调用方给的代理，失败不抛异常
 # ---------------------------------------------------------------------------
+
+#: 出站 UA。**全插件唯一一份**（0.8.0 之前 scraper / sitesearch / imgproxy 各写一份，
+#: 同一个进程对外有三个身份）。版本号只是装饰，发版时一并改即可。
+UA_DEFAULT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AVHelper/0.7"
+UA_HEADERS: Dict[str, str] = {
+    "User-Agent": UA_DEFAULT,
+    "Accept-Language": "zh-CN,zh;q=0.9,ja;q=0.8",
+}
+
+#: 失败正文只留 64 KB：拦截页（CF 挑战 / 年龄墙）**只有正文能认出来**，
+#: 而完整正文动辄几百 KB，没必要为了判定留全份。
+FAILURE_BODY_LIMIT = 65536
+#: 常规取数的重试次数（总尝试 = 1 + 本值）
+HTTP_RETRIES = 2
+#: 可重试的状态码：只有这四条（+超时/连接类异常）。
+#: **403 / 404 不重试** —— 403 是"被拦"（重试只会更冷）、404 是"没有"（重试是白等）。
+RETRYABLE_STATUS = frozenset({408, 429, 503, 504})
+#: `time.sleep` 的间接引用：**所有等待都走它**（重试退避 + 站点节流）。
+#: 单测把它换成不睡的假函数 —— 否则"失败 + 重试"的用例要真等 2±1、5±1 秒，
+#: 一轮全量测试会被拖到几分钟（实测 40 秒 → 4 分钟）。
+_SLEEP = time.sleep
+
 
 def _proxy_opener(proxy: str) -> Any:
     """按代理串建一个 urllib opener（空串 = 直连，不设任何 handler）。"""
@@ -577,28 +717,117 @@ def _proxy_opener(proxy: str) -> Any:
     return urllib.request.build_opener()
 
 
-def http_get(url: str, *, proxy: str = "", timeout: int = 30,
-             headers: Optional[Dict[str, str]] = None) -> Tuple[Optional[bytes], str, int]:
-    """GET 一个 URL，返回 `(body, error, status)`。**任何异常都吞掉**（失败只回错误文案）。
+@dataclass
+class FetchResult:
+    """一次出站请求的结构化结果。`body is None` 即失败，`reason` 说明为什么。
 
-    `error` 里带异常类型与原文（截断），调用方把它写进 `scrape_log.error_summary` /
-    `preview.warnings` —— 静默失败在刮削线里是最贵的 bug（分不清站点挂了还是解析器坏了）。
+    `kind` 是传输层分类（`http_status` / `timeout` / `network`），`reason` 是业务分类
+    （`REASON_*`，含拦截判定）—— 两者分开，是为了让"要不要重试"（看 kind 与 status）
+    与"要不要冷却/换源"（看 reason）各用各的判据。
     """
+
+    url: str = ""
+    status: Optional[int] = None
+    body: Optional[bytes] = None
+    error: str = ""
+    kind: str = ""
+    reason: str = ""
+    attempts: int = 1
+
+    @property
+    def ok(self) -> bool:
+        return self.body is not None
+
+
+def _backoff_wait(retry_index: int) -> float:
+    """第 `retry_index` 次重试前的等待秒数（**从 0 数**）：`retry_index*3 + 2 ± 1`（2±1、5±1）。
+
+    带 jitter 是**必须的**：多源同时失败时，固定退避会让它们在同一秒一起重发。
+    """
+    return max(0.0, float(retry_index) * 3 + 2 + random.uniform(-1, 1))
+
+
+def _classify_transport(error: BaseException) -> str:
+    """异常 → `REASON_TIMEOUT` / `REASON_NETWORK`（超时与"连不上"分开：前者值得重试与放宽
+    超时，后者多半是代理/DNS 问题）。"""
+    text = f"{type(error).__name__}: {error}".lower()
+    if isinstance(error, TimeoutError) or "timed out" in text or "timeout" in text:
+        return REASON_TIMEOUT
+    return REASON_NETWORK
+
+
+def _http_once(url: str, *, proxy: str = "", timeout: int = 30,
+               headers: Optional[Dict[str, str]] = None,
+               body_limit: int = FAILURE_BODY_LIMIT, attempts: int = 1) -> FetchResult:
+    """发一次请求，**任何异常都吞掉**（失败回结构化结果）。"""
     import urllib.error
     import urllib.request
 
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AVHelper/0.7",
-        "Accept-Language": "zh-CN,zh;q=0.9,ja;q=0.8",
-        **(headers or {}),
-    })
+    req = urllib.request.Request(url, headers={**UA_HEADERS, **(headers or {})})
     try:
         with _proxy_opener(proxy).open(req, timeout=max(1, _to_int(timeout) or 30)) as res:
-            return res.read(), "", int(getattr(res, "status", 200) or 200)
+            blob = res.read()
+            code = _to_int(getattr(res, "status", 200)) or 200
+            reason = classify_block(blob[:body_limit].decode("utf-8", "replace"), code)
+            return FetchResult(url=url, status=code, body=blob, kind="http_status",
+                               reason=reason, attempts=attempts)
     except urllib.error.HTTPError as error:
-        return None, f"HTTP {error.code}", int(error.code or 0)
+        # ★ 失败正文必须留档：`HTTPError.read()` 能拿到拦截页正文，
+        #   老实现直接丢掉，于是"被 CF 拦"与"404"只能靠状态码猜。
+        blob = b""
+        try:
+            blob = error.read(body_limit) or b""
+        except Exception:                                       # pragma: no cover - 防御
+            blob = b""
+        code = _to_int(error.code)
+        reason = classify_block(blob.decode("utf-8", "replace"), code)
+        return FetchResult(url=url, status=code, body=None, error=f"HTTP {code}",
+                           kind="http_status", reason=reason, attempts=attempts)
     except Exception as error:                                  # noqa: BLE001 - 故意的
-        return None, f"{type(error).__name__}: {error}", 0
+        reason = _classify_transport(error)
+        return FetchResult(url=url, status=None, body=None,
+                           error=f"{type(error).__name__}: {error}",
+                           kind=reason, reason=reason, attempts=attempts)
+
+
+def http_fetch(url: str, *, proxy: str = "", timeout: int = 30,
+               headers: Optional[Dict[str, str]] = None, retries: int = HTTP_RETRIES,
+               body_limit: int = FAILURE_BODY_LIMIT, sleeper: Any = None) -> FetchResult:
+    """**唯一出站函数**：一次 GET（含重试），失败回结构化结果，**不抛异常**。
+
+    - 重试只针对 `RETRYABLE_STATUS` + 超时 + 连接类异常；退避 `attempt*3+2±1`。
+    - 重试之间**不绕过站点节流**：退避最小 1 秒、`javtxt_interval` 默认 2 秒，
+      同一 host 的重试不会比正常请求更密（`scraper.throttle()` 仍在每次尝试前调用）。
+    - `sleeper` 可注入（单测传 `lambda _s: None`，不真睡）。
+    """
+    tries = max(1, _to_int(retries) + 1)
+    sleep = sleeper or _SLEEP
+    last = FetchResult(url=url, kind=REASON_NETWORK, reason=REASON_NETWORK)
+    for index in range(tries):
+        if index:
+            sleep(_backoff_wait(index - 1))
+        last = _http_once(url, proxy=proxy, timeout=timeout, headers=headers,
+                          body_limit=body_limit, attempts=index + 1)
+        if last.ok:
+            return last
+        retryable = (last.status in RETRYABLE_STATUS
+                     or last.kind in (REASON_TIMEOUT, REASON_NETWORK))
+        if not retryable or index == tries - 1:
+            return last
+    return last
+
+
+def http_get(url: str, *, proxy: str = "", timeout: int = 30,
+             headers: Optional[Dict[str, str]] = None, retries: int = 0,
+             sleeper: Any = None) -> Tuple[Optional[bytes], str, int]:
+    """`http_fetch` 的**兼容外壳**：旧的三元组返回，默认**不重试**（retries=0）。
+
+    保留它是因为调用点与单测都按 `(body, error, status)` 写；新代码一律用 `http_fetch()`
+    （要多一份 `kind` / `reason` / `attempts`，并且要重试）。
+    """
+    got = http_fetch(url, proxy=proxy, timeout=timeout, headers=headers,
+                     retries=retries, sleeper=sleeper)
+    return got.body, got.error, got.status
 
 
 # 站点节流（同一站点两次请求之间的最小间隔；跨线程也要守住）
@@ -607,14 +836,17 @@ _SITE_LOCK = threading.Lock()
 
 
 def throttle(host: str, interval: float) -> float:
-    """把「对 `host` 的下一次请求」推迟到距上次 ≥`interval` 秒；返回实际等待秒数。"""
+    """把「对 `host` 的下一次请求」推迟到距上次 ≥`interval` 秒；返回实际等待秒数。
+
+    等待走 `_SLEEP`（与重试退避同一个注入点）：单测里节流与退避一起被换成空实现。
+    """
     wait = 0.0
     with _SITE_LOCK:
         now = time.monotonic()
         last = _SITE_LAST.get(host, 0.0)
         wait = max(0.0, float(interval or 0) - (now - last))
         if wait > 0:
-            time.sleep(wait)
+            _SLEEP(wait)
         _SITE_LAST[host] = time.monotonic()
     return wait
 
@@ -799,14 +1031,20 @@ def javtxt_variants(display_number: str) -> List[str]:
 
 
 def javtxt_lookup(opts: Dict[str, Any], number: str, *, store: Any = None,
-                  key: str = "") -> Dict[str, Any]:
+                  key: str = "", run_id: str = "") -> Dict[str, Any]:
     """Javtxt 一键取数：搜索（多变体 + 强校验）→ 详情页解析。
 
     返回 `{ok, status, vid, url, title_zh, title_jp, plot_zh, plot_jp, zh_is_machine, actors,
-    latency_ms, error, tried[]}`；`status` ∈ `ok` / `miss` / `error`。
+    latency_ms, error, reason, http_status, tried[]}`；`status` ∈ `ok` / `miss` / `error`。
+
+    **`miss` 与 `error` 的边界（0.8.0 修的那个最贵的 bug）**：
+    `miss` 只表示"我们真的读到了一张干净页面，站点就是没收录这个番号"；
+    只要没有任何一次尝试拿到干净页面（全是 429/5xx/超时/拦截页），就落 `error` +
+    `reason`（`REASON_*`）。老实现把两者都写成 `miss`，于是**被 CF 拦会被记成"站点收录缺口"**，
+    重试与换源策略全部做错。
 
     请求一律走 `opts['proxy']`，**每个站点请求之间 ≥`opts['javtxt_interval']`（默认 2s）**，
-    失败不抛异常（只回 error 文案并由调用方写 `scrape_log`）。
+    `http_fetch` 的重试退避（2±1 秒起）也不比它密；失败不抛异常（只回 error 文案并写 `scrape_log`）。
     """
     hosts = [str(h).rstrip("/") for h in (javtxt_lookup_hosts(opts))]
     proxy = str(_opt(opts, "proxy") or "")
@@ -817,47 +1055,96 @@ def javtxt_lookup(opts: Dict[str, Any], number: str, *, store: Any = None,
         "ok": False, "status": "miss", "vid": "", "url": "", "host": "",
         "title_zh": "", "title_jp": "", "plot_zh": "", "plot_jp": "",
         "zh_is_machine": False, "actors": [], "tried": [], "error": "",
-        "latency_ms": 0,
+        "reason": "", "http_status": 0, "latency_ms": 0,
     }
     target = emby.parse_av_number(number)
     target_norm = target.norm_key if target.matched else emby.canon_key(number)
+    # 只要有任何一次拿到"干净页面"（HTTP 成功且不是拦截页），"没有结果"就是真·收录缺口
+    clean_seen = False
+    detail_failed = False
 
     for variant in javtxt_variants(number):
         for host in hosts:
             throttle(host, interval)
             url = f"{host}/search?{urlencode({'type': 'id', 'q': variant})}"
-            body, error, _status = http_get(url, proxy=proxy, timeout=timeout)
-            result["tried"].append({"variant": variant, "host": host, "error": error})
-            if body is None:
-                result["error"] = error or "搜索结果为空"
+            got = http_fetch(url, proxy=proxy, timeout=timeout, retries=JAVTXT_RETRIES)
+            result["tried"].append({"variant": variant, "host": host, "error": got.error})
+            if not got.ok:
+                result["error"] = got.error or "搜索结果为空"
+                _remember_failure(result, got)
                 continue
-            cards = parse_javtxt_search(body.decode("utf-8", "replace"))
+            text = got.body.decode("utf-8", "replace")
+            blocked = classify_block(text[:FAILURE_BODY_LIMIT], got.status)
+            if blocked:
+                # 200 也可能是拦截页（CF 挑战就是 200）：正文强特征已经认出来了
+                result["error"] = f"命中拦截页（{blocked}）"
+                result["reason"] = blocked
+                result["http_status"] = _to_int(got.status)
+                continue
+            clean_seen = True
+            cards = parse_javtxt_search(text)
             hit = pick_javtxt_hit(cards, target_norm)
             if not hit:
                 continue
             throttle(host, interval)
-            detail_body, detail_error, _st = http_get(
-                f"{host}{hit['url']}", proxy=proxy, timeout=timeout)
-            if detail_body is None:
-                result["error"] = detail_error or "详情页拉取失败"
+            detail = http_fetch(f"{host}{hit['url']}", proxy=proxy, timeout=timeout,
+                                retries=JAVTXT_RETRIES)
+            if not detail.ok:
+                result["error"] = detail.error or "详情页拉取失败"
+                _remember_failure(result, detail)
+                detail_failed = True
                 continue
-            detail = parse_javtxt_detail(detail_body.decode("utf-8", "replace"))
-            result.update(detail)
+            detail_text = detail.body.decode("utf-8", "replace")
+            blocked = classify_block(detail_text[:FAILURE_BODY_LIMIT], detail.status)
+            if blocked:
+                result["error"] = f"详情页命中拦截页（{blocked}）"
+                _remember_failure(result, detail)
+                detail_failed = True
+                continue
+            parsed = parse_javtxt_detail(detail_text)
+            result.update(parsed)
             result.update({
                 "ok": True, "status": "ok", "vid": hit.get("id", ""),
                 "url": f"{host}{hit['url']}", "host": host, "error": "",
+                "reason": "", "http_status": _to_int(detail.status),
             })
             result["latency_ms"] = int((time.time() - started) * 1000)
             _log_source(store, SRC_JAVTXT, "ok", key or number,
-                        result["latency_ms"], "")
+                        result["latency_ms"], "", run_id=run_id)
             return result
 
     result["latency_ms"] = int((time.time() - started) * 1000)
-    if not result["error"]:
-        result["error"] = ""                    # 命中不到不是错误：站点收录缺口，交 MetaTube
+    if detail_failed:
+        # 站点上**有**这个番号（搜索页干净且命中），但详情页取不回来 → 是请求失败，不是收录缺口
+        result["status"] = "error"
+        if not result["error"]:
+            result["error"] = f"详情页取不到内容（{result['reason'] or '未知原因'}）"
+    elif clean_seen:
+        # 读到过干净页面 → 真·收录缺口：reason 清空（别让界面把它显示成"被拦"）
+        result["status"] = "miss"
+        result["reason"] = ""
+        result["error"] = ""
+    elif result["reason"]:
+        result["status"] = "error"
+        if not result["error"]:
+            result["error"] = f"请求失败（{result['reason']}）"
     _log_source(store, SRC_JAVTXT, result["status"], key or number,
-                result["latency_ms"], result["error"])
+                result["latency_ms"], result["error"], reason=result["reason"],
+                http_status=_to_int(result.get("http_status")), run_id=run_id)
     return result
+
+
+def _remember_failure(result: Dict[str, Any], got: FetchResult) -> None:
+    """把一次失败的 `reason`/`http_status` 收进结果（**首个原因优先**）。
+
+    只记第一个：多变体 × 多主机的循环里，最后一个失败通常是"另一个镜像也连不上"，
+    信息量不如第一个（真正的始作俑者）。
+    """
+    if not result.get("reason") and got.reason:
+        result["reason"] = got.reason
+        result["http_status"] = _to_int(got.status)
+    elif not result.get("http_status") and got.status:
+        result["http_status"] = _to_int(got.status)
 
 
 def javtxt_lookup_hosts(opts: Dict[str, Any]) -> Tuple[str, ...]:
@@ -1016,8 +1303,9 @@ def metatube_movie(item: Any) -> Dict[str, Any]:
     }
 
 
-def _metatube_fetch(opts: Dict[str, Any], url: str, timeout: int) -> Tuple[Optional[bytes], str, int]:
-    """打一次 MetaTube search，**带 S0b 定的重试口径**，返回 `(body, error, status)`。
+def _metatube_fetch(opts: Dict[str, Any], url: str, timeout: int
+                    ) -> Tuple[Optional[bytes], str, int, str]:
+    """打一次 MetaTube search，**带 S0b 定的重试口径**，返回 `(body, error, status, reason)`。
 
     S0b 实测的三条硬约束（别"优化"掉）：
 
@@ -1027,25 +1315,27 @@ def _metatube_fetch(opts: Dict[str, Any], url: str, timeout: int) -> Tuple[Optio
     3. **必须串行**：服务端对 30 源有硬 10 秒截止，并发只会一起失败；而且响应**完全不缓存**
        （31 个 200 里有 12 个不同 sha）。本模块所有 MetaTube 调用都是同步串行的一次调用。
 
+    0.8.0 的传输层改动：改走 `http_fetch(retries=0)` —— **重试口径仍在本函数里**（上一条 2），
+    只是顺带拿到了结构化 `reason` 与失败正文（拦截判定要用），并**避免双层重试**。
+
     `timeout` 必须 **≥25 秒**（默认 30）—— 服务端自己在等上游，给 10 秒会把"它还在正常等待"
     误判成超时。
     """
-    body, error, status = http_get(url, proxy=str(_opt(opts, "proxy") or ""), timeout=timeout)
-    if body is not None or status == 404:
-        return body, error, status
-    for wait in (1.0, 3.0):
-        if status and 400 <= status < 500:                      # 其它 4xx：同样是业务结论
-            break
-        time.sleep(wait)
-        body, error, status = http_get(url, proxy=str(_opt(opts, "proxy") or ""),
-                                       timeout=timeout)
-        if body is not None or status == 404:
-            break
-    return body, error, status
+    proxy = str(_opt(opts, "proxy") or "")
+    got = http_fetch(url, proxy=proxy, timeout=timeout, retries=0)
+    if not got.ok and got.status != 404:
+        for wait in (1.0, 3.0):
+            if got.status and 400 <= got.status < 500:          # 其它 4xx：同样是业务结论
+                break
+            _SLEEP(wait)
+            got = http_fetch(url, proxy=proxy, timeout=timeout, retries=0)
+            if got.ok or got.status == 404:
+                break
+    return got.body, got.error, got.status, got.reason
 
 
 def metatube_lookup(opts: Dict[str, Any], number: str, *, store: Any = None,
-                    key: str = "") -> Dict[str, Any]:
+                    key: str = "", run_id: str = "") -> Dict[str, Any]:
     """MetaTube 取数：搜索 → **强校验** → 提取（概述兜底 + javdb 挂掉时的骨架兜底）。
 
     只打 `/v1/movies/search?q=`：**永远用默认 `lazy=true`**（`lazy=false` 对 7 个命中 7/7 全 500）、
@@ -1061,8 +1351,10 @@ def metatube_lookup(opts: Dict[str, Any], number: str, *, store: Any = None,
     整源不可用（全 404 / 连不上）时**返回空 + 记 `scrape_log(status='error')`，不抛异常**：
     S0b 提醒 JAV321 上游 main 已删目录，将来容器换版本会让这条源突然掉一半命中。
 
-    返回 `{ok, status, movie{…}, plot_jp, title_jp, candidates, mismatch, latency_ms, error}`；
-    `status` ∈ `ok` / `miss` / `mismatch` / `error` / `empty`（404 = 业务空值）。
+    返回 `{ok, status, movie{…}, plot_jp, title_jp, candidates, mismatch, latency_ms, error,
+    reason, http_status}`；`status` ∈ `ok` / `miss` / `mismatch` / `error` / `empty`
+    （404 = 业务空值）；`reason` 是 `REASON_*`（**HTTP 200 但正文是拦截页/不是 JSON 时，
+    分别记 `cloudflare_challenge` / `parse_error`，不再笼统写成"返回不是合法 JSON"**）。
     """
     base = str(_opt(opts, "metatube_base") or "").rstrip("/")
     timeout = _to_int(_opt(opts, "metatube_timeout")) or METATUBE_TIMEOUT
@@ -1070,44 +1362,60 @@ def metatube_lookup(opts: Dict[str, Any], number: str, *, store: Any = None,
     out: Dict[str, Any] = {
         "ok": False, "status": "miss", "plot_jp": "", "title_jp": "", "movie": {},
         "provider": "", "id": "", "candidates": 0, "mismatch": False,
-        "latency_ms": 0, "error": "",
+        "latency_ms": 0, "error": "", "reason": "", "http_status": 0,
     }
     if not base:
         out["status"] = "error"
         out["error"] = "未配置 MetaTube 地址"
+        out["reason"] = ""                      # 未配置不是请求失败：别算进失败率
         return out
     target = emby.parse_av_number(number)
     target_norm = target.norm_key if target.matched else emby.canon_key(number)
     url = f"{base}/v1/movies/search?{urlencode({'q': number})}"      # 只带 q；不要 provider=
-    body, error, status = _metatube_fetch(opts, url, timeout)
+    body, error, status, reason = _metatube_fetch(opts, url, timeout)
     if body is None:
         # 404 = 业务空值（30 个源都没收录），记 miss 而不是 error，也不进退避重试
         out.update({
             "status": "empty" if status == 404 else "error",
             "error": "" if status == 404 else (error or "请求失败"),
+            "reason": "" if status == 404 else (reason or REASON_UNEXPECTED),
+            "http_status": 0 if status == 404 else _to_int(status),
             "latency_ms": int((time.time() - started) * 1000),
         })
         _log_source(store, SRC_METATUBE, out["status"], key or number, out["latency_ms"],
-                    out["error"])
+                    out["error"], reason=out["reason"], http_status=out["http_status"],
+                    run_id=run_id)
         return out
+    text = body.decode("utf-8", "replace")
+    blocked = classify_block(text[:FAILURE_BODY_LIMIT], status)
     try:
-        payload = json.loads(body.decode("utf-8", "replace"))
+        payload = json.loads(text)
     except ValueError:
-        out.update({"status": "error", "error": "返回不是合法 JSON",
-                    "latency_ms": int((time.time() - started) * 1000)})
-        _log_source(store, SRC_METATUBE, "error", key or number, out["latency_ms"], out["error"])
+        out.update({
+            "status": "error",
+            "error": (f"命中拦截页（{blocked}）" if blocked else "返回不是合法 JSON"),
+            "reason": blocked or REASON_PARSE,
+            "http_status": _to_int(status),
+            "latency_ms": int((time.time() - started) * 1000),
+        })
+        _log_source(store, SRC_METATUBE, "error", key or number, out["latency_ms"],
+                    out["error"], reason=out["reason"], http_status=out["http_status"],
+                    run_id=run_id)
         return out
     items = payload.get("data") if isinstance(payload, dict) else payload
     hit, count, mismatch = pick_metatube_hit(items, target_norm)
     out["candidates"] = count
     out["mismatch"] = mismatch
+    out["http_status"] = _to_int(status)
     if hit is None:
         out["status"] = "mismatch" if mismatch else "miss"
         out["error"] = (f"返回 {count} 条候选全不同号（MetaTube 查不到时会返回随机结果，已拦截）"
                         if mismatch else "")
+        out["reason"] = REASON_NO_USABLE
         out["latency_ms"] = int((time.time() - started) * 1000)
         _log_source(store, SRC_METATUBE, out["status"], key or number, out["latency_ms"],
-                    out["error"])
+                    out["error"], reason=out["reason"], http_status=out["http_status"],
+                    run_id=run_id)
         return out
     movie = metatube_movie(hit)
     out["movie"] = movie
@@ -1118,9 +1426,12 @@ def metatube_lookup(opts: Dict[str, Any], number: str, *, store: Any = None,
     usable = bool(movie["title"] or movie["maker"] or movie["cover_url"] or movie["summary"])
     out["ok"] = usable
     out["status"] = "ok" if usable else "miss"
+    if not usable:
+        out["reason"] = REASON_NO_USABLE
     out["latency_ms"] = int((time.time() - started) * 1000)
     _log_source(store, SRC_METATUBE, out["status"], key or number, out["latency_ms"],
-                "" if usable else "命中同号条目但所有可用字段都为空")
+                "" if usable else "命中同号条目但所有可用字段都为空",
+                reason=out["reason"], http_status=out["http_status"], run_id=run_id)
     return out
 
 
@@ -1161,13 +1472,21 @@ def metatube_fill(skeleton: Dict[str, Any], movie: Dict[str, Any]) -> List[str]:
 # ---------------------------------------------------------------------------
 
 def _log_source(store: Any, source: str, status: str, key: str = "",
-                latency_ms: int = 0, error: str = "") -> None:
-    """往 `scrape_log` 记一条；`store` 缺失/不可用时静默跳过（读侧不该因为日志挂掉）。"""
+                latency_ms: int = 0, error: str = "", *, reason: str = "",
+                http_status: int = 0, run_id: str = "") -> None:
+    """往 `scrape_log` 记一条；`store` 缺失/不可用时静默跳过（读侧不该因为日志挂掉）。
+
+    `reason`（机器可读，`REASON_*`）与 `http_status` 是 0.8.0 加的：`status` 只能回答
+    "成没成"，排障要回答"为什么" —— 两者都要落在库里，才能按原因分组看趋势
+    （`parse_error` 连续上涨 = 站点改版；`cloudflare_challenge` 上涨 = 被拦）。
+    `run_id` 把同一次刮削的各源记录串成一组（`store.scrape_log_run()` 取回）。
+    """
     if store is None or not hasattr(store, "scrape_log_add"):
         return
     try:
         store.scrape_log_add(source, status, key=key, latency_ms=_to_int(latency_ms),
-                             error_summary=str(error or "")[:500])
+                             error_summary=str(error or "")[:500], reason=str(reason or ""),
+                             http_status=_to_int(http_status), run_id=str(run_id or ""))
     except Exception as error_obj:                              # pragma: no cover - 防御
         logger.warning(f"AVHelper 写 scrape_log 失败（{source}/{status}）：{error_obj}")
 
@@ -1217,12 +1536,16 @@ def _skeleton_from_raw(raw: Any) -> Dict[str, Any]:
 
 
 def javdb_skeleton(cli: Any, number: str, *, opts: Optional[Dict[str, Any]] = None,
-                   store: Any = None, key: str = "", raw: Any = None) -> Dict[str, Any]:
+                   store: Any = None, key: str = "", raw: Any = None,
+                   run_id: str = "") -> Dict[str, Any]:
     """取 javdb 骨架（标题/发行日/时长/片商/系列/导演/评分/演员/标签/封面）。
 
     `raw` 非空时**直接用它还原骨架、不调 javdb**（契约 §5.3「只补缺不重抓」：
     Tier1 重试时 `meta.raw_json['javdb']` 已存在就跳过这次调用）。
     调用走 `cli.detail(number)`（`client.JavdbClient._run()` 的既有失败留痕/冷却都在里面）。
+
+    javdb 走**子进程**，拿不到 HTTP 状态码 → 机器原因只能从失败文案反推
+    （`reason_from_text()`）；反推不出来给 `unexpected`，**绝不猜成"站点没收录"**。
     """
     options = opts or {}
     if raw:
@@ -1237,7 +1560,8 @@ def javdb_skeleton(cli: Any, number: str, *, opts: Optional[Dict[str, Any]] = No
             detail = getter(number)
         except Exception as error:                              # noqa: BLE001 - 门面之外不抛
             _log_source(store, SRC_JAVDB, "error", key or number,
-                        int((time.time() - started) * 1000), f"{type(error).__name__}: {error}")
+                        int((time.time() - started) * 1000), f"{type(error).__name__}: {error}",
+                        reason=reason_from_text(error, REASON_UNEXPECTED), run_id=run_id)
             detail = None
     latency = int((time.time() - started) * 1000)
     if not isinstance(detail, dict) or not detail:
@@ -1249,9 +1573,11 @@ def javdb_skeleton(cli: Any, number: str, *, opts: Optional[Dict[str, Any]] = No
             except Exception:                                   # pragma: no cover - 防御
                 reason = ""
         reason = reason or (options.get("javdb_error") or "javdb 未返回详情")
-        _log_source(store, SRC_JAVDB, "error", key or number, latency, reason)
+        _log_source(store, SRC_JAVDB, "error", key or number, latency, reason,
+                    reason=reason_from_text(reason, REASON_UNEXPECTED), run_id=run_id)
         return {
             "ok": False, "error": reason, "latency_ms": latency, "display_number": number,
+            "reason": reason_from_text(reason, REASON_UNEXPECTED),
         }
     skeleton = _skeleton_from_raw(detail)
     skeleton.update({"ok": True, "error": "", "latency_ms": latency, "from_cache": False})
@@ -1262,7 +1588,7 @@ def javdb_skeleton(cli: Any, number: str, *, opts: Optional[Dict[str, Any]] = No
     # 而骨架用的是本模块的键名（`title_jp`/`maker`…）。少了这一步，`raw_json['javdb']`
     # 会存成一份没有标题的空壳，Tier1「只补简介不重抓」就会把整条片子退化成 `missing_core`。
     skeleton["raw"] = detail
-    _log_source(store, SRC_JAVDB, "ok", key or number, latency, "")
+    _log_source(store, SRC_JAVDB, "ok", key or number, latency, "", run_id=run_id)
     return skeleton
 
 
@@ -1472,7 +1798,7 @@ def _run_cli(cli: Any, args: Sequence[str], *, timeout: int = 60,
 
 
 def javdb_assets(cli: Any, number: str, *, opts: Optional[Dict[str, Any]] = None,
-                 store: Any = None, key: str = "") -> List[Dict[str, Any]]:
+                 store: Any = None, key: str = "", run_id: str = "") -> List[Dict[str, Any]]:
     """`javdb assets list <number> --json` → 资产元数据列表（失败回空列表 + 留痕）。
 
     这一步**只用元数据**（type/url/width/height），真正下载走 `javdb_assets_download()`。
@@ -1484,23 +1810,26 @@ def javdb_assets(cli: Any, number: str, *, opts: Optional[Dict[str, Any]] = None
     code, out, err = _run_cli(cli, ["assets", "list", str(number), "--json"], timeout=timeout)
     latency = int((time.time() - started) * 1000)
     if code != 0:
-        _log_source(store, SRC_IMAGE, "error", key or number, latency,
-                    f"assets list 退出码 {code}：{err.decode('utf-8', 'replace')[:200]}")
+        detail = f"assets list 退出码 {code}：{err.decode('utf-8', 'replace')[:200]}"
+        _log_source(store, SRC_IMAGE, "error", key or number, latency, detail,
+                    reason=reason_from_text(detail, REASON_UNEXPECTED), run_id=run_id)
         return []
     try:
         payload = json.loads(out.decode("utf-8", "replace") or "[]")
     except ValueError:
-        _log_source(store, SRC_IMAGE, "error", key or number, latency, "assets list 输出不是 JSON")
+        _log_source(store, SRC_IMAGE, "error", key or number, latency, "assets list 输出不是 JSON",
+                    reason=REASON_PARSE, run_id=run_id)
         return []
     assets = parse_assets_list(payload)
     _log_source(store, SRC_IMAGE, "ok" if assets else "miss", key or number, latency,
-                "" if assets else "assets list 为空")
+                "" if assets else "assets list 为空",
+                reason="" if assets else REASON_NO_USABLE, run_id=run_id)
     return assets
 
 
 def javdb_assets_download(cli: Any, number: str, assets: Sequence[Dict[str, Any]],
                           *, opts: Optional[Dict[str, Any]] = None, store: Any = None,
-                          key: str = "") -> Dict[str, bytes]:
+                          key: str = "", run_id: str = "") -> Dict[str, bytes]:
     """下载指定的图片资产，返回 `{url: 字节}`。
 
     ★ **`assets download` 只认 `TYPE<TAB>URL` 管道格式**（实测：喂 JSON 直接
@@ -1519,7 +1848,8 @@ def javdb_assets_download(cli: Any, number: str, assets: Sequence[Dict[str, Any]
     selectors = [str(_to_int(a.get("idx"))) for a in rows if _to_int(a.get("idx")) > 0]
     if len(selectors) != len(rows):                             # 拿不到位置就不下载，绝不猜顺序
         _log_source(store, SRC_IMAGE, "error", key or number, 0,
-                    "资产缺少 1-based 位置（assets list --json 未给出），跳过下载")
+                    "资产缺少 1-based 位置（assets list --json 未给出），跳过下载",
+                    reason=REASON_PARSE, run_id=run_id)
         return {}
     timeout = _to_int(_opt(opts, "javdb_timeout")) or 60
     started = time.time()
@@ -1527,15 +1857,17 @@ def javdb_assets_download(cli: Any, number: str, assets: Sequence[Dict[str, Any]
         cli, ["assets", "list", str(number), "--type", kind, ",".join(selectors)],
         timeout=timeout)
     if code != 0:
+        detail = f"assets list(pipe) 退出码 {code}：{err.decode('utf-8', 'replace')[:200]}"
         _log_source(store, SRC_IMAGE, "error", key or number,
-                    int((time.time() - started) * 1000),
-                    f"assets list(pipe) 退出码 {code}：{err.decode('utf-8', 'replace')[:200]}")
+                    int((time.time() - started) * 1000), detail,
+                    reason=reason_from_text(detail, REASON_UNEXPECTED), run_id=run_id)
         return {}
     lines = [ln for ln in out.decode("utf-8", "replace").splitlines() if _ASSET_LINE.match(ln)]
     if len(lines) != len(selectors):
+        detail = f"管道记录数 {len(lines)} ≠ 选择器数 {len(selectors)}，放弃这一批下载"
         _log_source(store, SRC_IMAGE, "error", key or number,
-                    int((time.time() - started) * 1000),
-                    f"管道记录数 {len(lines)} ≠ 选择器数 {len(selectors)}，放弃这一批下载")
+                    int((time.time() - started) * 1000), detail,
+                    reason=REASON_PARSE, run_id=run_id)
         return {}
     tmp = tempfile.mkdtemp(prefix=_TMP_PREFIX)
     try:
@@ -1554,9 +1886,11 @@ def javdb_assets_download(cli: Any, number: str, assets: Sequence[Dict[str, Any]
             if blob:
                 result[str(asset.get("url"))] = blob
         latency = int((time.time() - started) * 1000)
+        detail = "" if result else (
+            f"下载了 0 张（退出码 {code}）：{dl_err.decode('utf-8', 'replace')[:200]}")
         _log_source(store, SRC_IMAGE, "ok" if result else "error", key or number, latency,
-                    "" if result else
-                    f"下载了 0 张（退出码 {code}）：{dl_err.decode('utf-8', 'replace')[:200]}")
+                    detail, reason="" if result else reason_from_text(detail, REASON_UNEXPECTED),
+                    run_id=run_id)
         return result
     finally:
         _shutil_rmtree(tmp)
@@ -1857,7 +2191,7 @@ def build_people(original: Any, actors: Any, director: Any) -> List[Dict[str, An
 
 def translate_fields(*, display_number: str, title_jp: str, plot_jp: str,
                      actors: Any, opts: Optional[Dict[str, Any]],
-                     store: Any = None, key: str = "") -> Dict[str, Any]:
+                     store: Any = None, key: str = "", run_id: str = "") -> Dict[str, Any]:
     """把日文标题/简介翻成中文（只有**确实拿到日文**才调 LLM）。
 
     契约 §3.4 / v4.1 §7：`items=[{'number','title_jp','plot_jp','glossary'}]`，
@@ -1895,7 +2229,8 @@ def translate_fields(*, display_number: str, title_jp: str, plot_jp: str,
         result = translator.translate_batch([item], **kwargs)
     except Exception as error:                                  # noqa: BLE001 - 故意的
         _log_source(store, SRC_LLM, "error", key or display_number,
-                    int((time.time() - started) * 1000), f"{type(error).__name__}: {error}")
+                    int((time.time() - started) * 1000), f"{type(error).__name__}: {error}",
+                    reason=REASON_UNEXPECTED, run_id=run_id)
         blank["error"] = f"{type(error).__name__}: {error}"
         return blank
     entry = {}
@@ -1913,7 +2248,8 @@ def translate_fields(*, display_number: str, title_jp: str, plot_jp: str,
         "status": status, "error": str((entry or {}).get("error") or ""), "called": True,
     }
     _log_source(store, SRC_LLM, "ok" if status == "done" else status, key or display_number,
-                int((time.time() - started) * 1000), out["error"])
+                int((time.time() - started) * 1000), out["error"],
+                reason="" if status == "done" else REASON_UNEXPECTED, run_id=run_id)
     return out
 
 
@@ -1936,6 +2272,10 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
     options = dict(opts or {})
     # `log_sources=False` 时整条取数链一行日志都不写（preview 的纯只读调用方用得上）
     logs = store if bool(_opt(options, "log_sources", True)) else None
+    # 一次刮削 = 一个 run：本次各源的 `scrape_log` 记录都带同一个 `run_id`，
+    # 排障时用 `store.scrape_log_run(run_id)` 一次取回"当时每个源各发生了什么"。
+    # `opts['run_id']` 可注入（单测/工装要固定它）。
+    run_id = str(_opt(options, "run_id") or "") or uuid.uuid4().hex[:12]
     warnings: List[str] = []
     sources: Dict[str, Any] = {
         SRC_JAVDB: {"status": "skipped"}, SRC_JAVTXT: {"status": "skipped"},
@@ -1977,7 +2317,7 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
                               "fetched_at": (row.get("javdb") or {}).get("fetched_at", "")}
     else:
         skeleton = javdb_skeleton(cli, display_number, opts=options, store=logs, key=key,
-                                  raw=cached_javdb if cached_javdb else None)
+                                  raw=cached_javdb if cached_javdb else None, run_id=run_id)
     if not skeleton.get("ok"):
         skeleton = dict(skeleton)
         skeleton.setdefault("display_number", display_number)
@@ -1991,7 +2331,8 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
         elif str(sources.get(SRC_JAVDB, {}).get("status")) == "cache_miss":
             warnings.append(f"缓存里没有 javdb 详情（{skeleton.get('error', '')}）")
         else:
-            sources[SRC_JAVDB] = {"status": "error", "error": skeleton.get("error", "")}
+            sources[SRC_JAVDB] = {"status": "error", "error": skeleton.get("error", ""),
+                                  "reason": skeleton.get("reason", REASON_UNEXPECTED)}
             warnings.append(f"javdb 取数失败：{skeleton.get('error', '')}")
     elif not cached_javdb:
         sources[SRC_JAVDB] = {"status": "ok", "latency_ms": skeleton.get("latency_ms", 0)}
@@ -2017,12 +2358,17 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
                           "zh_is_machine": False, "actors": [], "vid": "", "url": "",
                           "tried": [], "latency_ms": 0}
             else:
-                javtxt = javtxt_lookup(options, display_number, store=logs, key=key)
+                javtxt = javtxt_lookup(options, display_number, store=logs, key=key,
+                                       run_id=run_id)
         javtxt_meta = javtxt
         sources[SRC_JAVTXT] = {
             "status": javtxt.get("status", "miss"), "latency_ms": javtxt.get("latency_ms", 0),
             "url": javtxt.get("url", ""), "error": javtxt.get("error", ""),
         }
+        if javtxt.get("reason"):
+            sources[SRC_JAVTXT]["reason"] = javtxt.get("reason")
+        if javtxt.get("http_status"):
+            sources[SRC_JAVTXT]["http_status"] = _to_int(javtxt.get("http_status"))
         if javtxt.get("from_cache"):
             sources[SRC_JAVTXT]["from_cache"] = True
         if javtxt.get("ok"):
@@ -2050,7 +2396,13 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
                 plot_zh = ""
                 plot_source = ""
         elif javtxt.get("status") == "error":
-            warnings.append(f"Javtxt 请求失败：{javtxt.get('error', '')}")
+            # 被拦与"站点挂了/改版了"处置不同：前者要冷却 + 换 UA，后者要修解析器
+            if str(javtxt.get("reason") or "") in (REASON_CF_CHALLENGE, REASON_CF_BLOCKED,
+                                                  REASON_AGE, REASON_IP_BANNED, REASON_GEO):
+                warnings.append(f"Javtxt 被站点拦截（{javtxt.get('reason')}）："
+                                f"{javtxt.get('error', '')} —— 交 MetaTube 兜底，稍后重试")
+            else:
+                warnings.append(f"Javtxt 请求失败：{javtxt.get('error', '')}")
         else:
             warnings.append("Javtxt 无同号结果（站点收录缺口，交 MetaTube 兜底）")
 
@@ -2063,13 +2415,17 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
         # dry-run 不打 MetaTube：它恒定 ~10 秒且**不缓存**，108 条就是 18 分钟纯等待
         sources[SRC_METATUBE] = {"status": "skipped", "why": "cache_only dry-run"}
     elif (not plot_zh or need_core) and "metatube" in plot_sources:
-        mt = metatube_lookup(options, display_number, store=logs, key=key)
+        mt = metatube_lookup(options, display_number, store=logs, key=key, run_id=run_id)
         metatube_meta = mt
         sources[SRC_METATUBE] = {
             "status": mt.get("status", "miss"), "latency_ms": mt.get("latency_ms", 0),
             "provider": mt.get("provider", ""), "id": mt.get("id", ""),
             "candidates": mt.get("candidates", 0), "error": mt.get("error", ""),
         }
+        if mt.get("reason"):
+            sources[SRC_METATUBE]["reason"] = mt.get("reason")
+        if mt.get("http_status"):
+            sources[SRC_METATUBE]["http_status"] = _to_int(mt.get("http_status"))
         if mt.get("movie"):
             plot_before = plot_jp
             filled = metatube_fill(skeleton, mt["movie"])
@@ -2104,7 +2460,7 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
             display_number=display_number,
             title_jp=title_jp if need_title else "",
             plot_jp=plot_jp if need_plot else "",
-            actors=skeleton.get("actors"), opts=options, store=logs, key=key)
+            actors=skeleton.get("actors"), opts=options, store=logs, key=key, run_id=run_id)
         if tr.get("title_zh"):
             title_zh = tr["title_zh"]
         if tr.get("plot_zh"):
@@ -2134,6 +2490,7 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
     return {
         "key": key,
         "cli": cli,
+        "run_id": run_id,
         "display_number": display,
         "javdb_id": str(skeleton.get("javdb_id") or ""),
         "title_jp": title_jp,
@@ -2450,13 +2807,13 @@ def _fetch_cover_bytes(url: Any, opts: Dict[str, Any]) -> Tuple[bytes, str]:
         if blob:
             return bytes(blob), ""
         return b"", "imgproxy.fetch 返回空（不在白名单 / 站点 4xx / 代理不通）"
-    body, error, _status = http_get(text, proxy=str(_opt(opts, "proxy") or ""),
-                                    timeout=_to_int(_opt(opts, "http_timeout")) or 30)
-    if body is None:
-        return b"", f"http_get 失败：{error}"
-    if not is_image_bytes(body):
+    got = http_fetch(text, proxy=str(_opt(opts, "proxy") or ""),
+                     timeout=_to_int(_opt(opts, "http_timeout")) or 30, retries=1)
+    if not got.ok:
+        return b"", f"取图失败（{got.reason or got.kind}）：{got.error}"
+    if not is_image_bytes(got.body):
         return b"", "拿到的不是图片（缺 imgproxy 时无法解 XOR/Referer，已丢弃）"
-    return body, ""
+    return got.body, ""
 
 
 def _upload_images(emby_client: Any, store: Any, emby_id: str, target: Dict[str, Any],
@@ -3451,6 +3808,8 @@ def sources_selfcheck(store: Any, cli: Any, opts: Optional[Dict[str, Any]] = Non
     ensure_namemap(store, options)
     stamp = _now(options)
     out: List[Dict[str, Any]] = []
+    # 自检也是一次 run：这一组探针记录带同一个 id，便于"按一次自检"回溯
+    run_id = str(_opt(options, "run_id") or "") or uuid.uuid4().hex[:12]
 
     started = time.time()
     detail = None
@@ -3467,7 +3826,7 @@ def sources_selfcheck(store: Any, cli: Any, opts: Optional[Dict[str, Any]] = Non
     latency = int((time.time() - started) * 1000)
     if isinstance(detail, dict) and detail:
         out.append({"source": SRC_JAVDB, "status": "ok", "latency_ms": latency, "error": "",
-                    "checked_at": stamp,
+                    "reason": "", "checked_at": stamp,
                     "detail": {"number": detail.get("number"), "title": bool(detail.get("title"))}})
     else:
         # 失败原因优先用 client 记下的真话（`JavdbClient.last_error` 里有子进程的 stderr 摘要：
@@ -3481,6 +3840,7 @@ def sources_selfcheck(store: Any, cli: Any, opts: Optional[Dict[str, Any]] = Non
         out.append({"source": SRC_JAVDB, "status": "error", "latency_ms": latency,
                     "error": reason or f"javdb 没有 {SELFCHECK_NUMBER} 的详情"
                                        f"（番号下架 / 站点改版 / 被风控）",
+                    "reason": reason_from_text(reason, REASON_UNEXPECTED),
                     "checked_at": stamp, "detail": {}})
 
     for source, probe in ((SRC_JAVTXT, _probe_javtxt), (SRC_METATUBE, _probe_metatube)):
@@ -3498,19 +3858,23 @@ def sources_selfcheck(store: Any, cli: Any, opts: Optional[Dict[str, Any]] = Non
                 "latency_ms": _to_int((result or {}).get("latency_ms")) or
                 int((time.time() - started) * 1000),
                 "error": str((result or {}).get("error") or ""),
+                "reason": "" if ok else REASON_UNEXPECTED,
                 "detail": {"model": (result or {}).get("model", "")},
             })
         except Exception as error:                              # noqa: BLE001 - 故意的
             llm.update({"status": "error",
                         "latency_ms": int((time.time() - started) * 1000),
-                        "error": f"{type(error).__name__}: {error}"})
+                        "error": f"{type(error).__name__}: {error}",
+                        "reason": REASON_UNEXPECTED})
     else:
         llm["error"] = "translator 模块缺失（翻译链不可用，不影响取数）"
     out.append(llm)
 
     for row in out:
         _log_source(store, row["source"], row["status"], SELFCHECK_NUMBER,
-                    row.get("latency_ms", 0), row.get("error", ""))
+                    row.get("latency_ms", 0), row.get("error", ""),
+                    reason=str(row.get("reason") or ""),
+                    http_status=_to_int(row.get("http_status")), run_id=run_id)
     return out
 
 
@@ -3523,6 +3887,9 @@ def _probe_javtxt(opts: Dict[str, Any], store: Any, stamp: str) -> Dict[str, Any
         "status": "ok" if ok else str(result.get("status") or "miss"),
         "latency_ms": result.get("latency_ms", 0),
         "error": result.get("error", ""),
+        # 0.8.0：自检也要能回答"miss 还是被拦" —— 老版把两者都显示成 miss
+        "reason": str(result.get("reason") or ""),
+        "http_status": _to_int(result.get("http_status")),
         "checked_at": stamp,
         "detail": {"url": result.get("url", ""), "vid": result.get("vid", ""),
                    "title_zh": bool(result.get("title_zh")),
@@ -3538,6 +3905,8 @@ def _probe_metatube(opts: Dict[str, Any], store: Any, stamp: str) -> Dict[str, A
         "status": str(result.get("status") or "miss"),
         "latency_ms": result.get("latency_ms", 0),
         "error": result.get("error", ""),
+        "reason": str(result.get("reason") or ""),
+        "http_status": _to_int(result.get("http_status")),
         "checked_at": stamp,
         "detail": {"candidates": result.get("candidates", 0),
                    "mismatch": result.get("mismatch", False),
@@ -3648,10 +4017,11 @@ def _image_bytes(url: str, opts: Dict[str, Any]) -> Tuple[bytes, str]:
             if blob:
                 return bytes(blob), ""
         return b"", last
-    body, error, _status = http_get(url, proxy=str(_opt(opts, "proxy") or ""),
-                                     timeout=_to_int(_opt(opts, "http_timeout")) or 30)
-    if body is None:
-        return b"", f"http_get 失败：{error}"
+    got = http_fetch(url, proxy=str(_opt(opts, "proxy") or ""),
+                     timeout=_to_int(_opt(opts, "http_timeout")) or 30, retries=1)
+    if not got.ok:
+        return b"", f"取头像失败（{got.reason or got.kind}）：{got.error}"
+    body = got.body
     if not is_image_bytes(body):
         return b"", "拿到的不是图片（缺 imgproxy 时无法解 XOR/Referer，已丢弃）"
     return body, ""

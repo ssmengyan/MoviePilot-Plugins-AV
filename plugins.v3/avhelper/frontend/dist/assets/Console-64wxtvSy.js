@@ -8104,30 +8104,39 @@ const _hoisted_29$1 = {
 };
 const _hoisted_30$1 = { class: "avh-table" };
 const _hoisted_31$1 = ["title"];
-const _hoisted_32$1 = { class: "avh-scrape__secttl" };
-const _hoisted_33$1 = {
+const _hoisted_32$1 = {
+  key: 0,
+  class: "avh-scrape__reason"
+};
+const _hoisted_33$1 = { class: "avh-scrape__secttl" };
+const _hoisted_34$1 = {
   key: 0,
   class: "avh-scrape__hint"
 };
-const _hoisted_34$1 = {
+const _hoisted_35$1 = {
   key: 4,
   class: "avh-tablewrap"
 };
-const _hoisted_35$1 = { class: "avh-table" };
-const _hoisted_36$1 = ["title"];
+const _hoisted_36$1 = { class: "avh-table" };
 const _hoisted_37$1 = {
+  key: 0,
+  class: "avh-scrape__reason ms-1"
+};
+const _hoisted_38$1 = ["title"];
+const _hoisted_39$1 = {
   key: 5,
   class: "avh-scrape__hint"
 };
-const _hoisted_38$1 = {
+const _hoisted_40$1 = {
   key: 6,
   class: "avh-scrape__secttl"
 };
-const _hoisted_39$1 = {
+const _hoisted_41$1 = {
   key: 7,
   class: "avh-tablewrap"
 };
-const _hoisted_40$1 = { class: "avh-table" };
+const _hoisted_42$1 = { class: "avh-table" };
+const _hoisted_43$1 = ["title"];
 const {computed: computed$5,ref: ref$6} = await importShared('vue');
 const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
   __name: "ScrapeView",
@@ -8544,6 +8553,18 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
     function sourceError(row) {
       return text(row?.error ?? row?.error_summary) || "—";
     }
+    function sourceReason(row) {
+      return text(row?.reason);
+    }
+    function reasonText(row) {
+      const counts = row?.reasons;
+      if (!counts || typeof counts !== "object") return "—";
+      const pairs = Object.entries(counts).filter(([, n]) => Number(n) > 0).sort((a, b) => Number(b[1]) - Number(a[1]));
+      if (!pairs.length) return "—";
+      const head = pairs.slice(0, 3).map(([key, n]) => `${key}×${Number(n)}`);
+      const rest = pairs.length - head.length;
+      return rest > 0 ? `${head.join("、")} +${rest}` : head.join("、");
+    }
     function sourceCheckedAt(row) {
       return shortTime(row?.checked_at ?? row?.updated_at ?? row?.at ?? row?.time ?? row?.created_at);
     }
@@ -8934,7 +8955,10 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
                     _createElementVNode$6("td", {
                       class: "avh-table__ellipsis",
                       title: sourceError(row)
-                    }, _toDisplayString$6(sourceError(row)), 9, _hoisted_31$1),
+                    }, [
+                      sourceReason(row) ? (_openBlock$6(), _createElementBlock$6("code", _hoisted_32$1, _toDisplayString$6(sourceReason(row)), 1)) : _createCommentVNode$5("", true),
+                      _createTextVNode$4(" " + _toDisplayString$6(sourceError(row)), 1)
+                    ], 8, _hoisted_31$1),
                     _createElementVNode$6("td", null, _toDisplayString$6(sourceCheckedAt(row)), 1)
                   ]);
                 }), 128))
@@ -8945,9 +8969,9 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
             text: "还没有数据源状态",
             hint: "GET /scrape/status 的 sources 为空（接口没上线，或后端还没跑过自检）"
           })),
-          _createElementVNode$6("div", _hoisted_32$1, [
+          _createElementVNode$6("div", _hoisted_33$1, [
             _createElementVNode$6("span", null, "最近流水（" + _toDisplayString$6(logItems.value.length) + "）", 1),
-            logSummary.value.length ? (_openBlock$6(), _createElementBlock$6("span", _hoisted_33$1, "summary " + _toDisplayString$6(logSummary.value.length) + " 组", 1)) : _createCommentVNode$5("", true),
+            logSummary.value.length ? (_openBlock$6(), _createElementBlock$6("span", _hoisted_34$1, "summary " + _toDisplayString$6(logSummary.value.length) + " 组", 1)) : _createCommentVNode$5("", true),
             _createVNode$5(_component_v_btn, {
               variant: "text",
               size: "x-small",
@@ -8973,8 +8997,8 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
             ]),
             _: 1
           })) : _createCommentVNode$5("", true),
-          logItems.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_34$1, [
-            _createElementVNode$6("table", _hoisted_35$1, [
+          logItems.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_35$1, [
+            _createElementVNode$6("table", _hoisted_36$1, [
               _cache[20] || (_cache[20] = _createElementVNode$6("colgroup", null, [
                 _createElementVNode$6("col", { style: { "width": "120px" } }),
                 _createElementVNode$6("col", { style: { "width": "88px" } }),
@@ -9009,28 +9033,30 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
                           _createTextVNode$4(_toDisplayString$6(text(row?.status) || "—"), 1)
                         ]),
                         _: 2
-                      }, 1032, ["color"])
+                      }, 1032, ["color"]),
+                      sourceReason(row) ? (_openBlock$6(), _createElementBlock$6("code", _hoisted_37$1, _toDisplayString$6(sourceReason(row)), 1)) : _createCommentVNode$5("", true)
                     ]),
                     _createElementVNode$6("td", null, _toDisplayString$6(text(row?.key) || "—"), 1),
                     _createElementVNode$6("td", null, _toDisplayString$6(latencyText(row?.latency_ms)), 1),
                     _createElementVNode$6("td", {
                       class: "avh-table__ellipsis",
                       title: text(row?.error)
-                    }, _toDisplayString$6(text(row?.error) || "—"), 9, _hoisted_36$1),
+                    }, _toDisplayString$6(text(row?.error) || "—"), 9, _hoisted_38$1),
                     _createElementVNode$6("td", null, _toDisplayString$6(_unref$2(shortTime)(row?.created_at)), 1)
                   ]);
                 }), 128))
               ])
             ])
-          ])) : !logLoading.value && !logError.value ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_37$1, "还没有流水记录。")) : _createCommentVNode$5("", true),
-          logSummary.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_38$1, "summary")) : _createCommentVNode$5("", true),
-          logSummary.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_39$1, [
-            _createElementVNode$6("table", _hoisted_40$1, [
+          ])) : !logLoading.value && !logError.value ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_39$1, "还没有流水记录。")) : _createCommentVNode$5("", true),
+          logSummary.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_40$1, "summary")) : _createCommentVNode$5("", true),
+          logSummary.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_41$1, [
+            _createElementVNode$6("table", _hoisted_42$1, [
               _cache[22] || (_cache[22] = _createElementVNode$6("thead", null, [
                 _createElementVNode$6("tr", null, [
                   _createElementVNode$6("th", null, "源"),
                   _createElementVNode$6("th", null, "条数"),
-                  _createElementVNode$6("th", null, "失败")
+                  _createElementVNode$6("th", null, "失败"),
+                  _createElementVNode$6("th", null, "原因分布")
                 ])
               ], -1)),
               _createElementVNode$6("tbody", null, [
@@ -9039,8 +9065,12 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
                     key: `sum#${index}`
                   }, [
                     _createElementVNode$6("td", null, _toDisplayString$6(sourceName(row)), 1),
-                    _createElementVNode$6("td", null, _toDisplayString$6(text(row?.count ?? row?.total ?? "—")), 1),
-                    _createElementVNode$6("td", null, _toDisplayString$6(text(row?.failed ?? row?.errors ?? "—")), 1)
+                    _createElementVNode$6("td", null, _toDisplayString$6(text(row?.total ?? row?.count ?? "—")), 1),
+                    _createElementVNode$6("td", null, _toDisplayString$6(text(row?.fail ?? row?.failed ?? row?.errors ?? "—")), 1),
+                    _createElementVNode$6("td", {
+                      class: "avh-table__ellipsis",
+                      title: reasonText(row)
+                    }, _toDisplayString$6(reasonText(row)), 9, _hoisted_43$1)
                   ]);
                 }), 128))
               ])
@@ -9060,7 +9090,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
   }
 });
 
-const ScrapeView = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-243ea78f"]]);
+const ScrapeView = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-78b4b7b1"]]);
 
 const {defineComponent:_defineComponent$5} = await importShared('vue');
 

@@ -105,6 +105,24 @@ def plugin_dir() -> Path:
     return PLUGIN_DIR
 
 
+@pytest.fixture(autouse=True)
+def no_real_sleep(monkeypatch):
+    """整目录把重试退避换成**不睡**的假函数（`scraper._SLEEP`）。
+
+    0.8.0 的 `http_fetch()` 会为可重试失败真睡 `2±1`、`5±1` 秒；单测里"失败 + 重试"的组合
+    很多（每个源都要覆盖），真睡会把一轮测试从几十秒拖到几分钟。放在 conftest 里是为了
+    覆盖**所有**测试模块（api 侧的 preview 用例会走同一条取数链）。
+
+    取不到模块就跳过：并行施工期 `scraper.py` 可能是半成品（见 scraper 模块 docstring 的
+    `SyntaxError` 记要），不该因为一个提速夹具把整目录用例打挂。
+    """
+    try:
+        module = _load("scraper")
+    except Exception:                                           # pragma: no cover - 防御
+        return
+    monkeypatch.setattr(module, "_SLEEP", lambda _seconds: None)
+
+
 @pytest.fixture(scope="session")
 def store_mod():
     """store 模块。"""
