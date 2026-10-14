@@ -3008,6 +3008,19 @@ def scrape_one(key: Any, *, store: Any, cli: Any, emby_client: Any,
         "items": results, "written": len(wrote), "total": len(results),
         "version_tags": results[0]["version_tags"],
     }
+    # 本片女演员头像同步（R3/P0-②）：元数据写入成功后才做，**失败绝不能让刮削本身失败**
+    if wrote:
+        try:
+            names = [row["name"] for row in actor_rows(target.get("actors")) if row.get("name")]
+            if names:
+                avatar_sync = sync_actor_avatars(
+                    store, emby_client, names=names, dry_run=False, opts=options)
+                failed = [str(err) for err in (avatar_sync.get("errors") or []) if str(err)]
+                if failed:
+                    report["warnings"].append("头像同步：" + "；".join(failed))
+        except Exception as error:                              # noqa: BLE001 - 头像同步不阻断刮削
+            logger.warning(f"AVHelper 头像同步失败（不影响刮削）：{type(error).__name__}: {error}")
+            report["warnings"].append(f"头像同步失败：{type(error).__name__}: {error}")
     meta = _meta_of(store, key_text)
     report["retry"] = {
         "retry_count": _to_int((meta or {}).get("retry_count")),
