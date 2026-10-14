@@ -101,7 +101,8 @@ SCRAPE_NOT_READY = "刮削模块未就绪"
 EMBY_NOT_READY = "Emby 未配置"
 # 配置里的枚举项（任务书 E）：不认识的值一律回落默认，老配置缺这个键也不会报错
 SCRAPE_MODES = ("off", "fill", "hybrid", "own")
-CROP_ANCHORS = ("auto", "right", "center", "left", "raw")
+# 裁切锚点不再暴露给用户（0.7.2 减负）：固定走 `scraper.DEFAULT_OPTS["crop_anchor"]="auto"`，
+# 由裁切逻辑自判。这里原来的 `CROP_ANCHORS` 枚举已随设置项一起删除。
 TRAILER_MODES = ("off", "remote", "local")
 # `states{}`（契约 §4）三个字段各自的合法取值，投影时用来兜底
 DOWNLOAD_STATES = ("downloading", "paused", "completed", "failed", "cancelled", "none")

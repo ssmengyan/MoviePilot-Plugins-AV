@@ -1175,7 +1175,7 @@ class TestScrapeConf:
             "scrapeMode": "fill", "plotJavtxt": True, "plotMetatube": True,
             "metatubeBase": "",
             "translateModel": "hy3", "translateModelFallback": "deepseek-v4.1-flash",
-            "cropAnchor": "auto", "trailerMode": "off",
+            "trailerMode": "off",
             "autoScrapeTier1": True, "autoScrapeTier2": True,
             "cleanSuffixes": [], "nameTemplate": "{number}{badge} {title}",
         }
@@ -1188,20 +1188,24 @@ class TestScrapeConf:
                                      "metatubeBase": " http://metatube.test:8080 "})
         conf = plugin.scrape_conf()
         assert conf["scrapeMode"] == "hybrid" and conf["plotJavtxt"] is False
-        assert conf["cropAnchor"] == "right" and conf["trailerMode"] == "local"
+        assert conf["trailerMode"] == "local"
         assert conf["translateModel"] == "hy3-pro"
         assert conf["cleanSuffixes"] == ["-UC"]
         assert conf["metatubeBase"] == "http://metatube.test:8080"
 
     def test_scrape_opts_maps_camel_to_snake(self, plugin, store):
         """★ 0.7.0 集成缺口回归：`scraper._opt()` 按下划线键取值，驼峰开关必须被映射过去，
-        否则界面上的「简介来源」「裁切锚点」「MetaTube 地址」全部静默失效。"""
+        否则界面上的「简介来源」「MetaTube 地址」全部静默失效。
+
+        0.7.2：裁切锚点设置项已删，`crop_anchor` **不再**从这里映射 —— 锚点固定 `auto`，
+        由 `scraper.DEFAULT_OPTS["crop_anchor"]` 提供、裁切逻辑自判。老 kv 里残留的
+        `cropAnchor` 既不报错也不再影响 `opts`。"""
         store.kv_set("global_rule", {"plotJavtxt": True, "plotMetatube": False,
                                      "cropAnchor": "right",
                                      "metatubeBase": "http://metatube.test:8080"})
         opts = plugin.scrape_opts()
         assert opts["plot_sources"] == ("javtxt",)
-        assert opts["crop_anchor"] == "right"
+        assert "crop_anchor" not in opts
         assert opts["metatube_base"] == "http://metatube.test:8080"
         # 驼峰原样保留（契约里 opts 就是透传形状，别删）
         assert opts["plotMetatube"] is False
@@ -1219,7 +1223,7 @@ class TestScrapeConf:
         store.kv_set("global_rule", {"scrapeMode": "随便", "cropAnchor": 7, "trailerMode": None,
                                      "plotMetatube": "false", "cleanSuffixes": "不是数组"})
         conf = plugin.scrape_conf()
-        assert conf["scrapeMode"] == "fill" and conf["cropAnchor"] == "auto"
+        assert conf["scrapeMode"] == "fill" and "cropAnchor" not in conf
         assert conf["trailerMode"] == "off"
         assert conf["plotMetatube"] is False
         assert conf["cleanSuffixes"] == []
