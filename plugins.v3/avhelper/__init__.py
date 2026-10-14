@@ -108,9 +108,13 @@ TRAILER_MODES = ("off", "remote", "local")
 DOWNLOAD_STATES = ("downloading", "paused", "completed", "failed", "cancelled", "none")
 LIBRARY_STATES = ("in_library", "pending_import", "not_in_library")
 SCRAPE_STATES = ("scraped_full", "scraped_partial", "unscraped")
-# 台账 `state` → `film_view().states.download`（契约 §4 的取值集）
+# 台账 `state` → `film_view().states.download`（契约 §4 的取值集）。
+# `canceled`（单 l）是**队列行**的拼写（用户在下载页点了取消，见 `tasks.QUEUE_CANCELED_STATE`），
+# 投影的取值集是双 l 的 `cancelled` —— 两边各按自己的历史口径写，映射就在这里做，
+# 免得日后有人把队列状态直接喂进来时被兜底成 `none`。
 _DOWNLOAD_STATE_MAP = {"downloaded": "completed", "downloading": "downloading",
-                       "paused": "paused", "failed": "failed", "cancelled": "cancelled"}
+                       "paused": "paused", "failed": "failed", "cancelled": "cancelled",
+                       "canceled": "cancelled"}
 # `meta.completeness` → `states.scrape`（老行没有 media_item 时按作品级完整度兜底）
 _SCRAPE_STATE_MAP = {"full": "scraped_full", "missing_plot": "scraped_partial",
                      "missing_core": "unscraped"}
@@ -682,6 +686,22 @@ class AVHelper(_PluginBase):
              "auth": "bear", "summary": "取消任务／不要了",
              "description": "{id} = 老行为，只取消待确认任务；{number|key, cancel_sub:true} = "
                             "三出口联动（删种子/台账/订阅/known），cancel_sub 默认 false，结果在 steps"},
+            # ---- 下载页那一行的三个出口（2026-10-15）：全部按队列行 id，行留在原位由用户选出口 ----
+            {"path": "/queue/cancel", "endpoint": self.api_queue_cancel, "methods": ["POST"],
+             "auth": "bear", "summary": "取消下载(删种子含文件, 条目留在原位)",
+             "description": "POST {id}：删下载器里的种子与已下载的部分文件 → 队列行 state=canceled "
+                            "留在原位（不消失）→ 台账打墓碑。已完成的不许取消"},
+            {"path": "/queue/return", "endpoint": self.api_queue_return, "methods": ["POST"],
+             "auth": "bear", "summary": "换资源(回到任务页重挑)",
+             "description": "POST {id}：摘掉这条下载 + 把对应任务置回 await（候选与规则原样保留）"},
+            {"path": "/queue/discard", "endpoint": self.api_queue_discard, "methods": ["POST"],
+             "auth": "bear", "summary": "不要了(彻底取消)",
+             "description": "POST {id, unsubscribe?:true}：摘行 + 台账墓碑 + 任务 canceled + "
+                            "（默认）取消该番号的订阅；unsubscribe 默认 true"},
+            {"path": "/queue", "endpoint": self.api_queue_drop, "methods": ["DELETE"],
+             "auth": "bear", "summary": "移除已取消的灰行",
+             "description": "DELETE ?id=：只把一条 state=canceled 的行从下载列表去掉，"
+                            "不动下载器、不动台账、不动订阅"},
             {"path": "/downloads", "endpoint": self.api_downloads, "methods": ["GET", "DELETE"],
              "auth": "bear", "summary": "下载台账(下载历史)",
              "description": "GET 列出**本插件下载过**的台账条目并迁移老队列；DELETE ?key= 移除一条记录后回最新列表"
@@ -2361,6 +2381,86 @@ class AVHelper(_PluginBase):
         if not failed:
             return f"已取消 {number}"
         return f"已取消 {number}（{len(failed)} 步未完成：{'；'.join(failed)}）"
+
+    # ---------- API：下载页那一行的三个出口（2026-10-15） ----------
+    #
+    # 三条路都按**队列行 id**（`payload.id`），返回形状统一为
+    # `{success, message, details?, tasks, queue}`：前端一收到就把这两份快照换上，
+    # 不必再打一次 `/tasks`（与 `/tasks/cancel` 的返回形状保持一致）。
+    #
+    # 收尾一律用 `queue(fresh=False)`：这一刻刚把种子删掉，同步去问下载器既慢（0.6 秒）
+    # 又会得到"查不到"——`/tasks` 那条 5 秒轮询自会带着真实进度回来。
+
+    async def api_queue_cancel(self, request: Request) -> Dict[str, Any]:
+        """「取消下载」：删下载器里的种子（**含已下载的部分文件**）→ 行改 `canceled` 留在原位。
+
+        条目**不消失**（用户明确要求）：留在原位用户才能接着点「换资源」或「不要了」，
+        这两条见 `/queue/return` 与 `/queue/discard`。
+        已完成（`state=='done'`）的条目拒绝取消 —— 那可能已经入库，删文件是破坏性动作。
+        """
+        payload = await self._json_body(request)
+        tid = str(payload.get("id") or "").strip()
+        if not tid:
+            return {"success": False, "message": "缺少 id",
+                    "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+        result = await asyncio.to_thread(self.engine.cancel_entry, tid)
+        return {"success": bool(result.get("ok")),
+                "message": str(result.get("message") or ""),
+                "details": str(result.get("detail") or ""),
+                "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+
+    async def api_queue_return(self, request: Request) -> Dict[str, Any]:
+        """「换资源」：摘掉这条下载 + 把对应任务置回 `await`（候选与规则原样保留）。
+
+        用户点错站点、或下到一半发现版本不对时走这条：回到「任务」页立刻能挑别的种子，
+        不必重新搜一遍站点（重搜受限流约束、还要等好几秒）。
+        """
+        payload = await self._json_body(request)
+        tid = str(payload.get("id") or "").strip()
+        if not tid:
+            return {"success": False, "message": "缺少 id",
+                    "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+        result = await asyncio.to_thread(self.engine.return_entry, tid)
+        return {"success": bool(result.get("ok")),
+                "message": str(result.get("message") or ""),
+                "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+
+    async def api_queue_discard(self, request: Request) -> Dict[str, Any]:
+        """「不要了」：彻底取消 —— 摘行 + 台账墓碑 + 任务 `canceled` +（默认）取消该番号的订阅。
+
+        `unsubscribe` 默认 **true**（界面上的勾选框默认勾上）：不取消订阅的话，下一次订阅检查
+        还会把同一个番号重新搜出来落成任务，"不要了"就成了假话。
+        """
+        payload = await self._json_body(request)
+        tid = str(payload.get("id") or "").strip()
+        if not tid:
+            return {"success": False, "message": "缺少 id",
+                    "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+        unsubscribe = pick_bool(payload.get("unsubscribe")
+                                if payload.get("unsubscribe") is not None
+                                else request.query_params.get("unsubscribe"), True)
+        result = await asyncio.to_thread(self.engine.discard_entry, tid, unsubscribe)
+        return {"success": bool(result.get("ok")),
+                "message": str(result.get("message") or ""),
+                "steps": result.get("steps") or {}, "error": str(result.get("error") or ""),
+                "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+
+    async def api_queue_drop(self, request: Request) -> Dict[str, Any]:
+        """把一条**已取消**的灰行从下载列表去掉（不动下载器/台账/订阅）。
+
+        走 `DELETE /queue?id=`：语义是"清掉这条已经处理完的记录"，不是"删除下载"。
+        """
+        tid = str(request.query_params.get("id") or "").strip()
+        if not tid:
+            payload = await self._json_body(request)
+            tid = str(payload.get("id") or "").strip()
+        if not tid:
+            return {"success": False, "message": "缺少 id",
+                    "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+        result = await asyncio.to_thread(self.engine.drop_entry, tid)
+        return {"success": bool(result.get("ok")),
+                "message": str(result.get("message") or ""),
+                "tasks": self.engine.task_list(), "queue": self.engine.queue()}
 
     async def api_magnet_download(self, request: Request) -> Dict[str, Any]:
         """把详情页某条磁力直接推给下载器（界面上的「下载」按钮）。
