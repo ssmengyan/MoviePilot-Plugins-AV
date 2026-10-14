@@ -865,12 +865,15 @@ class TestScrapeLog:
 
     def test_summary_carries_reason_counts(self, plugin, store):
         """汇总带 `reasons` 计数：`parse_error` 连续上涨 = 站点改版。"""
+        store.scrape_log_add("javtxt", "skipped", "D", 0, "")       # P1-3：跳过不算失败
         store.scrape_log_add("javtxt", "error", "A", 1, "", reason="parse_error")
         store.scrape_log_add("javtxt", "ok", "C", 1, "")
         store.scrape_log_add("javtxt", "error", "B", 1, "", reason="parse_error")
         row = [r for r in plugin.api_scrape_log(limit=5)["summary"] if r["source"] == "javtxt"][0]
         assert row["reasons"] == {"parse_error": 2}
-        assert row["reason"] == "parse_error"          # = 最近一次的原因
+        assert row["total"] == 4 and row["ok"] == 1 and row["skipped"] == 1
+        assert row["fail"] == 2                        # ok 与 skipped 都不算失败
+        assert row["reason"] == "parse_error"          # = 最近一次（不是那条 skipped）
         assert row["last_reason"] == "parse_error"
 
     def test_limit_is_clamped(self, plugin, store):

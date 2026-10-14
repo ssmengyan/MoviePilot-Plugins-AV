@@ -873,6 +873,17 @@ class TestScrapeLog:
         assert summary["javdb"]["last_status"] == "not_found"
         assert summary["javtxt"]["ok"] == 1
 
+    def test_summary_keeps_skipped_out_of_failures(self, store_mod, tmp_path):
+        """P1-3：`skipped`（源被关 / 在冷却 / dry-run）**不算失败**，单列计数。"""
+        store = make_store(store_mod, tmp_path)
+        store.scrape_log_add("javdb", "ok", latency_ms=10)
+        store.scrape_log_add("javdb", "skipped", error_summary="cache_only dry-run")
+        store.scrape_log_add("javdb", "miss", latency_ms=20)
+        row = {r["source"]: r for r in store.scrape_log_summary()}["javdb"]
+        assert row["total"] == 3 and row["ok"] == 1 and row["skipped"] == 1
+        assert row["fail"] == 1                     # 只有那条 miss 算失败
+        assert row["reasons"] == {}                 # reason 列仍然只统计非空原因
+
     def test_error_summary_is_trimmed_and_log_pruned(self, store_mod, tmp_path, monkeypatch):
         """摘要裁到 500 字符；表只留最近 `_SCRAPE_LOG_KEEP` 条。"""
         store = make_store(store_mod, tmp_path)

@@ -1861,39 +1861,39 @@
 }
 
 /* 与下载页/订阅页同一套工具条几何 */
-.avh-scrape__toolbar[data-v-78b4b7b1] {
+.avh-scrape__toolbar[data-v-1572fa3a] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 12px;
 }
-.avh-scrape__hint[data-v-78b4b7b1] {
+.avh-scrape__hint[data-v-1572fa3a] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-scrape__spacer[data-v-78b4b7b1] {
+.avh-scrape__spacer[data-v-1572fa3a] {
   flex: 1;
 }
-.avh-scrape__meta[data-v-78b4b7b1] {
+.avh-scrape__meta[data-v-1572fa3a] {
   display: flex;
   align-items: baseline;
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 10px;
 }
-.avh-scrape__actions[data-v-78b4b7b1] {
+.avh-scrape__actions[data-v-1572fa3a] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 10px;
 }
-.avh-scrape__checkall[data-v-78b4b7b1] {
+.avh-scrape__checkall[data-v-1572fa3a] {
   flex: none;
   max-width: 190px;
 }
-.avh-scrape__loading[data-v-78b4b7b1] {
+.avh-scrape__loading[data-v-1572fa3a] {
   padding: 44px 20px;
   text-align: center;
   font-size: 13px;
@@ -1901,13 +1901,13 @@
 }
 
 /* 状态卡片（照发现榜单那组 tabs 的胶囊观感，改成可点的方块） */
-.avh-stats[data-v-78b4b7b1] {
+.avh-stats[data-v-1572fa3a] {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
   gap: 10px;
   margin-bottom: 10px;
 }
-.avh-stat[data-v-78b4b7b1] {
+.avh-stat[data-v-1572fa3a] {
   padding: 10px 12px;
   cursor: pointer;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
@@ -1915,25 +1915,25 @@
   background: rgba(var(--v-theme-on-surface), 0.04);
   transition: 0.15s;
 }
-.avh-stat[data-v-78b4b7b1]:hover {
+.avh-stat[data-v-1572fa3a]:hover {
   border-color: rgb(var(--v-theme-primary));
 }
-.avh-stat--on[data-v-78b4b7b1] {
+.avh-stat--on[data-v-1572fa3a] {
   border-color: rgb(var(--v-theme-primary));
   background: rgba(var(--v-theme-primary), 0.16);
 }
-.avh-stat__num[data-v-78b4b7b1] {
+.avh-stat__num[data-v-1572fa3a] {
   font-size: 20px;
   font-weight: 700;
   line-height: 1.2;
 }
-.avh-stat__label[data-v-78b4b7b1] {
+.avh-stat__label[data-v-1572fa3a] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.6);
 }
 
 /* 四档的常驻图例（用户问过「缺核心是什么意思」，答案必须看得见，不能只藏在悬浮提示里） */
-.avh-scrape__legend[data-v-78b4b7b1] {
+.avh-scrape__legend[data-v-1572fa3a] {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 14px;
@@ -1941,23 +1941,23 @@
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.55);
 }
-.avh-scrape__legenditem[data-v-78b4b7b1] {
+.avh-scrape__legenditem[data-v-1572fa3a] {
   display: inline-flex;
   align-items: center;
 }
 
 /* 表格（`table-layout: fixed` + 显式列宽：宽屏不把「操作」列挤出去，照 S6 候选表的教训） */
-.avh-tablewrap[data-v-78b4b7b1] {
+.avh-tablewrap[data-v-1572fa3a] {
   overflow-x: auto;
 }
-.avh-table[data-v-78b4b7b1] {
+.avh-table[data-v-1572fa3a] {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
   font-size: 12.5px;
 }
-.avh-table th[data-v-78b4b7b1],
-.avh-table td[data-v-78b4b7b1] {
+.avh-table th[data-v-1572fa3a],
+.avh-table td[data-v-1572fa3a] {
   padding: 6px 8px;
   text-align: left;
   vertical-align: middle;
@@ -1966,26 +1966,26 @@
   white-space: nowrap;
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
 }
-.avh-table th[data-v-78b4b7b1] {
+.avh-table th[data-v-1572fa3a] {
   font-weight: 600;
   color: rgba(var(--v-theme-on-surface), 0.6);
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.16);
 }
-.avh-table__right[data-v-78b4b7b1] {
+.avh-table__right[data-v-1572fa3a] {
   text-align: right;
 }
-.avh-table__num[data-v-78b4b7b1] {
+.avh-table__num[data-v-1572fa3a] {
   font-weight: 600;
 }
-.avh-table__ellipsis[data-v-78b4b7b1] {
+.avh-table__ellipsis[data-v-1572fa3a] {
   max-width: 0;
 }
-.avh-rowbtns[data-v-78b4b7b1] {
+.avh-rowbtns[data-v-1572fa3a] {
   display: flex;
   gap: 4px;
   justify-content: flex-end;
 }
-.avh-scrape__secttl[data-v-78b4b7b1] {
+.avh-scrape__secttl[data-v-1572fa3a] {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -1997,14 +1997,14 @@
 
 /* 失败原因（`scrape_log.reason`）：等宽小字、弱化色，只作"为什么"的注脚，
    不与状态 chip 抢视觉 —— 状态说"成没成"，它说"为什么"。 */
-.avh-scrape__reason[data-v-78b4b7b1] {
+.avh-scrape__reason[data-v-1572fa3a] {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   color: rgba(var(--v-theme-on-surface), 0.6);
 }
 
 /* 版本角标（与 `LibraryView` / `DownloadsView` 同一套观感） */
-.avh-vbadge[data-v-78b4b7b1] {
+.avh-vbadge[data-v-1572fa3a] {
   display: inline-block;
   padding: 1px 6px;
   font-size: 10px;
@@ -2014,7 +2014,7 @@
   background: rgba(var(--v-theme-secondary), 0.9);
   border: 1px solid rgba(255, 255, 255, 0.14);
 }
-.avh-vbadge--inline[data-v-78b4b7b1] {
+.avh-vbadge--inline[data-v-1572fa3a] {
   margin-left: 4px;
 }
 
@@ -2026,7 +2026,7 @@
  */
 
 /* 页签胶囊：与「下载」栏那组同一套（两份 scoped CSS 各有作用域，本项目既有做法） */
-.avh-tabs[data-v-78b4b7b1] {
+.avh-tabs[data-v-1572fa3a] {
   display: flex;
   gap: 4px;
   padding: 3px;
@@ -2034,7 +2034,7 @@
   border-radius: 8px;
   background: rgba(var(--v-theme-on-surface), 0.04);
 }
-.avh-tabs button[data-v-78b4b7b1] {
+.avh-tabs button[data-v-1572fa3a] {
   padding: 4px 12px;
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
@@ -2043,7 +2043,7 @@
   border-radius: 6px;
   cursor: pointer;
 }
-.avh-tabs__on[data-v-78b4b7b1] {
+.avh-tabs__on[data-v-1572fa3a] {
   color: rgb(var(--v-theme-on-primary)) !important;
   background: rgb(var(--v-theme-primary)) !important;
 }

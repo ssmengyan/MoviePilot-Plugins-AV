@@ -676,7 +676,9 @@ function latencyText(value: unknown): string {
 }
 
 function sourceError(row: Record<string, any>): string {
-  return text(row?.error ?? row?.error_summary) || '—'
+  // P1-3：`skipped`（未配置 / 未启用）的说明在 `detail.why` 里，`error` 是空的 ——
+  // 不补这一层，自检表上那一行会显示成「—」，让人以为是抓不到。
+  return text(row?.error ?? row?.error_summary) || text(row?.detail?.why) || '—'
 }
 
 /** 失败原因（`reason`，机器可读的 `REASON_*`；老后端没有这个键就是空串）。 */
@@ -1141,7 +1143,13 @@ function logStatusColor(status: unknown): string {
             <tr v-for="(row, index) in logSummary" :key="`sum#${index}`">
               <td>{{ sourceName(row) }}</td>
               <td>{{ text(row?.total ?? row?.count ?? '—') }}</td>
-              <td>{{ text(row?.fail ?? row?.failed ?? row?.errors ?? '—') }}</td>
+              <td>
+                {{ text(row?.fail ?? row?.failed ?? row?.errors ?? '—') }}
+                <!-- P1-3：`skipped` 单列且不算失败（源被关 / 冷却 / dry-run） -->
+                <span v-if="Number(row?.skipped) > 0" class="avh-scrape__reason">
+                  跳过 {{ row.skipped }}
+                </span>
+              </td>
               <!-- 「这一列就是排障的入口」：parse_error 连着涨 = 站点改版，
                    cloudflare_challenge 涨 = 被拦，no_usable_metadata 涨 = 站点真没收录（换源）。 -->
               <td class="avh-table__ellipsis" :title="reasonText(row)">{{ reasonText(row) }}</td>

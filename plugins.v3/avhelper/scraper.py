@@ -4144,17 +4144,31 @@ def _restored_fields(backup: Dict[str, Any], before: Any, after: Any) -> List[st
 SELFCHECK_NUMBER = "SNOS-380"
 
 
+def _skip_row(source: str, why: str, stamp: str) -> Dict[str, Any]:
+    """**未探测**的一行：不给耗时、不算失败（P1-3）。
+
+    没探测就没有耗时 —— 界面显示「无法探测 + 0 ms」是自相矛盾的；`error` 也留空，
+    真正的说明放 `detail.why`（那是"没配置/没启用"，不是"站点不可达"）。
+    """
+    return {"source": source, "status": "skipped", "latency_ms": 0, "error": "",
+            "reason": "", "checked_at": stamp, "detail": {"why": why}}
+
+
 def sources_selfcheck(store: Any, cli: Any, opts: Optional[Dict[str, Any]] = None
                       ) -> List[Dict[str, Any]]:
-    """四个源各打一次轻量探针，写 `scrape_log` 并返回逐源结果。
+    """**当前会真正请求的**来源各打一次轻量探针，写 `scrape_log` 并返回逐源结果。
 
-    返回 `[{source, status, latency_ms, error, checked_at, detail}]`（`status` ∈
-    `ok` / `miss` / `error` / `skipped`）。探针一律走**轻量调用**：
+    返回 `[{source, status, latency_ms, error, reason, http_status, checked_at, detail}]`
+    （`status` ∈ `ok` / `miss` / `error` / `skipped`）。探针一律走**轻量调用**：
 
     - javdb：`cli.detail('SNOS-380')`（真实存在的老片，1 次子进程）；
     - javtxt：搜索 + 详情（受 2s 站点间隔约束，约 3–5 s）；
     - metatube：`/v1/movies/search`（本地服务器，毫秒级）；
-    - llm：`translator.selfcheck()`（模块缺失时 `skipped`，不假装成功）。
+    - llm：`translator.selfcheck()`（派生源，不在取数图里，**总是探**）。
+
+    **探测范围 = 取数图里启用的来源**（P1-3，照 amane 的"探测范围与刮削范围一致"）：
+    用户在设置台关掉的源不必探 —— 否则结果里永远挂着一个"从不参与"的红行。
+    `skipped` 与"不可达"分开：未配置 / 未启用 / 模块缺失都是 `skipped`（零耗时、不算失败）。
     """
     options = dict(opts or {})
     ensure_namemap(store, options)
@@ -4162,46 +4176,29 @@ def sources_selfcheck(store: Any, cli: Any, opts: Optional[Dict[str, Any]] = Non
     out: List[Dict[str, Any]] = []
     # 自检也是一次 run：这一组探针记录带同一个 id，便于"按一次自检"回溯
     run_id = str(_opt(options, "run_id") or "") or uuid.uuid4().hex[:12]
+    # 探测范围：当前**会真正请求**的来源（用户关掉的源不探）
+    enabled = scrape_graph.enabled_sources({"sources": _opt(options, "sources"),
+                                            "plot_sources": _opt(options, "plot_sources")})
+    route = scrape_graph.route_for(number_classify.classify(SELFCHECK_NUMBER)["content_type"])
+    wanted = [site for site in route if site in enabled]
+
+    if "javdb" in wanted:
+        out.append(_probe_javdb(cli, stamp))
+    if "javtxt" in wanted:
+        out.append(_probe_javtxt(options, store, stamp))
+    if "metatube" in wanted:
+        out.append(_probe_metatube(options, store, stamp))
+    for site in wanted:                                   # 图上将来新增的源：没有探针就如实说
+        if site not in (SRC_JAVDB, SRC_JAVTXT, SRC_METATUBE):
+            out.append(_skip_row(site, "该来源还没有自检探针", stamp))
 
     started = time.time()
-    detail = None
-    reason = ""                      # ★ 必须先初始化：`detail()` 正常返回 None 时不会进 except
-    getter = getattr(cli, "detail", None) if cli is not None else None
-    if callable(getter):
-        try:
-            detail = getter(SELFCHECK_NUMBER)
-        except Exception as error:                              # noqa: BLE001 - 故意的
-            detail = None
-            reason = f"{type(error).__name__}: {error}"
+    llm: Dict[str, Any]
+    if translator is None or not hasattr(translator, "selfcheck"):
+        llm = _skip_row(SRC_LLM, "translator 模块缺失（翻译链不可用，不影响取数）", stamp)
     else:
-        reason = "未注入 javdb client"
-    latency = int((time.time() - started) * 1000)
-    if isinstance(detail, dict) and detail:
-        out.append({"source": SRC_JAVDB, "status": "ok", "latency_ms": latency, "error": "",
-                    "reason": "", "checked_at": stamp,
-                    "detail": {"number": detail.get("number"), "title": bool(detail.get("title"))}})
-    else:
-        # 失败原因优先用 client 记下的真话（`JavdbClient.last_error` 里有子进程的 stderr 摘要：
-        # 二进制不存在 / 代理不可达 / 超时 …），拿不到才退回一句笼统的说明。
-        reporter = getattr(cli, "last_error", None) if cli is not None else None
-        if callable(reporter) and not reason:
-            try:
-                reason = str(reporter(f"detail:{SELFCHECK_NUMBER}") or "")
-            except Exception:                                   # pragma: no cover - 防御
-                reason = ""
-        out.append({"source": SRC_JAVDB, "status": "error", "latency_ms": latency,
-                    "error": reason or f"javdb 没有 {SELFCHECK_NUMBER} 的详情"
-                                       f"（番号下架 / 站点改版 / 被风控）",
-                    "reason": reason_from_text(reason, REASON_UNEXPECTED),
-                    "checked_at": stamp, "detail": {}})
-
-    for source, probe in ((SRC_JAVTXT, _probe_javtxt), (SRC_METATUBE, _probe_metatube)):
-        out.append(probe(options, store, stamp))
-
-    started = time.time()
-    llm: Dict[str, Any] = {"source": SRC_LLM, "status": "skipped", "latency_ms": 0,
-                           "error": "", "checked_at": stamp, "detail": {}}
-    if translator is not None and hasattr(translator, "selfcheck"):
+        llm = {"source": SRC_LLM, "status": "skipped", "latency_ms": 0, "error": "",
+               "reason": "", "checked_at": stamp, "detail": {}}
         try:
             result = translator.selfcheck()
             ok = bool((result or {}).get("ok"))
@@ -4218,8 +4215,6 @@ def sources_selfcheck(store: Any, cli: Any, opts: Optional[Dict[str, Any]] = Non
                         "latency_ms": int((time.time() - started) * 1000),
                         "error": f"{type(error).__name__}: {error}",
                         "reason": REASON_UNEXPECTED})
-    else:
-        llm["error"] = "translator 模块缺失（翻译链不可用，不影响取数）"
     out.append(llm)
 
     for row in out:
@@ -4228,6 +4223,40 @@ def sources_selfcheck(store: Any, cli: Any, opts: Optional[Dict[str, Any]] = Non
                     reason=str(row.get("reason") or ""),
                     http_status=_to_int(row.get("http_status")), run_id=run_id)
     return out
+
+
+def _probe_javdb(cli: Any, stamp: str) -> Dict[str, Any]:
+    """javdb 探针：`cli.detail(SNOS-380)` 一次子进程（真实存在的老片）。"""
+    started = time.time()
+    detail = None
+    reason = ""                      # ★ 必须先初始化：`detail()` 正常返回 None 时不会进 except
+    getter = getattr(cli, "detail", None) if cli is not None else None
+    if callable(getter):
+        try:
+            detail = getter(SELFCHECK_NUMBER)
+        except Exception as error:                              # noqa: BLE001 - 故意的
+            detail = None
+            reason = f"{type(error).__name__}: {error}"
+    else:
+        reason = "未注入 javdb client"
+    latency = int((time.time() - started) * 1000)
+    if isinstance(detail, dict) and detail:
+        return {"source": SRC_JAVDB, "status": "ok", "latency_ms": latency, "error": "",
+                "reason": "", "checked_at": stamp,
+                "detail": {"number": detail.get("number"), "title": bool(detail.get("title"))}}
+    # 失败原因优先用 client 记下的真话（`JavdbClient.last_error` 里有子进程的 stderr 摘要：
+    # 二进制不存在 / 代理不可达 / 超时 …），拿不到才退回一句笼统的说明。
+    reporter = getattr(cli, "last_error", None) if cli is not None else None
+    if callable(reporter) and not reason:
+        try:
+            reason = str(reporter(f"detail:{SELFCHECK_NUMBER}") or "")
+        except Exception:                                       # pragma: no cover - 防御
+            reason = ""
+    return {"source": SRC_JAVDB, "status": "error", "latency_ms": latency,
+            "error": reason or f"javdb 没有 {SELFCHECK_NUMBER} 的详情"
+                               f"（番号下架 / 站点改版 / 被风控）",
+            "reason": reason_from_text(reason, REASON_UNEXPECTED),
+            "checked_at": stamp, "detail": {}}
 
 
 def _probe_javtxt(opts: Dict[str, Any], store: Any, stamp: str) -> Dict[str, Any]:
@@ -4250,7 +4279,12 @@ def _probe_javtxt(opts: Dict[str, Any], store: Any, stamp: str) -> Dict[str, Any
 
 
 def _probe_metatube(opts: Dict[str, Any], store: Any, stamp: str) -> Dict[str, Any]:
-    """MetaTube 探针：走一次搜索并**如实回报串号拦截**（这正是它最需要被盯住的行为）。"""
+    """MetaTube 探针：走一次搜索并**如实回报串号拦截**（这正是它最需要被盯住的行为）。
+
+    没配地址 → `skipped`（P1-3：**未配置 ≠ 不可达**，不该在自检表里挂成一条红行）。
+    """
+    if not str(_opt(opts, "metatube_base") or "").strip():
+        return _skip_row(SRC_METATUBE, "未配置 MetaTube 地址（hybrid 不做它兜底）", stamp)
     result = metatube_lookup(opts, SELFCHECK_NUMBER, store=None)
     return {
         "source": SRC_METATUBE,

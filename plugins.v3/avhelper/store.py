@@ -1972,15 +1972,19 @@ class Store:
         它把"这个源最近一直失败"从一句中文 error_summary 变成可分组的事实 ——
         `parse_error` 连着涨 = 站点改版，`cloudflare_challenge` 连着涨 = 被拦，
         `no_usable_metadata` 连着涨 = 站点确实没收录（换源，不是修解析器）。
+
+        `skipped`（P1-3）单列且**不算失败**：那是"我们没试"（源被关掉 / 在冷却里 / dry-run），
+        与"试了没拿到"是两件事；把它算进 `fail` 会让自检表的失败数天天虚高。
         """
         rows = self._exec(
             "SELECT source_name, COUNT(*), "
-            "SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END), AVG(latency_ms) "
+            "SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END), "
+            "SUM(CASE WHEN status='skipped' THEN 1 ELSE 0 END), AVG(latency_ms) "
             "FROM scrape_log GROUP BY source_name ORDER BY source_name",
             fetch=True,
         ) or []
         out: List[Dict[str, Any]] = []
-        for source, total, ok, avg in rows:
+        for source, total, ok, skipped, avg in rows:
             last = self._exec(
                 "SELECT status, error_summary, created_at, reason FROM scrape_log "
                 "WHERE source_name=? ORDER BY id DESC LIMIT 1",
@@ -1988,6 +1992,7 @@ class Store:
             ) or [("", "", "", "")]
             count = _to_int(total)
             good = _to_int(ok)
+            idle = _to_int(skipped)
             reason_rows = self._exec(
                 "SELECT reason, COUNT(*) FROM scrape_log WHERE source_name=? AND reason<>'' "
                 "GROUP BY reason ORDER BY COUNT(*) DESC, reason",
@@ -1995,7 +2000,9 @@ class Store:
             ) or []
             out.append({
                 "source_name": source, "source": source,
-                "total": count, "ok": good, "fail": max(count - good, 0),
+                "total": count, "ok": good, "skipped": idle,
+                # `fail` 只数"试了没拿到"：跳过的那些（源被关 / 在冷却 / dry-run）不算失败
+                "fail": max(count - good - idle, 0),
                 "avg_latency_ms": int(_to_float(avg)),
                 "last_status": last[0][0] or "", "last_error": last[0][1] or "",
                 "last_created_at": last[0][2] or "",

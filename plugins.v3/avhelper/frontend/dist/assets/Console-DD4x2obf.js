@@ -8149,7 +8149,11 @@ const _hoisted_41$1 = {
   class: "avh-tablewrap"
 };
 const _hoisted_42$1 = { class: "avh-table" };
-const _hoisted_43$1 = ["title"];
+const _hoisted_43$1 = {
+  key: 0,
+  class: "avh-scrape__reason"
+};
+const _hoisted_44$1 = ["title"];
 const {computed: computed$5,ref: ref$6} = await importShared('vue');
 const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
   __name: "ScrapeView",
@@ -8564,7 +8568,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
       return Number.isFinite(num) && num > 0 ? `${Math.round(num)} ms` : "—";
     }
     function sourceError(row) {
-      return text(row?.error ?? row?.error_summary) || "—";
+      return text(row?.error ?? row?.error_summary) || text(row?.detail?.why) || "—";
     }
     function sourceReason(row) {
       return text(row?.reason);
@@ -9079,11 +9083,14 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
                   }, [
                     _createElementVNode$6("td", null, _toDisplayString$6(sourceName(row)), 1),
                     _createElementVNode$6("td", null, _toDisplayString$6(text(row?.total ?? row?.count ?? "—")), 1),
-                    _createElementVNode$6("td", null, _toDisplayString$6(text(row?.fail ?? row?.failed ?? row?.errors ?? "—")), 1),
+                    _createElementVNode$6("td", null, [
+                      _createTextVNode$4(_toDisplayString$6(text(row?.fail ?? row?.failed ?? row?.errors ?? "—")) + " ", 1),
+                      Number(row?.skipped) > 0 ? (_openBlock$6(), _createElementBlock$6("span", _hoisted_43$1, " 跳过 " + _toDisplayString$6(row.skipped), 1)) : _createCommentVNode$5("", true)
+                    ]),
                     _createElementVNode$6("td", {
                       class: "avh-table__ellipsis",
                       title: reasonText(row)
-                    }, _toDisplayString$6(reasonText(row)), 9, _hoisted_43$1)
+                    }, _toDisplayString$6(reasonText(row)), 9, _hoisted_44$1)
                   ]);
                 }), 128))
               ])
@@ -9103,7 +9110,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
   }
 });
 
-const ScrapeView = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-78b4b7b1"]]);
+const ScrapeView = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-1572fa3a"]]);
 
 const {defineComponent:_defineComponent$5} = await importShared('vue');
 

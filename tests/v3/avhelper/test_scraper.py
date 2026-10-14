@@ -2105,6 +2105,41 @@ class TestSelfcheck:
         summary = {row["source"]: row for row in store.scrape_log_summary()}
         assert {"javdb", "javtxt", "metatube", "llm"} <= set(summary)
 
+    def test_probe_scope_follows_the_graph(self, scraper, store_mod, tmp_path, monkeypatch):
+        """P1-3：探测范围 = **取数图里启用的来源** —— 用户关掉的源不探。"""
+        store = make_store(store_mod, tmp_path)
+        _patch_fetch(monkeypatch, lambda url, **k: (JAVTXT_SEARCH_HTML.encode(), "", 200))
+        rows = scraper.sources_selfcheck(store, FakeCli(detail=JAVDB_DETAIL),
+                                         {"javtxt_interval": 0,
+                                          "javtxt_hosts": ("https://j.test",),
+                                          "metatube_base": "http://mt:8080",
+                                          "plot_sources": ("javtxt",)})   # 只开 javtxt
+        assert [row["source"] for row in rows] == ["javdb", "javtxt", "llm"]
+
+    def test_unconfigured_metatube_is_skipped_not_failed(self, scraper, store_mod, tmp_path,
+                                                         monkeypatch):
+        """★ 未配置 ≠ 不可达：地址留空时是 `skipped`（零耗时、error 空），不是一条红行。"""
+        store = make_store(store_mod, tmp_path)
+        rows = scraper.sources_selfcheck(store, FakeCli(detail=JAVDB_DETAIL),
+                                         {"javtxt_interval": 0,
+                                          "javtxt_hosts": ("https://j.test",),
+                                          "metatube_base": ""})
+        row = {r["source"]: r for r in rows}["metatube"]
+        assert row["status"] == "skipped"
+        assert row["latency_ms"] == 0 and row["error"] == ""
+        assert "未配置" in row["detail"]["why"]
+
+    def test_missing_translator_is_skipped_with_why(self, scraper, store_mod, tmp_path,
+                                                    monkeypatch):
+        store = make_store(store_mod, tmp_path)
+        monkeypatch.setattr(scraper, "translator", None)
+        rows = scraper.sources_selfcheck(store, FakeCli(detail=JAVDB_DETAIL),
+                                         {"javtxt_interval": 0,
+                                          "javtxt_hosts": ("https://j.test",),
+                                          "metatube_base": ""})
+        row = {r["source"]: r for r in rows}["llm"]
+        assert row["status"] == "skipped" and "translator" in row["detail"]["why"]
+
     def test_javdb_probe_failure_reports_reason(self, scraper, store_mod, tmp_path):
         store = make_store(store_mod, tmp_path)
         rows = scraper.sources_selfcheck(
