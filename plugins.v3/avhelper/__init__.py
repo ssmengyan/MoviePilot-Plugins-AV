@@ -1702,6 +1702,14 @@ class AVHelper(_PluginBase):
         只给点名的键（`key`/`display_number`/`original_title`/`actors`/`cover`/`version_tags`/
         `states`），原有字段一个都不碰；`emby_id` 传进来时封面一律走 Emby 原图
         （`?emby={id}&type=Primary`），否则回落投影里的远程图。
+
+        **`title` 是唯一一处例外（2026-10-15，用户诉求"四个界面显示要一致"）**：
+        投影里有中文标题时就**顶掉行里原有的** `title`，投影没有才保留原值。
+        为什么必须顶：`/library` 的行自带 `title` = Emby 的 `Name`（没刮削时是**文件名**、
+        刮到了也是 Google 机翻），而 `/downloads` 的行自带 `title` = 下载那一刻的种子名 ——
+        同一个字段在两处是两个东西，用户看到的正是"同一个影片五花八门"。
+        投影的 `title` 是**唯一权威**（javdb 中文标题 / 日文原名），所以这里让它说话；
+        拿不到时**保留原值而不是清空**（宁可显示 Emby 的弱信息，也不要一片空白）。
         """
         data = view if isinstance(view, dict) else {}
         states = dict(data.get("states") or {}) if isinstance(data.get("states"), dict) else {}
@@ -1714,7 +1722,7 @@ class AVHelper(_PluginBase):
             states["download"] = download_state_name(download_state)
         if emby_id:
             states["library"] = "in_library"
-        return {
+        out = {
             "key": str(data.get("key") or "") or canon_of(number),
             "display_number": str(data.get("number") or "") or shown_of(number),
             "original_title": str(data.get("original_title") or ""),
@@ -1723,6 +1731,10 @@ class AVHelper(_PluginBase):
             "version_tags": list(data.get("version_tags") or []),
             "states": states,
         }
+        title = str(data.get("title") or "").strip()
+        if title:
+            out["title"] = title
+        return out
 
     def actor_zh(self, name: Any) -> str:
         """演员名的中文写法：`namemap.actor_display()` 优先，缺失退回 `name_map` 表。

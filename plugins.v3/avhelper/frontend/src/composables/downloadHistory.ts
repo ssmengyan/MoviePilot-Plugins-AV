@@ -44,6 +44,16 @@ export interface DownloadRecord {
    * 「不在库（可能已删除）」——所以这里不做区分。
    */
   lib?: { id?: string; name?: string; path?: string; url?: string } | null
+  /**
+   * 读侧统一投影追加的影片字段（2026-10-15 加，后端 `_film_extra()`）：
+   * `actors[]` 是投影口径的演员（**中文名**，`{name, jp, zh, avatar}`），
+   * 比台账那个单串 `actor` 更准也更全（同一部片可能有多个演员）。
+   * 另外 `states{}` 给三段状态（下载/入库/刮削），`version_tags[]` 给版本角标。
+   */
+  actors?: Array<{ name?: string; jp?: string; zh?: string; avatar?: string }>
+  originalTitle?: string
+  versionTags?: string[]
+  states?: { download?: string; library?: string; scrape?: string }
 }
 
 /** 后端给的三个计数（`/downloads` 顺带算出，前端不再自己数一遍规范口径）。 */

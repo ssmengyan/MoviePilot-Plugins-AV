@@ -1933,7 +1933,7 @@ const _hoisted_16$9 = {
   key: 1,
   class: "avh-map__list"
 };
-const _hoisted_17$7 = ["onClick"];
+const _hoisted_17$9 = ["onClick"];
 const _hoisted_18$7 = { class: "avh-map__main" };
 const _hoisted_19$7 = { class: "avh-map__name" };
 const _hoisted_20$7 = { class: "avh-map__sub" };
@@ -2485,7 +2485,7 @@ const _sfc_main$q = /* @__PURE__ */ _defineComponent$q({
                           _createElementVNode$p("div", _hoisted_20$7, _toDisplayString$p(row.jp || ""), 1),
                           extrasOf(row) ? (_openBlock$q(), _createElementBlock$p("div", _hoisted_21$5, _toDisplayString$p(extrasOf(row)), 1)) : _createCommentVNode$k("", true)
                         ])
-                      ], 10, _hoisted_17$7);
+                      ], 10, _hoisted_17$9);
                     }), 128))
                   ])) : !listError.value ? (_openBlock$q(), _createElementBlock$p("div", _hoisted_22$5, _toDisplayString$p(listLoading.value ? "正在读取…" : "没有匹配的记录（后端还没有返回数据，或查询词没命中）"), 1)) : _createCommentVNode$k("", true)
                 ]),
@@ -3407,7 +3407,7 @@ const _hoisted_13$a = ["title"];
 const _hoisted_14$a = { class: "avh-cand__act" };
 const _hoisted_15$9 = ["href"];
 const _hoisted_16$8 = { colspan: "7" };
-const _hoisted_17$6 = { class: "avh-cand__meta" };
+const _hoisted_17$8 = { class: "avh-cand__meta" };
 const _hoisted_18$6 = ["title"];
 const _hoisted_19$6 = {
   key: 0,
@@ -3747,7 +3747,7 @@ const _sfc_main$l = /* @__PURE__ */ _defineComponent$l({
                     class: _normalizeClass$c(["avh-cand__sub", ...rowClass(row.cand)])
                   }, [
                     _createElementVNode$l("td", _hoisted_16$8, [
-                      _createElementVNode$l("div", _hoisted_17$6, [
+                      _createElementVNode$l("div", _hoisted_17$8, [
                         _createElementVNode$l("span", {
                           class: "avh-cand__ttl",
                           title: metaTip(row.cand)
@@ -4349,7 +4349,7 @@ function filterRecords(items, query, onlyMissing) {
 
 const {defineComponent:_defineComponent$h} = await importShared('vue');
 
-const {createElementVNode:_createElementVNode$h,resolveComponent:_resolveComponent$e,createVNode:_createVNode$f,createTextVNode:_createTextVNode$c,withCtx:_withCtx$e,toDisplayString:_toDisplayString$g,openBlock:_openBlock$h,createElementBlock:_createElementBlock$h,createCommentVNode:_createCommentVNode$d,unref:_unref$5,renderList:_renderList$d,Fragment:_Fragment$e,createBlock:_createBlock$e} = await importShared('vue');
+const {createElementVNode:_createElementVNode$h,resolveComponent:_resolveComponent$e,createVNode:_createVNode$f,createTextVNode:_createTextVNode$c,withCtx:_withCtx$e,toDisplayString:_toDisplayString$g,openBlock:_openBlock$h,createBlock:_createBlock$e,createCommentVNode:_createCommentVNode$d,createElementBlock:_createElementBlock$h,unref:_unref$5,renderList:_renderList$d,Fragment:_Fragment$e} = await importShared('vue');
 
 const _hoisted_1$g = { class: "avh-history" };
 const _hoisted_2$g = { class: "avh-history__toolbar" };
@@ -4375,12 +4375,14 @@ const _hoisted_11$9 = ["title"];
 const _hoisted_12$9 = ["title"];
 const _hoisted_13$9 = ["title"];
 const _hoisted_14$9 = ["title"];
-const _hoisted_15$8 = { class: "avh-history__act" };
-const _hoisted_16$7 = { class: "avh-history__hint" };
+const _hoisted_15$8 = ["href"];
+const _hoisted_16$7 = { class: "avh-history__act" };
+const _hoisted_17$7 = { class: "avh-history__hint" };
 const {computed: computed$d,onMounted: onMounted$7,ref: ref$g} = await importShared('vue');
 const ENDPOINT$1 = "plugin/downloads";
 const SKELETON_ROWS = 6;
 const HISTORY_PAGE_SIZE = 60;
+const IMPORT_GRACE_H = 48;
 const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
   __name: "HistoryView",
   props: {
@@ -4426,11 +4428,52 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
         missing: typeof given.missing === "number" ? given.missing : local.missing
       };
     });
-    const summary = computed$d(
-      () => `共 ${counts.value.total} 条 · 在库 ${counts.value.inLibrary} · 不在库 ${counts.value.missing}`
-    );
+    function withinGrace(completedAt) {
+      const text = String(completedAt || "").trim();
+      if (!text) return false;
+      const stamp = Date.parse(text.replace(/-/g, "/"));
+      if (Number.isNaN(stamp)) return false;
+      return Date.now() - stamp < IMPORT_GRACE_H * 3600 * 1e3;
+    }
+    function libTier(item) {
+      if (inLibrary(item)) return "in";
+      return withinGrace(item.completedAt || item.createdAt) ? "pending" : "gone";
+    }
     function libraryText(item) {
-      return inLibrary(item) ? "在库" : "不在库（可能已删除）";
+      const tier = libTier(item);
+      if (tier === "in") return "在库";
+      return tier === "pending" ? "待入库" : "不在库（可能已删除）";
+    }
+    function libColor(item) {
+      const tier = libTier(item);
+      return tier === "in" ? "success" : tier === "pending" ? "warning" : void 0;
+    }
+    function libHint(item) {
+      const tier = libTier(item);
+      if (tier === "in") return String(item.lib?.path || "");
+      if (tier === "pending") {
+        return "刚下载完，Emby 还没扫到或刮削还没跑完；也可能这个番号刮不到（等一会儿再看）";
+      }
+      return "Emby 库里没有这个番号，文件可能已经删了";
+    }
+    const tiers = computed$d(() => {
+      const out = { in: 0, pending: 0, gone: 0 };
+      for (const item of items.value) out[libTier(item)] += 1;
+      return out;
+    });
+    const summary = computed$d(
+      () => `共 ${counts.value.total} 条 · 在库 ${tiers.value.in} · 待入库 ${tiers.value.pending} · 不在库 ${tiers.value.gone}`
+    );
+    function actorText(item) {
+      const list = item.actors;
+      if (Array.isArray(list)) {
+        const names = list.map((row) => String((row || {}).name || (row || {}).zh || "").trim()).filter(Boolean);
+        if (names.length) return names.join(" / ");
+      }
+      return String(item.actor || "");
+    }
+    function libUrl(item) {
+      return String(item.lib?.url || "");
     }
     function readList(response) {
       return parseDownloadList(unwrap(response));
@@ -4526,7 +4569,7 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
             color: "primary",
             density: "compact",
             "hide-details": "",
-            label: "只看不在库"
+            label: "只看未入库"
           }, null, 8, ["modelValue"]),
           _createVNode$f(_component_v_btn, {
             variant: "outlined",
@@ -4548,17 +4591,30 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
             label: ""
           }, {
             default: _withCtx$e(() => [
-              _createTextVNode$c("在库 " + _toDisplayString$g(counts.value.inLibrary), 1)
+              _createTextVNode$c("在库 " + _toDisplayString$g(tiers.value.in), 1)
             ]),
             _: 1
           }),
+          tiers.value.pending ? (_openBlock$h(), _createBlock$e(_component_v_chip, {
+            key: 0,
+            size: "x-small",
+            variant: "flat",
+            color: "warning",
+            label: "",
+            title: "刚下载完、Emby 还没扫到或刮削还没跑完；超过 48 小时仍未入库就归到「不在库」"
+          }, {
+            default: _withCtx$e(() => [
+              _createTextVNode$c("待入库 " + _toDisplayString$g(tiers.value.pending), 1)
+            ]),
+            _: 1
+          })) : _createCommentVNode$d("", true),
           _createVNode$f(_component_v_chip, {
             size: "x-small",
             variant: "outlined",
             label: ""
           }, {
             default: _withCtx$e(() => [
-              _createTextVNode$c("不在库 " + _toDisplayString$g(counts.value.missing), 1)
+              _createTextVNode$c("不在库 " + _toDisplayString$g(tiers.value.gone), 1)
             ]),
             _: 1
           }),
@@ -4671,29 +4727,36 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
                     title: String(item.title || "")
                   }, _toDisplayString$g(String(item.title || "") || "—"), 9, _hoisted_11$9),
                   _createElementVNode$h("td", {
-                    title: String(item.actor || "")
-                  }, _toDisplayString$g(String(item.actor || "") || "—"), 9, _hoisted_12$9),
+                    title: actorText(item)
+                  }, _toDisplayString$g(actorText(item) || "—"), 9, _hoisted_12$9),
                   _createElementVNode$h("td", null, _toDisplayString$g(_unref$5(sizeLabel)(item)), 1),
                   _createElementVNode$h("td", {
                     title: String(item.completedAt || item.createdAt || "")
                   }, _toDisplayString$g(_unref$5(completedText)(item)), 9, _hoisted_13$9),
                   _createElementVNode$h("td", {
-                    title: String(item.lib?.path || "")
+                    title: libHint(item)
                   }, [
                     _createVNode$f(_component_v_chip, {
                       size: "x-small",
                       label: "",
-                      variant: _unref$5(inLibrary)(item) ? "flat" : "outlined",
-                      color: _unref$5(inLibrary)(item) ? "success" : void 0,
+                      variant: libTier(item) === "gone" ? "outlined" : "flat",
+                      color: libColor(item),
                       class: "avh-history__lib"
                     }, {
                       default: _withCtx$e(() => [
                         _createTextVNode$c(_toDisplayString$g(libraryText(item)), 1)
                       ]),
                       _: 2
-                    }, 1032, ["variant", "color"])
+                    }, 1032, ["variant", "color"]),
+                    libUrl(item) ? (_openBlock$h(), _createElementBlock$h("a", {
+                      key: 0,
+                      class: "avh-history__embylink",
+                      href: libUrl(item),
+                      target: "_blank",
+                      rel: "noopener"
+                    }, "打开 ↗", 8, _hoisted_15$8)) : _createCommentVNode$d("", true)
                   ], 8, _hoisted_14$9),
-                  _createElementVNode$h("td", _hoisted_15$8, [
+                  _createElementVNode$h("td", _hoisted_16$7, [
                     _createVNode$f(_component_v_btn, {
                       variant: "outlined",
                       size: "small",
@@ -4716,7 +4779,7 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
             ref: sentinel,
             class: "avh-history__more"
           }, [
-            _createElementVNode$h("span", _hoisted_16$7, _toDisplayString$g(pagedHint.value), 1)
+            _createElementVNode$h("span", _hoisted_17$7, _toDisplayString$g(pagedHint.value), 1)
           ], 512)) : _createCommentVNode$d("", true)
         ])) : filtered.value && loaded.value ? (_openBlock$h(), _createBlock$e(EmptyState, {
           key: 4,
@@ -4731,7 +4794,7 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
   }
 });
 
-const HistoryView = /* @__PURE__ */ _export_sfc(_sfc_main$h, [["__scopeId", "data-v-ce7e2c04"]]);
+const HistoryView = /* @__PURE__ */ _export_sfc(_sfc_main$h, [["__scopeId", "data-v-7cf5d9d5"]]);
 
 const {defineComponent:_defineComponent$g} = await importShared('vue');
 
@@ -4765,7 +4828,7 @@ const _hoisted_15$7 = {
   class: "avh-q__hint"
 };
 const _hoisted_16$6 = { class: "avh-bar" };
-const _hoisted_17$5 = {
+const _hoisted_17$6 = {
   key: 1,
   class: "avh-downloads__hint"
 };
@@ -5112,7 +5175,7 @@ const _sfc_main$g = /* @__PURE__ */ _defineComponent$g({
                   }, null, 4)
                 ])
               ], 2);
-            }), 128)) : (_openBlock$g(), _createElementBlock$g("div", _hoisted_17$5, "没有下载中的任务")),
+            }), 128)) : (_openBlock$g(), _createElementBlock$g("div", _hoisted_17$6, "没有下载中的任务")),
             failedRows.value.length ? (_openBlock$g(), _createElementBlock$g("div", _hoisted_18$5, [
               _createElementVNode$g("span", null, "下载失败（" + _toDisplayString$f(failedRows.value.length) + "）", 1),
               _cache[3] || (_cache[3] = _createElementVNode$g("span", { class: "avh-downloads__secttl-note" }, "在「任务」页可重新挑种下载", -1))
@@ -5286,14 +5349,18 @@ const _hoisted_8$9 = {
   key: 5,
   class: "avh-badge avh-badge--dl"
 };
-const _hoisted_9$8 = { class: "avh-card__meta" };
-const _hoisted_10$8 = { class: "avh-card__num" };
-const _hoisted_11$7 = { class: "avh-card__sub" };
-const _hoisted_12$7 = { key: 0 };
-const _hoisted_13$7 = { key: 1 };
-const _hoisted_14$7 = { class: "avh-card__sub" };
-const _hoisted_15$6 = ["title"];
-const _hoisted_16$5 = ["href"];
+const _hoisted_9$8 = {
+  key: 6,
+  class: "avh-badge avh-badge--unscraped"
+};
+const _hoisted_10$8 = { class: "avh-card__meta" };
+const _hoisted_11$7 = { class: "avh-card__num" };
+const _hoisted_12$7 = { class: "avh-card__sub" };
+const _hoisted_13$7 = { key: 0 };
+const _hoisted_14$7 = { key: 1 };
+const _hoisted_15$6 = { class: "avh-card__sub" };
+const _hoisted_16$5 = ["title"];
+const _hoisted_17$5 = ["href"];
 const _sfc_main$f = /* @__PURE__ */ _defineComponent$f({
   __name: "NumCard",
   props: {
@@ -5319,6 +5386,15 @@ const _sfc_main$f = /* @__PURE__ */ _defineComponent$f({
       return day ? `入库 ${day}` : "";
     };
     const fileName = () => String(props.movie.lib?.path || "").replace(/\\/g, "/").split("/").pop() || "";
+    const actorLine = () => {
+      const list = props.movie.actors;
+      if (Array.isArray(list)) {
+        const names = list.map((row) => String((row || {}).name || (row || {}).zh || "").trim()).filter(Boolean);
+        if (names.length) return names.join(" / ");
+      }
+      return String(props.movie.actor || "") || "—";
+    };
+    const libBodyText = () => String(props.movie.title || "") || fileName();
     const watchUrl = () => String(props.movie.lib?.url || "");
     return (_ctx, _cache) => {
       return _openBlock$f(), _createElementBlock$f("div", {
@@ -5342,20 +5418,21 @@ const _sfc_main$f = /* @__PURE__ */ _defineComponent$f({
             _ctx.actorFavorited ? (_openBlock$f(), _createElementBlock$f("span", _hoisted_5$b, "⭐已收藏演员")) : _createCommentVNode$b("", true),
             _ctx.movie.lib ? (_openBlock$f(), _createElementBlock$f("span", _hoisted_6$b, "✔已入库")) : _createCommentVNode$b("", true),
             _ctx.movie.downloading && !_ctx.movie.lib && !_ctx.movie.downloaded ? (_openBlock$f(), _createElementBlock$f("span", _hoisted_7$a, "⏬下载中")) : _createCommentVNode$b("", true),
-            _ctx.movie.downloaded && !_ctx.movie.lib ? (_openBlock$f(), _createElementBlock$f("span", _hoisted_8$9, "✔已下载")) : _createCommentVNode$b("", true)
+            _ctx.movie.downloaded && !_ctx.movie.lib ? (_openBlock$f(), _createElementBlock$f("span", _hoisted_8$9, "✔已下载")) : _createCommentVNode$b("", true),
+            library() && _ctx.movie.states?.scrape === "unscraped" ? (_openBlock$f(), _createElementBlock$f("span", _hoisted_9$8, "未刮")) : _createCommentVNode$b("", true)
           ])
         ], 2),
-        _createElementVNode$f("div", _hoisted_9$8, [
-          _createElementVNode$f("div", _hoisted_10$8, _toDisplayString$e(number()), 1),
-          _createElementVNode$f("div", _hoisted_11$7, [
-            _createElementVNode$f("span", null, _toDisplayString$e(_ctx.movie.actor || "—"), 1),
-            library() ? (_openBlock$f(), _createElementBlock$f("span", _hoisted_12$7, _toDisplayString$e(addedText()), 1)) : (_openBlock$f(), _createElementBlock$f("span", _hoisted_13$7, "🧲 " + _toDisplayString$e(_ctx.movie.magnets || 0), 1))
+        _createElementVNode$f("div", _hoisted_10$8, [
+          _createElementVNode$f("div", _hoisted_11$7, _toDisplayString$e(number()), 1),
+          _createElementVNode$f("div", _hoisted_12$7, [
+            _createElementVNode$f("span", null, _toDisplayString$e(actorLine()), 1),
+            library() ? (_openBlock$f(), _createElementBlock$f("span", _hoisted_13$7, _toDisplayString$e(addedText()), 1)) : (_openBlock$f(), _createElementBlock$f("span", _hoisted_14$7, "🧲 " + _toDisplayString$e(_ctx.movie.magnets || 0), 1))
           ]),
-          _createElementVNode$f("div", _hoisted_14$7, [
+          _createElementVNode$f("div", _hoisted_15$6, [
             library() ? (_openBlock$f(), _createElementBlock$f(_Fragment$c, { key: 0 }, [
               _createElementVNode$f("span", {
                 title: String(_ctx.movie.lib?.path || "")
-              }, _toDisplayString$e(fileName()), 9, _hoisted_15$6),
+              }, _toDisplayString$e(libBodyText()), 9, _hoisted_16$5),
               watchUrl() ? (_openBlock$f(), _createElementBlock$f("a", {
                 key: 0,
                 class: "avh-card__watch",
@@ -5365,7 +5442,7 @@ const _sfc_main$f = /* @__PURE__ */ _defineComponent$f({
                 title: "在 Emby（MB）里观看",
                 onClick: _cache[0] || (_cache[0] = _withModifiers(() => {
                 }, ["stop"]))
-              }, "▶ 观看", 8, _hoisted_16$5)) : _createCommentVNode$b("", true)
+              }, "▶ 观看", 8, _hoisted_17$5)) : _createCommentVNode$b("", true)
             ], 64)) : (_openBlock$f(), _createElementBlock$f(_Fragment$c, { key: 1 }, [
               _createElementVNode$f("span", null, _toDisplayString$e(_ctx.movie.date || ""), 1),
               _createElementVNode$f("span", null, _toDisplayString$e(durationText()), 1)
@@ -5377,7 +5454,7 @@ const _sfc_main$f = /* @__PURE__ */ _defineComponent$f({
   }
 });
 
-const NumCard = /* @__PURE__ */ _export_sfc(_sfc_main$f, [["__scopeId", "data-v-c1cc9d49"]]);
+const NumCard = /* @__PURE__ */ _export_sfc(_sfc_main$f, [["__scopeId", "data-v-40465f5e"]]);
 
 const {reactive: reactive$2} = await importShared('vue');
 

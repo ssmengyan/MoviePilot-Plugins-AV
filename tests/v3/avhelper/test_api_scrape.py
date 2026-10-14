@@ -1085,6 +1085,30 @@ class TestDownloadsReadSide:
         assert "downloader_offline" not in payload
         assert "downloader_error" not in payload
 
+    def test_projection_title_wins_over_legacy_title(self, plugin, api_mod, monkeypatch, store):
+        """`_film_extra` 的 `title` 例外（2026-10-15）：投影的中文标题**顶掉**行里原有的标题。
+
+        为什么必须顶：`/downloads` 的行自带 `title` = 下载那一刻的**种子名**、
+        `/library` 的行自带 `title` = Emby 的 `Name`（没刮削时是文件名）—— 同一个字段两处两个意思，
+        用户看到的正是"同一个影片五花八门"。投影的 `title` 才是唯一权威。
+        """
+        self._seed(store)          # 台账里 title = "标题"（模拟种子名/机翻名）
+        with_scraper(api_mod, monkeypatch,
+                     FakeScraper(view={"key": "SNOS380", "number": "SNOS-380",
+                                       "title": "投影中文标题"}))
+        plugin._emby_lib = FakeEmbyLib(_lib_index())
+        row = plugin.api_downloads(FakeRequest(method="GET"))["items"][0]
+        assert row["title"] == "投影中文标题"
+
+    def test_projection_without_title_keeps_legacy_value(self, plugin, api_mod, monkeypatch, store):
+        """投影没有标题时**保留原值**，不许清空（宁可显示弱信息，也不要一片空白）。"""
+        self._seed(store)
+        with_scraper(api_mod, monkeypatch,
+                     FakeScraper(view={"key": "SNOS380", "number": "SNOS-380"}))
+        plugin._emby_lib = FakeEmbyLib(_lib_index())
+        row = plugin.api_downloads(FakeRequest(method="GET"))["items"][0]
+        assert row["title"] == "标题"
+
 
 class TestCancelLinkage:
     """「不要了」三出口联动（任务书 C）：`/tasks/cancel` 与 `DELETE /downloads`。
