@@ -3,8 +3,9 @@
  * 视图：刮削（数据台第八栏，v4 刮削线 S9 新增）。
  *
  * 两个页签（契约 §3.8 / v4.1 §10.2）：
- * 1. **全库刮削工作台** —— 顶部状态卡片（`full` / `missing_plot` / `missing_core` / `unscraped` / `total`，
- *    点一下筛选）、行列表（番号 / 标题 / 状态徽标 / 预览·刮削）、字段级 diff 面板、
+ * 1. **全库刮削工作台** —— 首屏「搜索刮削」入口（`common/SearchScrapePanel.vue`）+
+ *    顶部状态卡片（`full` / `missing_plot` / `missing_core` / `unscraped` / `total`，
+ *    点一下筛选）、行列表（番号 / 标题 / 状态徽标 / 预览·刮削）、
  *    全选 + 批量刮削（**二次确认，文案写明「将写入 Emby」**）；
  * 2. **数据源自检** —— `sources[]` 表格（源名 / 最近状态 / 耗时 / 错误摘要 / 检查时间）、
  *    「立即自检」按钮、`scrape_log` 最近 50 条流水。
@@ -24,7 +25,7 @@
  * `completeness` / `scrape_state` / `version_tags` / `updated_at`；`has_backup` / `crop_anchor` 仍由
  * 后端返回与使用（写前留底闸门、裁切自判），但**界面不展示、也不再提交**（见下条）。
  *
- * 三处刻意的口径（都有实测/裁决依据，改之前先读文档）：
+ * 四处刻意的口径（都有实测/裁决依据，改之前先读文档）：
  * - **「立即自检」只重读 `GET /scrape/status`**：契约 §3.7 **没有**触发式自检端点
  *   （`scraper.sources_selfcheck()` 是 Python 侧函数），所以这里把「刷新各源最近状态」如实
  *   说成「重新读取 `/scrape/status`」，不发明端点名。
@@ -34,6 +35,14 @@
  *   锚点固定 `auto`、由后端裁切逻辑自判，界面不出现，`POST /scrape/run` 也不带 `anchor`；
  *   行内「回滚」按钮与「备份」列一并撤掉，文案不再提备份/回滚。**写前留底闸门
  *   （`has_backup`）与 `POST /scrape/rollback` 端点在后端原样保留**——只是界面不给入口。
+ * - **2026-10-16 手动刮削改搜索式交互**（用户原话要义：「手动刮削预览信息过多；希望像搜索
+ *   一样只显示几个搜到的结果；找到想要的点确认，数据直接导入；自动刮削无所谓」）：
+ *   工作台首屏多一个**「搜索刮削」入口**（`common/SearchScrapePanel.vue`：输入番号或关键词 →
+ *   回车即搜 `GET /search` → 只列几条候选卡片 → 点一条出**精简确认卡**（只画将写入的
+ *   中文标题 / 原名 / 演员数 / 封面缩略 / 发行日）→ 「确认导入」走 `POST /scrape/run`）。
+ *   **`GET /scrape/preview` 与字段级 diff 表原样保留，只是降级为默认收起的「高级」折叠**
+ *   （展开后点一下才请求），行内那颗「预览」按钮也改由该面板承载 —— 全页只有一份 diff 表实现，
+ *   所以本文件不再持有预览状态。**自动刮削（Tier 1/2 定时）相关交互一律未动**（用户："无所谓"）。
  *
  * 降级纪律（本线的硬要求）：接口 404 / 网络失败 / 字段缺失 → 空态或错误态 + 一句原因，
  * **不白屏、不抛未捕获异常**、不因为一个端点坏了就把另一块也画成坏的（两块各自 try/catch）。
@@ -41,6 +50,7 @@
 import { computed, ref } from 'vue'
 import EmptyState from '../common/EmptyState.vue'
 import ErrorState from '../common/ErrorState.vue'
+import SearchScrapePanel from '../common/SearchScrapePanel.vue'
 import { errorText, hostToast, unwrap, type PluginApi } from '../../composables/usePluginApi'
 import { useHostConfirm } from '../../composables/useHostDialogs'
 import { shortTime } from '../../composables/storeTypes'
@@ -330,80 +340,19 @@ void load(false)
 
 // ---------------------------------------------------------------- 预览（字段级 diff）
 
-interface PreviewField {
-  name: string
-  current: string
-  target: string
-  changed: boolean
+/**
+ * 字段级 diff 已**降级为搜索面板里的「高级」折叠**（0.7.2）：预览状态、请求与那张
+ * diff 表全部搬到了 `common/SearchScrapePanel.vue`，本视图的行内按钮只把番号交给它。
+ *
+ * 为什么不留两份：`GET /scrape/preview` 的回包同时喂着「确认卡的关键字段」与「diff 表」，
+ * 分成两处持有就会出现"刚看过的那份值"和"确认卡上那份值"不一致。全页一份实现，
+ * 行内「预览」与折叠里的「预览字段差异」也就天然同源。
+ */
+const pickRef = ref<InstanceType<typeof SearchScrapePanel> | null>(null)
+
+function openPreview(row: WorkRow): void {
+  void pickRef.value?.openPreview({ key: row.key, number: row.number })
 }
-
-const preview = ref<{
-  open: boolean
-  loading: boolean
-  error: string
-  key: string
-  number: string
-  fields: PreviewField[]
-  warnings: string[]
-  sources: Record<string, any> | null
-}>({
-  open: false,
-  loading: false,
-  error: '',
-  key: '',
-  number: '',
-  fields: [],
-  warnings: [],
-  sources: null,
-})
-
-/** 值 → 一行文本（对象/数组压成 JSON，null 显示 `—`）。 */
-function valueText(value: unknown): string {
-  if (value === null || value === undefined || value === '') return '—'
-  if (typeof value === 'object') {
-    try {
-      return JSON.stringify(value)
-    } catch {
-      return String(value)
-    }
-  }
-  return String(value)
-}
-
-async function openPreview(row: WorkRow): Promise<void> {
-  preview.value = {
-    open: true,
-    loading: true,
-    error: '',
-    key: row.key,
-    number: row.number,
-    fields: [],
-    warnings: [],
-    sources: null,
-  }
-  try {
-    const payload: any = await getJson('plugin/scrape/preview', { key: row.key })
-    const list = firstArray(payload, ['fields']) || []
-    preview.value.fields = list.map((item: any) => ({
-      name: text(item?.name),
-      current: valueText(item?.current),
-      target: valueText(item?.target),
-      changed: item?.changed === true,
-    }))
-    preview.value.warnings = Array.isArray(payload?.warnings)
-      ? payload.warnings.map((item: any) => text(item))
-      : []
-    preview.value.sources =
-      payload?.sources && typeof payload.sources === 'object' ? payload.sources : null
-    if (payload?.number) preview.value.number = text(payload.number)
-  } catch (err) {
-    preview.value.error = errorText(err)
-  } finally {
-    preview.value.loading = false
-  }
-}
-
-const previewChanged = computed(() => preview.value.fields.filter(item => item.changed).length)
 
 // ---------------------------------------------------------------- 刮削
 
@@ -623,7 +572,8 @@ function logStatusColor(status: unknown): string {
       </div>
 
       <span v-if="tab === 'workbench'" class="avh-scrape__hint">
-        行内「刮削」写 Emby · 列表来源：{{
+        搜索刮削走 GET /search · 行内「刮削」与「确认导入」同一条写入链路 ·
+        列表来源：{{
           listSource === 'library' ? 'GET /library（/scrape/status 没有 items）'
             : listSource === 'status' ? 'GET /scrape/status'
               : '暂无（两个端点都没读到）'
@@ -643,6 +593,20 @@ function logStatusColor(status: unknown): string {
 
     <!-- ================= 页签 1：全库刮削工作台 ================= -->
     <template v-if="tab === 'workbench'">
+      <!--
+        搜索刮削入口（0.7.2，首屏第一块）：输入番号或关键词 → 候选卡片 → 精简确认卡 → 确认导入。
+        `GET /scrape/preview` 与字段级 diff 表在这个组件里降级为默认收起的「高级」折叠；
+        行内「预览」按钮也走它的 `openPreview()`（`ref` 见 `<script>` 里的 `pickRef`）。
+      -->
+      <SearchScrapePanel
+        ref="pickRef"
+        :api="api"
+        :plugin-id="pluginId"
+        :toast="toast"
+        @refresh-side="emit('refreshSide')"
+        @done="load(false)"
+      />
+
       <!-- 状态卡片：点一下筛选，再点一下取消；「全部」清筛选 -->
       <div class="avh-stats">
         <div
@@ -943,102 +907,11 @@ function logStatusColor(status: unknown): string {
       </div>
     </template>
 
-    <!-- ================= 字段级 diff 预览 ================= -->
-    <v-dialog v-model="preview.open" max-width="880" scrollable>
-      <v-card>
-        <v-toolbar density="comfortable" color="surface">
-          <v-icon icon="mdi-compare-horizontal" color="primary" class="ms-2" />
-          <v-toolbar-title class="text-body-1">
-            刮削预览 · {{ preview.number || preview.key }}
-          </v-toolbar-title>
-          <v-spacer />
-          <v-chip v-if="!preview.loading && !preview.error" size="small" variant="tonal" class="me-2">
-            变更 {{ previewChanged }} / {{ preview.fields.length }} 项
-          </v-chip>
-          <v-btn variant="text" icon="mdi-close" @click="preview.open = false" />
-        </v-toolbar>
-
-        <v-divider />
-
-        <v-card-text>
-          <div v-if="preview.loading" class="avh-scrape__loading">正在计算字段差异…</div>
-
-          <v-alert
-            v-else-if="preview.error"
-            type="warning"
-            variant="tonal"
-            density="compact"
-            class="text-caption"
-          >预览失败（GET /scrape/preview）：{{ preview.error }}</v-alert>
-
-          <template v-else>
-            <v-alert
-              v-for="(line, index) in preview.warnings"
-              :key="`warn#${index}`"
-              type="warning"
-              variant="tonal"
-              density="compact"
-              class="text-caption mb-2"
-            >{{ line }}</v-alert>
-
-            <div v-if="preview.fields.length" class="avh-tablewrap">
-              <table class="avh-table avh-table--diff">
-                <colgroup>
-                  <col style="width:150px">
-                  <col>
-                  <col>
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>字段</th>
-                    <th>当前值</th>
-                    <th>目标值</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="field in preview.fields"
-                    :key="field.name"
-                    :class="{ 'avh-diff__changed': field.changed }"
-                  >
-                    <td>
-                      <span>{{ field.name }}</span>
-                      <v-chip v-if="field.changed" size="x-small" color="warning" variant="tonal" class="ms-1">
-                        有变化
-                      </v-chip>
-                    </td>
-                    <td class="avh-diff__cell">{{ field.current }}</td>
-                    <td class="avh-diff__cell">{{ field.target }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <EmptyState
-              v-else
-              text="没有可预览的字段"
-              hint="GET /scrape/preview 返回的 fields 里没有条目（或后端还没算）"
-            />
-
-            <div v-if="preview.sources" class="avh-scrape__secttl">本次取值来源</div>
-            <div v-if="preview.sources" class="avh-srcgrid">
-              <div v-for="(value, key) in preview.sources" :key="String(key)" class="avh-srcgrid__item">
-                <span class="avh-srcgrid__k">{{ key }}</span>
-                <span>{{ valueText(value) }}</span>
-              </div>
-            </div>
-          </template>
-        </v-card-text>
-
-        <v-divider />
-        <v-card-actions>
-          <span class="avh-scrape__hint">
-            预览不写任何东西；确认无误后点该行的「刮削」才真正写 Emby。
-          </span>
-          <v-spacer />
-          <v-btn variant="text" @click="preview.open = false">关闭</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+    <!--
+      字段级 diff 表（0.7.2）：**已搬进 `SearchScrapePanel.vue`** ——
+      它默认收在「高级」折叠里，工作台行内「预览」与折叠里的按钮共用同一份实现与状态。
+      这里不再放第二张表（原因见 `<script>` 里 `pickRef` 那段注释）。
+    -->
   </div>
 </template>
 
@@ -1199,40 +1072,11 @@ function logStatusColor(status: unknown): string {
   margin-left: 4px;
 }
 
-/* diff 表：`changed` 的行整行高亮（当前值/目标值两列都看得见） */
-.avh-table--diff td {
-  white-space: normal;
-  word-break: break-word;
-  vertical-align: top;
-}
-
-.avh-diff__changed {
-  background: rgba(var(--v-theme-warning), 0.16);
-}
-
-.avh-diff__cell {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.avh-srcgrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 6px 16px;
-}
-
-.avh-srcgrid__item {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 12px;
-}
-
-.avh-srcgrid__k {
-  color: rgba(var(--v-theme-on-surface), 0.6);
-}
+/*
+ * `.avh-table--diff` / `.avh-diff__changed` / `.avh-diff__cell` / `.avh-srcgrid*` 五条规则
+ * 随 diff 表一起搬去了 `SearchScrapePanel.vue`（0.7.2）：scoped CSS 不会跨组件生效，
+ * 留在这里就是五条永远选不中任何元素（本文件模板里已经没有 `--diff` / `srcgrid` 的类名了）。
+ */
 
 /* 页签胶囊：与「下载」栏那组同一套（两份 scoped CSS 各有作用域，本项目既有做法） */
 .avh-tabs {
