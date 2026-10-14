@@ -56,8 +56,6 @@ export const SCRAPE_SECTIONS: string[] = ['scrape', 'scrapeRule']
 
 /** 刮削模式四档（v4.1 §5 / 契约 §3.7 的 `/scrape/run`）。 */
 export type ScrapeMode = 'off' | 'fill' | 'hybrid' | 'own'
-/** 封面裁切锚点五档（契约 §3.5 `crop_poster(anchor=…)`）。 */
-export type CropAnchor = 'auto' | 'right' | 'center' | 'left' | 'raw'
 /** 预告片三档（契约 D9：**默认 off**，写媒体目录会触发 Emby 实时扫描）。 */
 export type TrailerMode = 'off' | 'remote' | 'local'
 
@@ -84,8 +82,6 @@ export interface ScrapeSettings {
   translateModel: string
   /** 备用翻译模型（同一网关）。 */
   translateModelFallback: string
-  /** 封面裁切锚点（契约 §3.5 / v4.1 §8.2）。 */
-  cropAnchor: CropAnchor
   /** 预告片模式：`off` / `remote`（写 RemoteTrailers，**实测写不进去**）/ `local`（旁挂 mp4）。 */
   trailerMode: TrailerMode
   /** 定时重刮 Tier 1（新片 / 缺简介指数退避，v4.1 §5.3）。 */
@@ -106,7 +102,6 @@ export const SCRAPE_DEFAULTS: ScrapeSettings = {
   metatubeBase: '',
   translateModel: 'hy3',
   translateModelFallback: 'deepseek-v4.1-flash',
-  cropAnchor: 'auto',
   trailerMode: 'off',
   autoScrapeTier1: false,
   autoScrapeTier2: false,
@@ -115,7 +110,6 @@ export const SCRAPE_DEFAULTS: ScrapeSettings = {
 }
 
 const MODES: ScrapeMode[] = ['off', 'fill', 'hybrid', 'own']
-const ANCHORS: CropAnchor[] = ['auto', 'right', 'center', 'left', 'raw']
 const TRAILERS: TrailerMode[] = ['off', 'remote', 'local']
 
 function pick<T extends string>(value: unknown, allowed: T[], fallback: T): T {
@@ -155,7 +149,6 @@ export function toScrapeSettings(raw: unknown): ScrapeSettings {
     metatubeBase: typeof src.metatubeBase === 'string' ? src.metatubeBase.trim() : '',
     translateModel: textOf(src.translateModel, SCRAPE_DEFAULTS.translateModel),
     translateModelFallback: textOf(src.translateModelFallback, SCRAPE_DEFAULTS.translateModelFallback),
-    cropAnchor: pick(src.cropAnchor, ANCHORS, SCRAPE_DEFAULTS.cropAnchor),
     trailerMode: pick(src.trailerMode, TRAILERS, SCRAPE_DEFAULTS.trailerMode),
     autoScrapeTier1: boolOf(src.autoScrapeTier1, SCRAPE_DEFAULTS.autoScrapeTier1),
     autoScrapeTier2: boolOf(src.autoScrapeTier2, SCRAPE_DEFAULTS.autoScrapeTier2),
@@ -172,7 +165,6 @@ export const SCRAPE_KEYS: (keyof ScrapeSettings)[] = [
   'metatubeBase',
   'translateModel',
   'translateModelFallback',
-  'cropAnchor',
   'trailerMode',
   'autoScrapeTier1',
   'autoScrapeTier2',
