@@ -2511,13 +2511,28 @@ class AVHelper(_PluginBase):
         return self._emby_client
 
     def scrape_opts(self) -> Dict[str, Any]:
-        """给 `scraper.*` 的 `opts`：设置台那 11 项（`scrape_conf()`）+ 代理。
+        """给 `scraper.*` 的 `opts`：设置台那 11 项（`scrape_conf()`）+ `proxy` + **`library`**。
 
-        **待 S7 报告复核**：契约 §3.6 只写了 `opts=None`，键名这里就用设置台那套
-        （`scrapeMode`/`plotJavtxt`/…）另附 `proxy`（抓 Javtxt / MetaTube 必须走它）。
+        **`library` 是必需项**（S10 试点批抓到的阻塞级集成缺口）：`scraper.locate_items()` 的定位顺序是
+        「显式 `emby:<id>` → `store.item_list(key=…)` → `opts['emby_id']` → **`opts['library']`
+        的 Emby 内存索引 `lookup()`**」。全新库里 `meta` / `media_item` 都是 0 行，前三条全空 ——
+        少了 `library`，**「按番号（而不是按实例键）刮削」这条主路径永远走不通**：`/scrape/preview`
+        回 `items: []` + 「没有找到对应的 Emby 条目」，`/scrape/run` 全条 `找不到该番号对应的 Emby 条目`
+        且零写入。而这正是工作台与 P4 全库写入的唯一入口。
+
+        这里给的就是 `self.emby()` 那个 `EmbyLibrary` 实例（惰性 + 按 `(host, apikey)` 换实例）；
+        **没配 Emby 时给 `None`** —— `locate_items()` 用的是 `library is not None` 判断，容忍 None，
+        不会 KeyError。**别把它塞进 `emby_client`**：一个是只读全库索引（`lookup()`/`index()`），
+        一个是写侧客户端（`get_item()`/`update_item()`），两个对象不能互换。
+
+        口径补充（S11 全库实测）：`IPZZ586` 这种一个 key 对应两个**文件**的情形，Emby 把它们当
+        同一部影片的备用版本、`/Items` 只回主条目（11452）—— 所以「一个 key → 一个 Emby **可见**条目」
+        是正常的，写到主条目就是对的；`media_item` 一行一个 **Emby 可见条目**，不是一行一个文件。
         """
         opts = dict(self.scrape_conf())
         opts["proxy"] = self._proxy
+        host, apikey = self._emby_conn()
+        opts["library"] = self.emby() if (host and apikey) else None
         return opts
 
     def scrape_deps(self) -> Dict[str, Any]:

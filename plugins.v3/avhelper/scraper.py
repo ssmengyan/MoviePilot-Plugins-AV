@@ -1960,7 +1960,10 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
     if not tags and skeleton.get("tags"):
         warnings.append("标签全部被清洗规则滤掉")
     completeness = completeness_of(title_zh, title_jp, plot_zh)
-    display = _clean_text(skeleton.get("display_number")) or display_number
+    # 展示番号以**调用方给的那个**为准（它来自 `resolve_key`/`site_number`/缓存行的 `display`）：
+    # javdb 的 `number` 只用来补空，**不许反过来覆盖请求番号** —— 万一站点把我们的请求
+    # 解析成了别的条目，覆盖 `display_number` 就会把 B 片的号写到 A 片上（写 `Name` 时尤其危险）。
+    display = _clean_text(display_number) or _clean_text(skeleton.get("display_number"))
     return {
         "key": key,
         "cli": cli,
@@ -2085,27 +2088,84 @@ def _release_stamp(value: Any) -> str:
     return f"{match.group(0)}T00:00:00.0000000Z"
 
 
+def effective_overrides(overrides: Any) -> Dict[str, Any]:
+    """覆盖表里**最终真的会写进去**的那部分（与 S2 `writable_overrides()` 对齐）。
+
+    过滤规则（顺序即 S2 的顺序）：
+
+    1. `None` 值丢掉（`build_overrides()` 正常不会产生 None，这里是防御）；
+    2. 不在 `emby.WRITABLE_KEYS` 白名单里的丢掉 —— 例如 `SeriesName`（S2 目前的白名单没有它，
+       传了会被"忽略不在白名单里的键"丢掉，**不该报成"有改动"**）；
+    3. 其余保留（`Overview: ""` 是矩阵明确要求的"清空旧机翻"，**必须算作要写**）。
+
+    存在的意义只有一个：**`changed[]` 不许高估**。真机反例（0.7.0 试点）：
+    `FC2PPV4828968` 的 javdb/javtxt 双源全挂，实际只会写 `ProviderIds` 一个字段，
+    却因为"每个矩阵字段都出一行"报了 8 个改动。
+    """
+    src = overrides if isinstance(overrides, dict) else {}
+    writable = getattr(emby, "WRITABLE_KEYS", None)
+    out: Dict[str, Any] = {}
+    for key, value in src.items():
+        name = str(key)
+        if name.startswith("_") or value is None:
+            continue
+        if isinstance(writable, (set, frozenset, tuple, list)) and name not in writable:
+            continue
+        out[name] = value
+    return out
+
+
 def field_diff(dto: Optional[Dict[str, Any]], overrides: Dict[str, Any]) -> List[Dict[str, Any]]:
     """生成 `fields:[{name,current,target,changed}]`（`preview_one` 的字段级 diff）。
 
     顺序固定走 `MATRIX_FIELDS`，**每个矩阵字段都出一行**（哪怕这次跳过它）：
     `target=None` 就是"拿不到、跳过该字段"的可见证据，比只列改动过的字段有用得多。
+
+    `changed` 的判据是「**最终会写进去 且 与现值不同**」（`effective_overrides()` + 值比对），
+    不是"`target` 非空"—— 后者会把压根不会发的字段也算成改动（0.7.0 试点真机反例：
+    `FC2PPV4828968` 只写 `ProviderIds`，却报了 8 个"改动"）。
     """
     current = dto if isinstance(dto, dict) else {}
+    will_write = effective_overrides(overrides)
     out: List[Dict[str, Any]] = []
     for name in MATRIX_FIELDS:
-        target = overrides.get(name, None)
-        now = current.get(name, None)
         out.append({
             "name": name,
-            "current": now,
-            "target": target,
-            "changed": _differs(now, target),
+            "current": current.get(name, None),
+            "target": overrides.get(name, None),
+            "changed": name in will_write and _differs(current.get(name, None),
+                                                       overrides.get(name)),
         })
     for name in sorted(set(overrides) - set(MATRIX_FIELDS)):
         out.append({"name": name, "current": current.get(name),
-                    "target": overrides[name], "changed": True})
+                    "target": overrides[name],
+                    "changed": name in will_write and _differs(current.get(name), overrides[name])})
     return out
+
+
+# 集合类字段的"实质"投影：只比 (Name, Type)，忽略 Id/Role/ImageTags 这些**我们不写**的键。
+# 为什么需要它：Emby 读回时 `GenreItems`/`Studios` 带 `Id`、`People` 带 `Id`/`ImageTags`，
+# 而我们只写 `Name`（+`Type`）。不比投影的话，这三个字段**每次刮削都会报"有改动"**，
+# 界面上的"改动"永远消不掉 —— 那是另一种形式的高估。
+_COLLECTION_FIELDS = ("GenreItems", "Genres", "Studios", "People")
+
+
+def _collection_key(value: Any) -> Any:
+    """集合字段的比较键：`sorted([(Name, Type), …])`；不是这类形状就回 `None`（退回全量比对）。"""
+    if not isinstance(value, list):
+        return None
+    out: List[Any] = []
+    for item in value:
+        if isinstance(item, dict):
+            name = _clean_text(item.get("Name") or item.get("name"))
+            if not name:
+                return None
+            out.append((name, str(item.get("Type") or "")))
+        elif isinstance(item, str):
+            out.append((_clean_text(item), ""))
+        else:
+            return None
+    return sorted(out)
 
 
 def _differs(left: Any, right: Any) -> bool:
@@ -2114,6 +2174,9 @@ def _differs(left: Any, right: Any) -> bool:
         return False
     if left is None and right is None:
         return False
+    left_key, right_key = _collection_key(left), _collection_key(right)
+    if left_key is not None and right_key is not None:
+        return left_key != right_key
     return _canon(left) != _canon(right)
 
 
@@ -2298,15 +2361,19 @@ def write_item(store: Any, emby_client: Any, target: Dict[str, Any], *, item_key
     的调用方用；`preview_one` 走的是自己那条更轻的路径（它连备份与台账都不碰），不走这里。
     """
     options = dict(opts or {})
+    # 每个实例一份**带自己角标**的视图（缺陷 1）：`locate_items()` 已经用盘上路径派生过一次，
+    # 下面读到 DTO 后再用条目自己的 `Path` 补正一次（DTO 才是权威，且**不额外增加请求**）。
+    local = dict(target)
     result: Dict[str, Any] = {
         "ok": False, "status": "skipped", "changed": [], "images": {}, "error": "",
         "emby_id": emby_id, "item_key": item_key, "key": key,
         "completeness": target.get("completeness", "missing_core"),
+        "version_tags": version_labels(local.get("version_tags")),
     }
     if not _emby_write_ok(emby_client):
         result["error"] = "未配置 Emby（emby_client 不可用），仅更新本地台账"
         result["status"] = "no_emby"
-        _persist(store, target, item_key=item_key, key=key, emby_id=emby_id, opts=options,
+        _persist(store, local, item_key=item_key, key=key, emby_id=emby_id, opts=options,
                  library=library, assets=assets, wrote=False,
                  completeness=result["completeness"], error=result["error"])
         return result
@@ -2324,7 +2391,10 @@ def write_item(store: Any, emby_client: Any, target: Dict[str, Any], *, item_key
         _log_source(store, SRC_EMBY_WRITE, "error", key, 0, result["error"])
         return result
 
-    overrides = build_overrides(target, dto)
+    local["version_tags"] = item_version_tags(dto, target.get("version_tags"))
+    result["version_tags"] = version_labels(local["version_tags"])
+    result["version_tags_raw"] = dict(local["version_tags"])
+    overrides = build_overrides(local, dto)
     result["fields"] = field_diff(dto, overrides)
     result["changed"] = [f["name"] for f in result["fields"] if f["changed"]]
     if dry:
@@ -2352,7 +2422,7 @@ def write_item(store: Any, emby_client: Any, target: Dict[str, Any], *, item_key
                     int((time.time() - started) * 1000), result["error"])
         return result
 
-    images = _upload_images(emby_client, store, emby_id, target, assets or [],
+    images = _upload_images(emby_client, store, emby_id, local, assets or [],
                             options, key, cli=cli)
     result["images"] = images
     if images.get("errors"):
@@ -2361,7 +2431,7 @@ def write_item(store: Any, emby_client: Any, target: Dict[str, Any], *, item_key
                 int((time.time() - started) * 1000), result["error"])
     result["ok"] = True
     result["status"] = "ok"
-    _persist(store, target, item_key=item_key, key=key, emby_id=emby_id, opts=options,
+    _persist(store, local, item_key=item_key, key=key, emby_id=emby_id, opts=options,
              library=library, assets=assets, wrote=True,
              completeness=result["completeness"], error=result["error"])
     return result
@@ -2448,29 +2518,46 @@ def _persist(store: Any, target: Dict[str, Any], *, item_key: str, key: str, emb
 # 实例定位：key → (item_key, emby_id)
 # ---------------------------------------------------------------------------
 
-def locate_items(store: Any, key: str, display_number: str, opts: Optional[Dict[str, Any]] = None,
-                 item_key: str = "") -> List[Tuple[str, str]]:
-    """定位该作品下的**全部** `(item_key, emby_id)` —— 一个番号可能对应多个 Emby 条目。
+def locate_instances(store: Any, key: str, display_number: str,
+                     opts: Optional[Dict[str, Any]] = None,
+                     item_key: str = "") -> List[Dict[str, Any]]:
+    """定位该作品下的**全部**实例 —— 一个番号可能对应多个 Emby 条目（含各自的角标）。
+
+    返回 `[{item_key, emby_id, path, number, version_tags}, …]`。
 
     ★ S11 全库实测（`_tmp/s11/REPORT-S11.md`，事实：设计缺口）：
     **同一个 `norm_key` 可能挂多个 Emby 条目** —— `IPZZ586` ×2、`MIRD277` ×4（`-A/-B/-C/-D`）。
     只写第一条的后果不是"少刮一点"，而是**另外 4 条永远没有元数据**（用户看到 4 张空卡片）。
     `media_item` 本身是一行一个 `emby_id`，表结构天然支持多实例，所以这里必须全列出来。
 
+    ★ 每个实例**自带 `version_tags`**（0.7.0 试点缺陷 1）：能拿到盘上路径时
+    （`media_item.file_path` → S11 缓存行 `emby[].path`）就地用**该条目的文件名**解析一次；
+    拿不到就先留 `{}`，由 `write_item()` 在读到 DTO 后用它自己的 `Path` 补正
+    （`item_version_tags()`）—— **同一组多实例各用各的文件名**，`-UC` 的那条有角标、
+    普通版没有，正好是 v4.1 §9.2 第 6 条要的版本角标。
+
     顺序：显式实例键 → `media_item` 全部行 → `opts['emby_id']` → Emby 内存索引（只补一条）。
     同 `emby_id` 去重；`item_key` 一律规范化成 `emby:<id>`（避免同一实例两种写法各写一遍）。
+    抓取缓存只用来**补路径/角标**，**不会凭空造实例**（台账里没有就是没有）。
     """
     options = opts or {}
-    out: List[Tuple[str, str]] = []
+    out: List[Dict[str, Any]] = []
     seen: List[str] = []
 
-    def add(item: Any, emby_id: Any) -> None:
+    def add(item: Any, emby_id: Any, path: Any = "") -> None:
         ident = str(emby_id or "").strip()
         if not ident or ident in seen:
             return
         seen.append(ident)
         text = str(item or "").strip()
-        out.append((text if text.startswith("emby:") else f"emby:{ident}", ident))
+        info = item_number({"Path": path}) if path else {}
+        out.append({
+            "item_key": text if text.startswith("emby:") else f"emby:{ident}",
+            "emby_id": ident,
+            "path": str(path or ""),
+            "number": str((info or {}).get("number") or ""),
+            "version_tags": dict((info or {}).get("version_tags") or {}),
+        })
 
     text = str(item_key or "").strip()
     match = _ITEM_KEY.match(text)
@@ -2481,13 +2568,23 @@ def locate_items(store: Any, key: str, display_number: str, opts: Optional[Dict[
         try:
             for row in store.item_list(key=key) or []:
                 if isinstance(row, dict):
-                    add(row.get("item_key"), row.get("emby_id"))
+                    add(row.get("item_key"), row.get("emby_id"), row.get("file_path"))
         except Exception as error:                              # pragma: no cover - 防御
             logger.warning(f"AVHelper item_list({key}) 失败：{error}")
     forced = str(options.get("emby_id") or "").strip()
     if forced:
         add(f"emby:{forced}", forced)
     if out:
+        # 台账里没有 file_path 时，用 S11 抓取缓存里的 emby[].path 补（本地、零请求）
+        cached = (cache_row(options.get("fetch_cache"), key).get("emby") or [])
+        paths = {str(e.get("id") or ""): str(e.get("path") or "") for e in cached
+                 if isinstance(e, dict)}
+        for entry in out:
+            if not entry["path"] and paths.get(entry["emby_id"]):
+                info = item_number({"Path": paths[entry["emby_id"]]})
+                entry["path"] = paths[entry["emby_id"]]
+                entry["number"] = entry["number"] or str(info.get("number") or "")
+                entry["version_tags"] = dict(info.get("version_tags") or {})
         return out
     library = options.get("library")
     finder = getattr(library, "lookup", None) if library is not None else None
@@ -2498,8 +2595,20 @@ def locate_items(store: Any, key: str, display_number: str, opts: Optional[Dict[
             logger.warning(f"AVHelper EmbyLibrary.lookup 失败：{error}")
             hit = None
         if isinstance(hit, dict):
-            add(f"emby:{hit.get('id')}", hit.get("id"))
+            add(f"emby:{hit.get('id')}", hit.get("id"), hit.get("path"))
     return out
+
+
+def locate_items(store: Any, key: str, display_number: str, opts: Optional[Dict[str, Any]] = None,
+                 item_key: str = "") -> List[Tuple[str, str]]:
+    """`locate_instances()` 的**实例键对**视图：`[(item_key, emby_id), …]`。
+
+    保留这个形状是因为它是**已经上线的对外形状**（S8 的 `__init__.py` 与它的用例都按
+    `[("emby:12598", "12598")]` 断言）。角标等逐实例信息在 `locate_instances()` 里，
+    要那几项的调用方直接用它 —— 别为了少写一行去改别人的用例。
+    """
+    return [(entry["item_key"], entry["emby_id"])
+            for entry in locate_instances(store, key, display_number, opts, item_key)]
 
 
 def locate_item(store: Any, key: str, display_number: str, opts: Optional[Dict[str, Any]] = None,
@@ -2530,6 +2639,30 @@ def number_from_dto(dto: Any) -> str:
     会带别的番号形态），所以这里连"兜底"都不做：认不出就回空串，让调用方走 Emby 索引兜底。
     """
     data = dto if isinstance(dto, dict) else {}
+    info = item_number(data)
+    return info["number"]
+
+
+def item_number(dto: Any) -> Dict[str, Any]:
+    """从**条目自己的文件名**派生 `{number, version_tags, path, matched}`。
+
+    与 `number_from_dto()` 是同一套解析，但把 `version_tags` 一起带出来 ——
+    **写侧拿不到角标是 0.7.0 试点抓到的真机缺陷**：
+
+    | 请求的 key | 旧行为 `version_tags` | `Name` 目标 |
+    | --- | --- | --- |
+    | `IPZZ-912-UC` | `["中字流出"]` | `IPZZ-912 [中字流出] 标题` ✅ |
+    | `IPZZ912`（工作台给的是干净键） | `[]` | `IPZZ-912 标题` ❌ 角标没了 |
+    | `emby:12595` | `[]` | 同上 ❌ |
+
+    而 `IPZZ-912-UC` 与 `IPZZ912` 是**同一部片**（`norm_key` 都是 `IPZZ912`），
+    主路径给的就是干净键 → 盘上文件名里的「中字流出」信息就再也出不来。
+    所以角标必须以**该条目自己的文件名**为准：文件在盘上是什么，就是什么。
+
+    `number` 仍是干净号（`IPZZ-912`）—— 角标只进 `Name` 的 `{badge}` 与
+    `media_item.version_tags_json`，不参与番号匹配（契约 D1）。
+    """
+    data = dto if isinstance(dto, dict) else {}
     paths: List[str] = []
     for key in ("Path", "FileName"):
         if data.get(key):
@@ -2537,12 +2670,30 @@ def number_from_dto(dto: Any) -> str:
     for source in (data.get("MediaSources") or []):
         if isinstance(source, dict) and source.get("Path"):
             paths.append(str(source["Path"]))
+    out: Dict[str, Any] = {"number": "", "version_tags": {}, "path": "", "matched": False}
     for path in paths:
         base = str(path).replace("\\", "/").rsplit("/", 1)[-1]
         parsed = emby.parse_av_number(base)
         if parsed.matched and parsed.display_number:
-            return parsed.display_number
-    return ""
+            return {
+                "number": str(parsed.display_number),
+                "version_tags": dict(parsed.version_tags or {}),
+                "path": str(path), "matched": True,
+            }
+    return out
+
+
+def item_version_tags(dto: Any, fallback: Any = None) -> Dict[str, Any]:
+    """该条目的 `version_tags`：**条目文件名优先**，解析不出文件名才退回请求键的角标。
+
+    「优先」是**整体替换而不是逐键合并**：`IPZZ-912.mp4`（普通版）解出来的角标是 `{}`，
+    那就该是 `{}` —— 请求键里的 `-UC` 属于另一个实例，逐键合并会把它的「中字流出」
+    错安到普通版头上（同组多实例时尤其明显：`MIRD-277-A/B/C/D` 各有各的角标）。
+    """
+    info = item_number(dto)
+    if info.get("matched"):
+        return dict(info.get("version_tags") or {})
+    return dict(fallback or {})
 
 
 def _read_dto(emby_client: Any, emby_id: str) -> Tuple[Optional[Dict[str, Any]], str]:
@@ -2578,20 +2729,27 @@ def preview_one(key: Any, *, store: Any, cli: Any, emby_client: Any = None,
     """
     options = dict(opts or {})
     resolved = resolve_key(key)
-    found = locate_items(store, resolved.get("key") or "",
-                         resolved.get("display_number") or "", options,
-                         resolved.get("item_key") or "")
-    item_key, emby_id = found[0] if found else ("", "")
+    found = locate_instances(store, resolved.get("key") or "",
+                             resolved.get("display_number") or "", options,
+                             resolved.get("item_key") or "")
+    first = found[0] if found else {"item_key": "", "emby_id": "", "path": "",
+                                    "version_tags": {}, "number": ""}
+    item_key, emby_id = first["item_key"], first["emby_id"]
     # `emby:12598` 这种输入本身不带番号：先从条目 DTO 的**路径**反推（S11：绝不用 Name）。
     dto, dto_error = _read_dto(emby_client, emby_id)
     number = (str(options.get("display_number") or "").strip()
               or resolved.get("display_number") or resolved.get("number")
-              or number_from_dto(dto) or resolved.get("input") or "")
+              or number_from_dto(dto) or first.get("number")
+              or resolved.get("input") or "")
     key_text = resolved.get("key") or emby.canon_key(number) or number
+    # ★ 缺陷 1：角标以**该实例自己的文件名**为准（DTO 优先 → 定位时用盘上路径派生的 → 请求键）
+    instance_tags = item_version_tags(dto, first.get("version_tags")
+                                      or resolved.get("version_tags"))
     existing = _meta_of(store, key_text)
     target = gather(cli, store, key_text, number, opts=options, existing=existing,
-                    version_tags=resolved.get("version_tags"))
+                    version_tags=instance_tags)
     target["cli"] = cli
+    result_tags = version_labels(target.get("version_tags"))
 
     warnings = list(target.get("warnings") or [])
     if not emby_id:
@@ -2630,7 +2788,15 @@ def preview_one(key: Any, *, store: Any, cli: Any, emby_client: Any = None,
         "display_number": target.get("display_number") or number,
         "item_key": item_key,
         "emby_id": emby_id,
-        "items": [{"item_key": key_, "emby_id": ident} for key_, ident in found],
+        # `items[]` 保持**已上线的形状**（`[{item_key, emby_id}]`，S8 的用例按它断言）；
+        # 逐实例的角标等新增信息放 `instances[]`（只加不改）。
+        "items": [{"item_key": entry["item_key"], "emby_id": entry["emby_id"]}
+                  for entry in found],
+        "instances": [{"item_key": entry["item_key"], "emby_id": entry["emby_id"],
+                       "path": entry.get("path") or "",
+                       "number": entry.get("number") or "",
+                       "version_tags": version_labels(entry.get("version_tags"))}
+                      for entry in found],
         "fields": field_diff(dto, overrides),
         "sources": target.get("sources") or {},
         "warnings": warnings,
@@ -2641,7 +2807,8 @@ def preview_one(key: Any, *, store: Any, cli: Any, emby_client: Any = None,
         "plot_zh_len": len(target.get("plot_zh") or ""),
         "plot_jp_len": len(target.get("plot_jp") or ""),
         "translation_status": target.get("translation_status"),
-        "version_tags": version_labels(target.get("version_tags")),
+        "version_tags": result_tags,
+        "version_tags_raw": dict(target.get("version_tags") or {}),
     }
 
 
@@ -2671,9 +2838,9 @@ def scrape_one(key: Any, *, store: Any, cli: Any, emby_client: Any,
     options = dict(opts or {})
     ensure_namemap(store, options)
     resolved = resolve_key(key)
-    found = locate_items(store, resolved.get("key") or "",
-                         resolved.get("display_number") or "", options,
-                         resolved.get("item_key") or "")
+    found = locate_instances(store, resolved.get("key") or "",
+                             resolved.get("display_number") or "", options,
+                             resolved.get("item_key") or "")
     if not found:
         return {
             "ok": False, "status": "error", "key": resolved.get("key") or str(key or ""),
@@ -2682,23 +2849,27 @@ def scrape_one(key: Any, *, store: Any, cli: Any, emby_client: Any,
             "completeness": "missing_core", "retry": {}, "items": [], "written": 0, "total": 0,
             "error": "找不到该番号对应的 Emby 条目（先用 /library 或 item_upsert 登记）",
         }
-    item_key, emby_id = found[0]
+    first = found[0]
+    item_key, emby_id = first["item_key"], first["emby_id"]
     number = (str(options.get("display_number") or "").strip()
               or resolved.get("display_number") or resolved.get("number") or "")
     if not number:
         # 输入是 `emby:<id>` 时番号只能从**路径**反推（S11：绝不用 Name）；缓存行里也有一份
         row = cache_row(options.get("fetch_cache"), resolved.get("key") or "")
         number = _clean_text(row.get("display"))
-        for entry_key, ident in found:
+        for entry in found:
             if number:
                 break
-            dto, _err = _read_dto(emby_client, ident)
+            dto, _err = _read_dto(emby_client, entry["emby_id"])
             number = number_from_dto(dto)
         number = number or resolved.get("input") or ""
     key_text = resolved.get("key") or emby.canon_key(number) or number
     existing = _meta_of(store, key_text)
+    # 取数**只做一次**（三源调用最贵）；角标由每个实例在 `write_item()` 里用自己的文件名定。
+    # 这里传代表实例的角标只作兜底（比如条目读不到 DTO 时 `_persist` 仍要有个值）。
     target = gather(cli, store, key_text, number, opts=options, existing=existing,
-                    version_tags=resolved.get("version_tags"))
+                    version_tags=first.get("version_tags")
+                    or resolved.get("version_tags"))
     target["cli"] = cli
     assets: List[Dict[str, Any]] = []
     if number and bool(_opt(options, "write_images", True)) \
@@ -2706,16 +2877,18 @@ def scrape_one(key: Any, *, store: Any, cli: Any, emby_client: Any,
         assets = javdb_assets(cli, number, opts=options, store=store, key=key_text)
 
     results: List[Dict[str, Any]] = []
-    for entry_key, ident in found:
+    for entry in found:
         one = write_item(
-            store, emby_client, target, item_key=entry_key, key=key_text,
-            emby_id=ident, opts=options, library=options.get("library"), assets=assets,
-            cli=cli)
+            store, emby_client, target, item_key=entry["item_key"], key=key_text,
+            emby_id=entry["emby_id"], opts=options, library=options.get("library"),
+            assets=assets, cli=cli)
         one.pop("fields", None)
         results.append({
-            "item_key": entry_key, "emby_id": ident, "ok": bool(one.get("ok")),
-            "status": one.get("status"), "changed": one.get("changed") or [],
-            "images": one.get("images") or {}, "error": one.get("error") or "",
+            "item_key": entry["item_key"], "emby_id": entry["emby_id"],
+            "ok": bool(one.get("ok")), "status": one.get("status"),
+            "changed": one.get("changed") or [], "images": one.get("images") or {},
+            "error": one.get("error") or "",
+            "version_tags": one.get("version_tags") or version_labels(entry.get("version_tags")),
         })
     changed: List[str] = []
     for one in results:
@@ -2736,6 +2909,7 @@ def scrape_one(key: Any, *, store: Any, cli: Any, emby_client: Any,
         "translation_status": target.get("translation_status"),
         "error": "；".join(one["error"] for one in results if one["error"]),
         "items": results, "written": len(wrote), "total": len(results),
+        "version_tags": results[0]["version_tags"],
     }
     meta = _meta_of(store, key_text)
     report["retry"] = {
@@ -2774,16 +2948,21 @@ def scrape_batch(keys: Any, *, store: Any, cli: Any, emby_client: Any,
 # ---------------------------------------------------------------------------
 
 def rollback_item(item_key: Any, *, store: Any, emby_client: Any) -> Dict[str, Any]:
-    """回滚一条：把 `store.item_backup_get()` 的完整 DTO 原样回灌（只认 204）。
+    """回滚一条：把 `store.item_backup_get()` 的完整 DTO 回灌成**基线状态**（只认 204）。
 
     ⚠️ **S2 的 `update_item()` 是「合并覆盖」语义**（GET → 剔只读键 → 盖上覆盖表 → POST），
-    所以"整份覆盖"要靠两件事凑齐，本函数都已处理：
+    所以"整份还原"要靠覆盖表**显式表达清空**，不能只把备份里有的键塞进去：
 
-    1. 把**备份 DTO 的每一个可写键**都放进覆盖表（备份里没有的键不会漏 —— 备份是完整 DTO，
-       45 键里 13 个可写键一个不少）；
-    2. `ProviderIds` 传 `provider_ids_replace=True`（S2 提供该控制标记）→ 备份里的
-       `ProviderIds` **整份替换**，否则"备份为空字典"的情形会残留刮削后写入的键
-       （P0-① 明确点过这个坑）。
+    1. 覆盖表走 `_restore_payload()` → `emby.restore_overrides(backup)`（S2 交付）。
+       它解决的正是**回滚链断掉**的那个真机缺陷：Emby 对"没有值的可选字段"会整个省略该键
+       （12598 写前备份 45 键里**没有 `Overview`**），而"备份里没有的键 = 不动" →
+       备份原样回灌**回滚不掉 `Overview`**。`restore_overrides()` 对基线缺席但可清空的标量
+       显式写 `None`（S2 落成 `""`）、缺席集合键写 `[]`、`ProviderIds` 整份还原
+       （`provider_ids_replace=True` 已包含）。
+    2. ⚠️ **`PremiereDate`/`ProductionYear` 的清空未实测**（S2 交底），所以它们**保持"不动"**
+       —— 宁可留旧值，也不要拿空串去赌 400。
+    3. **正常写入路径不共用这套**：`scrape_one()` 该跳过的字段仍要跳过（"拿不到就不写"），
+       回滚是"整份还原"，两者语义不同，所以分成两个函数。
 
     只读键（`Path`/`MediaSources`/`RunTimeTicks`/`ImageTags`…）由 S2 从**当前** DTO 重新取，
     这是对的：它们是服务端/探针维护的，本来就不该被备份覆盖。
@@ -2836,9 +3015,7 @@ def rollback_item(item_key: Any, *, store: Any, emby_client: Any) -> Dict[str, A
         except Exception:                                       # pragma: no cover - 防御
             before = None
 
-    overrides = {k: v for k, v in backup.items() if k not in emby.READONLY_KEYS}
-    overrides["provider_ids_replace"] = True
-    overrides["ProviderIds"] = dict(backup.get("ProviderIds") or {})
+    overrides = _restore_payload(backup)
     started = time.time()
     ok, detail = _call(emby_client, "update_item", emby_id, overrides)
     if not ok:
@@ -2877,6 +3054,49 @@ def rollback_item(item_key: Any, *, store: Any, emby_client: Any) -> Dict[str, A
             logger.warning(f"AVHelper 回滚后更新 media_item 失败：{error}")
     out["ok"] = True
     return out
+
+
+def _restore_payload(backup: Dict[str, Any]) -> Dict[str, Any]:
+    """备份 DTO → **能真正还原**的覆盖表（回滚专用，与正常写入的语义**不同**）。
+
+    首选 `emby.restore_overrides(backup)`（S2 交付，2026-10-14）。为什么非它不可 ——
+    S2 的真机 E2E 抓到的缺陷：
+
+    - Emby 对"没有值的可选字段"**会整个省略该键**：12598 写前的 DTO 与备份里**根本没有
+      `Overview`**（45 键），写一次之后才出现（46 键）；
+    - 而 `update_item()` 是「以当前 DTO 为底、覆盖表改哪算哪」→ **备份里没有的键 = 不动**，
+      不是清空 → 「备份原样回灌」**回滚不掉 `Overview`**，条目停在验证态、与备份 sha 不一致。
+    - `restore_overrides()` 补上了这一层：基线缺席但可清空的标量显式写 `None`
+      （`writable_overrides()` 会落成 `""`）、缺席的集合键写 `[]`、`ProviderIds` 整份还原
+      （`provider_ids_replace=True` 已包在里面）。
+
+    ⚠️ **未验证项（S2 明确交底，别赌）**：`NULL_CLEARABLE_KEYS` 只覆盖**字符串类**字段
+    （`Name`/`OriginalTitle`/`Overview`/`SeriesName`/`OfficialRating`/`CommunityRating`/
+    `Taglines`）；`PremiereDate`/`ProductionYear` 是日期/数值型，**清空写法未实测**，
+    所以它们**故意不在表里** → 回滚时**保持"不动"**（宁可留旧值，也不要拿空串去赌 400）。
+    等真机探明"清空写不服 400"再由 S2 放进那张表，本函数不用改。
+
+    降级：`emby.py` 里没有 `restore_overrides`（旧版/正在改）时退回老写法
+    （剔只读键 + `provider_ids_replace=True`）—— 它至少能还原**备份里有的**字段。
+    """
+    src = backup if isinstance(backup, dict) else {}
+    # 先把只读键剔掉再交给 S2：`restore_overrides()` 是**整份复制**备份的，
+    # 只读键（`Path`/`MediaSources`/`Etag`/`Id`… 实测 32 个）留着不会写错，
+    # 但会让 `writable_overrides()` 为每一个键记一条"忽略只读键"的 warning（一次回滚 30 条噪音），
+    # 而且只读键本来就不在 `WRITABLE_KEYS` 里 → 剔掉**不影响**它的"缺席即清空"判定。
+    cleaned = {k: v for k, v in src.items() if k not in emby.READONLY_KEYS}
+    builder = getattr(emby, "restore_overrides", None)
+    if callable(builder):
+        try:
+            out = builder(cleaned)
+            if isinstance(out, dict) and out:
+                return out
+        except Exception as error:                              # noqa: BLE001 - 故意的
+            logger.warning(f"AVHelper emby.restore_overrides 失败，退回老写法：{error}")
+    overrides = dict(cleaned)
+    overrides["provider_ids_replace"] = True
+    overrides["ProviderIds"] = dict(src.get("ProviderIds") or {})
+    return overrides
 
 
 def _restored_fields(backup: Dict[str, Any], before: Any, after: Any) -> List[str]:

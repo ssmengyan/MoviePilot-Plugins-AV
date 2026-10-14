@@ -348,6 +348,72 @@ class TestUpdateItem:
         assert "Path" not in body, "只读键不该出现在写载荷里（传了也不会被采纳）"
         assert body["Name"] == "x"
 
+    def test_unknown_key_is_rejected(self, emby_mod, fake_http):
+        """白名单之外的自造键也不许进载荷。"""
+        c = _client(emby_mod)
+        self._prep(fake_http)
+        ok, _ = c.update_item("12598", {"Name": "x", "TotallyMadeUp": 1})
+        assert ok
+        assert "TotallyMadeUp" not in _last(fake_http, "post", "/emby/Items/12598")["json"]
+
+    # ---------- Content-Type：0.7.0 上线后第一个真机写请求就挂在这里（必挂级） ----------
+
+    def test_post_uses_application_json_content_type(self, emby_mod, fake_http):
+        """★ `update_item` 的 POST **必须**显式带 `application/json`。
+
+        真机故障（0.7.0 canary）：`RequestUtils.__init__` 的默认头是
+        `application/x-www-form-urlencoded; charset=UTF-8`，而 requests 只在「调用方没给
+        Content-Type」时才用 `json=` 的 `application/json` —— 默认头把它占了，于是 JSON body
+        顶着表单头发出去，Emby 用表单解析器读它，body 长度被当成"表单 key 长度"：
+        超过 2048 直接 **500 `Form key length limit 2048 exceeded.`**。
+        requests 的 `json=` 默认 `ensure_ascii=True`（中文变 `\\uXXXX`，6 字节/字），
+        线上载荷轻松破 2 KB → **8/10 条必挂**，`rollback_item()` 走同一条路会一起挂
+        （等于 D7 的"写前备份 + 一键回滚"整条链是断的）。
+        """
+        c = _client(emby_mod)
+        self._prep(fake_http)
+        ok, detail = c.update_item("12598", {"Name": "SNOS-380"})
+        assert ok, detail
+        call = _last(fake_http, "post", "/emby/Items/12598")
+        assert call["headers"].get("Content-Type") == "application/json"
+        # body 仍要走 json=（不要退化成 data= 手搓字符串）
+        assert isinstance(call["json"], dict) and call["json"]["Name"] == "SNOS-380"
+
+    def test_post_body_is_not_form_encoded(self, emby_mod, fake_http):
+        """反向断言：绝不能出现 form 头 —— 那正是真机上 500 的形态。"""
+        c = _client(emby_mod)
+        self._prep(fake_http)
+        c.update_item("12598", {"Name": "x"})
+        ctype = _last(fake_http, "post", "/emby/Items/12598")["headers"].get("Content-Type", "")
+        assert "x-www-form-urlencoded" not in ctype
+
+    def test_big_payload_would_have_tripped_the_form_parser(self, emby_mod, fake_http):
+        """线上那些"必挂"的载荷都远超 2048：钉住「大载荷 + json 头」这个组合。
+
+        （这条同时说明为什么它比全挂更难查：小条目碰运气能过。）
+        """
+        c = _client(emby_mod)
+        self._prep(fake_http)
+        big = "中" * 2000                      # ensure_ascii 后 12000 字节，远超 2048
+        ok, _ = c.update_item("12598", {"Name": "SNOS-380", "Overview": big})
+        assert ok
+        call = _last(fake_http, "post", "/emby/Items/12598")
+        assert call["headers"].get("Content-Type") == "application/json"
+        assert len(call["json"]["Overview"]) == 2000
+
+    def test_get_and_delete_do_not_carry_json_header(self, emby_mod, fake_http):
+        """GET / DELETE 没有 JSON body，不该被这次改动影响。"""
+        c = _client(emby_mod)
+        fake_http.on("get", "/emby/Users", FakeReply(200, USERS))
+        fake_http.on("get", "/emby/Users/cfa1/Items/12598", FakeReply(200, {"Id": "12598"}))
+        fake_http.on("delete", "/emby/Items/12598/Images/Primary", FakeReply(204))
+        c.get_item("12598")
+        c.delete_image("12598", "Primary")
+        assert _calls(fake_http, "get") and _calls(fake_http, "delete")
+        for method in ("get", "delete"):
+            for call in _calls(fake_http, method):
+                assert call["headers"].get("Content-Type") != "application/json", call["url"]
+
 
 class TestUpdateItemFailures:
     """失败一律 `(False, 原因)`，**绝不抛异常**。"""
@@ -734,3 +800,45 @@ class TestBareDigitsAreNotNumbers:
         """`canon_key()` 的契约是「绝不返回空串（调用方拿它当查询键）」—— 这条不受影响。"""
         assert emby_mod.canon_key("12598") == "12598"
         assert emby_mod.canon_key("12598") == emby_mod.norm_key("12598")
+
+
+class TestRestoreOverrides:
+    """`restore_overrides()`：把备份 DTO 变成**能真正还原**的覆盖表。
+
+    真机踩坑（S2 E2E）：Emby 对没有值的可选字段会**整个省略该键** —— `SNOS-380` 写前的
+    DTO 与备份里都**没有 `Overview` 这个键**（45 键），写一次之后才出现（46 键）。
+    所以「备份原样回灌」回滚不掉 `Overview`，条目停在验证态、与备份 sha 不一致。
+    """
+
+    def test_absent_scalar_keys_become_explicit_clears(self, emby_mod):
+        backup = {"Name": "SNOS-380", "People": [], "Studios": [],
+                  "ProviderIds": {}}
+        overrides = emby_mod.restore_overrides(backup)
+        # 基线里缺席的可清空标量 → 显式 None（writable_overrides 会落成 ""）
+        assert overrides.get("Overview") is None
+        assert overrides.get("OriginalTitle") is None
+        assert overrides.get("SeriesName") is None
+        # 备份里有的值照原样带
+        assert overrides.get("Name") == "SNOS-380"
+        # ProviderIds 整份还原
+        assert overrides.get("provider_ids_replace") is True
+        assert overrides.get("ProviderIds") == {}
+
+    def test_absent_collections_become_empty_lists(self, emby_mod):
+        """集合键缺席要写 `[]`（`null` 会 400）。"""
+        overrides = emby_mod.restore_overrides({"Name": "x"})
+        for key in ("People", "Studios", "Genres", "GenreItems"):
+            assert overrides.get(key) == [], key
+
+    def test_garbage_backup_is_harmless(self, emby_mod):
+        assert emby_mod.restore_overrides(None)["provider_ids_replace"] is True
+        assert emby_mod.restore_overrides("nope")["ProviderIds"] == {}
+
+    def test_restore_overrides_survives_writable_overrides(self, emby_mod):
+        """端到端：备份（缺 Overview）→ restore_overrides → writable_overrides → 真会清空。"""
+        backup = {"Name": "SNOS-380", "People": [], "Studios": [],
+                  "Genres": [], "GenreItems": [], "ProviderIds": {}}
+        overrides, _ = emby_mod.writable_overrides(emby_mod.restore_overrides(backup))
+        assert overrides.get("Overview") == "", "Overview 必须是 ''（清空），不能缺席"
+        assert overrides.get("Name") == "SNOS-380"
+        assert overrides.get("People") == []

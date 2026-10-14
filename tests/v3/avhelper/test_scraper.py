@@ -1460,6 +1460,89 @@ class TestRollback:
         assert emby.calls["delete_image"] == 1
 
 
+class TestRollbackRestoresAbsentKeys:
+    """S2 真机 E2E 抓到的回滚链缺陷：Emby 会**整个省略**"没有值"的可选字段。
+
+    12598 写前备份是 **45 键、根本没有 `Overview`**；写一次之后它才出现（46 键）。
+    而 `update_item` 是「以当前 DTO 为底、覆盖表改哪算哪」→ **备份里没的键 = 不动**，
+    于是"备份原样回灌"回滚不掉 `Overview`，条目停在验证态、与备份 sha 不一致。
+    修法：覆盖表走 `emby.restore_overrides(backup)`（基线缺席的可清空标量显式清空）。
+    """
+
+    # 模拟 Emby 的省略行为：没有 Overview / ProductionYear，集合键也不在，ImageTags 空
+    BASELINE_WITHOUT_OVERVIEW = {
+        "Id": "12598", "Name": "SNOS-380", "SortName": "SNOS-380",
+        "Path": "/Media/9kg/avi/SNOS-380.mp4", "Etag": "abc",
+        "ProviderIds": {}, "MediaSources": [{"Path": "/Media/9kg/avi/SNOS-380.mp4"}],
+        "RunTimeTicks": 99493394000, "ImageTags": {},
+    }
+
+    def _rollback(self, scraper, backup, current):
+        store = FakeStore(backup=json.dumps(backup, ensure_ascii=False))
+        emby = FakeEmby(dto=current)
+        report = scraper.rollback_item("emby:12598", store=store, emby_client=emby)
+        return report, emby, (emby.updated[0]["dto"] if emby.updated else {})
+
+    def test_absent_overview_is_explicitly_cleared(self, scraper):
+        """★ 硬性验收：备份里**缺 `Overview`** → 覆盖表里必须**显式带清空**。"""
+        current = dict(self.BASELINE_WITHOUT_OVERVIEW,
+                       Overview="S2-CT-OK 真机写路径验证", Genres=["4K"],
+                       People=[{"Name": "x", "Type": "Actor"}],
+                       ProviderIds={"AVHelper": "SNOS-380"})
+        report, emby, sent = self._rollback(scraper, self.BASELINE_WITHOUT_OVERVIEW, current)
+        assert report["ok"] is True
+        assert "Overview" in sent, "缺席键必须显式清空，否则回滚链断在这里"
+        assert sent["Overview"] is None                    # S2 把它落成 ""
+        assert sent["provider_ids_replace"] is True         # ProviderIds 整份还原
+        assert sent["ProviderIds"] == {}
+        assert sent["People"] == []                         # 缺席集合键 → []（null 会 400）
+        # 端到端口径：S2 的 writable_overrides() 必须把 None 变成 ""（真机能清空 Overview）
+        effective, _notes = scraper.emby.writable_overrides(sent)
+        assert effective["Overview"] == ""
+        assert "MediaSources" not in sent and "Etag" not in sent and "Path" not in sent
+
+    def test_untested_date_clears_are_not_guessed(self, scraper):
+        """`PremiereDate`/`ProductionYear` 的清空未实测 → **保持"不动"**，不许拿空串赌 400。"""
+        current = dict(self.BASELINE_WITHOUT_OVERVIEW, PremiereDate="2026-10-14T00:00:00.0000000Z",
+                       ProductionYear=2026)
+        report, emby, sent = self._rollback(scraper, self.BASELINE_WITHOUT_OVERVIEW, current)
+        assert report["ok"] is True
+        assert "PremiereDate" not in sent                   # S2 明确交底：未验证，故意不放进表
+        assert "ProductionYear" not in sent
+        assert scraper.emby.NULL_CLEARABLE_KEYS and \
+            "PremiereDate" not in scraper.emby.NULL_CLEARABLE_KEYS
+
+    def test_backup_values_are_replayed_verbatim(self, scraper):
+        """备份里**有**的字段照原值回灌（含空串 —— 那本身就是基线的值）。"""
+        backup = dict(self.BASELINE_WITHOUT_OVERVIEW, Overview="", CommunityRating=None,
+                      Studios=[{"Name": "旧片商"}])
+        report, emby, sent = self._rollback(scraper, backup, dict(EMPTY_DTO, Overview="新简介"))
+        assert report["ok"] is True
+        assert sent["Overview"] == "" and sent["Studios"] == [{"Name": "旧片商"}]
+        assert "Path" not in sent and "RunTimeTicks" not in sent
+
+    def test_restore_payload_falls_back_when_helper_missing(self, scraper, monkeypatch):
+        """`emby.restore_overrides` 不在（旧版/正在改）时退回老写法，至少还原备份里有的键。"""
+        monkeypatch.setattr(scraper.emby, "restore_overrides", None, raising=False)
+        got = scraper._restore_payload({"Id": "1", "Name": "x", "Path": "/p",
+                                        "ProviderIds": {"MetaTube": "y"}})
+        assert got["Name"] == "x" and "Path" not in got
+        assert got["ProviderIds"] == {"MetaTube": "y"}
+        assert got["provider_ids_replace"] is True
+
+    def test_normal_write_path_still_skips(self, scraper):
+        """回滚的"整份还原"不许污染正常写入：拿不到的值仍然跳过。"""
+        store = FakeStore()
+        emby = FakeEmby(dto=EMPTY_DTO)
+        target = targets({}, plot_zh="", plot_jp="")
+        report = scraper.write_item(store, emby, target, item_key="emby:1", key="SNOS380",
+                                    emby_id="1", opts={"now": "2026-10-14T00:00:00",
+                                                       "write_images": False})
+        sent = emby.updated[0]["dto"]
+        assert "Overview" not in sent                        # 两者都空 → 不动（回滚才会清）
+        assert set(sent) <= set(scraper.MATRIX_FIELDS)
+
+
 # ---------------------------------------------------------------------------
 # 12. film_view（零抓取）
 # ---------------------------------------------------------------------------
@@ -2011,7 +2094,7 @@ def s11_cache(key="SNOS380", display="SNOS-380", **patch):
         "display": display,
         "emby": [{"id": "12598", "name": display, "path": f"/Media/9kg/avi/{display}.mp4"}],
         "javdb": {"ok": True, "number": display, "fetched_at": "2026-10-14T06:00:00+08:00",
-                  "detail": dict(JAVDB_DETAIL, title="javdb 的日文标题")},
+                  "detail": dict(JAVDB_DETAIL, number=display, title="javdb 的日文标题")},
         "javtxt": {"hit": True, "url": "https://javtxt.com/v/558149", "vid": "558149",
                    "title_jp": "日文标题", "title_zh": "中文标题",
                    "plot_jp": "日文简介" * 20, "plot_zh": "中文简介" * 20},
@@ -2220,9 +2303,12 @@ class TestMultiInstance:
 
     def test_locates_all_instances(self, scraper, store_mod, tmp_path):
         store = self._seed(store_mod, tmp_path, ["1", "2", "3", "4"])
-        found = scraper.locate_items(store, "MIRD277", "MIRD-277")
-        assert [ident for _key, ident in found] == ["1", "2", "3", "4"]
-        assert all(key_ == f"emby:{ident}" for key_, ident in found)
+        found = scraper.locate_instances(store, "MIRD277", "MIRD-277")
+        assert [entry["emby_id"] for entry in found] == ["1", "2", "3", "4"]
+        assert all(entry["item_key"] == f"emby:{entry['emby_id']}" for entry in found)
+        # 兼容形状（已上线）：键对
+        assert scraper.locate_items(store, "MIRD277", "MIRD-277") == [
+            ("emby:1", "1"), ("emby:2", "2"), ("emby:3", "3"), ("emby:4", "4")]
         assert scraper.locate_item(store, "MIRD277", "MIRD-277") == ("emby:1", "1")
 
     def test_scrape_one_writes_every_instance(self, scraper, store_mod, tmp_path, monkeypatch):
@@ -2354,6 +2440,230 @@ class TestCacheOnly:
                                       "metatube_base": "", "write_images": False})
         assert cli.calls["detail"] == 1                     # 没缓存 → 该抓还得抓
         assert target["title_zh"] and target["plot_zh"]
+
+
+# ---------------------------------------------------------------------------
+# 18. 0.7.0 真机试点抓到的两个缺陷（S7 修正）
+# ---------------------------------------------------------------------------
+
+class TestInstanceVersionTags:
+    """缺陷 1：写侧拿不到 `version_tags` → 中字/流出/4K 角标丢失。
+
+    真机现象（0.7.0 试点，`/scrape/preview`）：
+
+    | 请求的 key | 旧 `version_tags` | `Name` 目标 |
+    | --- | --- | --- |
+    | `IPZZ-912-UC` | `["中字流出"]` | `IPZZ-912 [中字流出] 标题` ✅ |
+    | `IPZZ912`（工作台给的就是干净键） | `[]` | `IPZZ-912 标题` ❌ |
+    | `emby:12595` | `[]` | 同上 ❌ |
+
+    而 `IPZZ-912-UC` 与 `IPZZ912` 是同一部片（`norm_key` 都是 `IPZZ912`），主路径给的就是
+    干净键 → 盘上文件名里的「中字流出」再也出不来。修法：**角标以该条目自己的文件名为准**。
+    """
+
+    def test_item_number_carries_tags(self, scraper):
+        info = scraper.item_number({"Path": "/Media/9kg/avi/IPZZ-912-UC.mp4"})
+        assert info["matched"] is True
+        assert info["number"] == "IPZZ-912"
+        assert info["version_tags"]["is_zh_sub"] and info["version_tags"]["is_uncensored_leak"]
+        assert info["path"].endswith("IPZZ-912-UC.mp4")
+        plain = scraper.item_number({"Path": "/Media/9kg/avi/IPZZ-912.mp4"})
+        assert plain["number"] == "IPZZ-912" and plain["version_tags"] == {}
+        assert scraper.item_number({})["matched"] is False
+
+    def test_item_version_tags_item_wins(self, scraper):
+        """条目文件名优先；解不出文件名才退回请求键的角标。"""
+        key_tags = {"is_zh_sub": True, "is_uncensored_leak": True}
+        dto = {"Path": "/Media/9kg/avi/IPZZ-912.mp4"}           # 盘上是普通版
+        assert scraper.item_version_tags(dto, key_tags) == {}    # 普通版不许带「中字流出」
+        dto_uc = {"Path": "/Media/9kg/avi/IPZZ-912-UC.mp4"}
+        assert scraper.item_version_tags(dto_uc)["is_zh_sub"] is True
+        assert scraper.item_version_tags({}, key_tags) == key_tags    # 无路径 → 退回
+        assert scraper.item_version_tags({"Path": "/x/无番号.mp4"}, key_tags) == key_tags
+
+    def test_locate_items_derives_from_store_path(self, scraper, store_mod, tmp_path):
+        """台账里有 `file_path` 时，定位阶段就能拿到角标（零请求）。
+
+        `locate_items()` 保持已上线的**键对形状**（S8 的用例按 `[("emby:1","1")]` 断言），
+        逐实例的角标在 `locate_instances()` 里 —— 两个都验，免得哪天把兼容层删了。
+        """
+        store = make_store(store_mod, tmp_path)
+        store.item_upsert("emby:1", "IPZZ912", display_number="IPZZ-912", emby_id="1",
+                          file_path="/Media/9kg/avi/IPZZ-912-UC.mp4")
+        store.item_upsert("emby:2", "IPZZ912", display_number="IPZZ-912", emby_id="2",
+                          file_path="/Media/9kg/avi/IPZZ-912.mp4")
+        found = scraper.locate_instances(store, "IPZZ912", "IPZZ-912")
+        assert [e["emby_id"] for e in found] == ["1", "2"]
+        assert scraper.version_labels(found[0]["version_tags"]) == ["中字流出"]
+        assert scraper.version_labels(found[1]["version_tags"]) == []
+        assert scraper.locate_items(store, "IPZZ912", "IPZZ-912") == [("emby:1", "1"),
+                                                                     ("emby:2", "2")]
+        # 台账没存 `file_path` 时，用 S11 缓存行里的 `emby[].path` 补（本地、零请求）
+        store2 = make_store(store_mod, tmp_path / "b")
+        store2.item_upsert("emby:12598", "SNOS380", display_number="SNOS-380", emby_id="12598")
+        cache = s11_cache()
+        cache["numbers"]["SNOS380"]["emby"][0]["path"] = "/Media/9kg/avi/SNOS-380-UC.mp4"
+        found2 = scraper.locate_instances(store2, "SNOS380", "SNOS-380", {"fetch_cache": cache})
+        assert found2 and found2[0]["item_key"] == "emby:12598"
+        assert scraper.version_labels(found2[0]["version_tags"]) == ["中字流出"]
+        # 缓存只是"补路径"，**不会凭空造实例**（台账里没有就是没有）
+        assert scraper.locate_instances(FakeStore(), "SNOS380", "SNOS-380",
+                                        {"fetch_cache": cache}) == []
+
+    def test_same_key_two_instances_get_own_badge(self, scraper, store_mod, tmp_path):
+        """★ 硬性验收 ①：同 key 两个实例、一个 `-UC` 一个普通 → 两条各自正确。"""
+        store = make_store(store_mod, tmp_path)
+        store.item_upsert("emby:101", "IPZZ912", display_number="IPZZ-912", emby_id="101")
+        store.item_upsert("emby:102", "IPZZ912", display_number="IPZZ-912", emby_id="102")
+        dtos = {
+            "101": dict(EMPTY_DTO, Id="101", Name="IPZZ-912-UC",
+                        Path="/Media/9kg/avi/IPZZ-912-UC.mp4"),
+            "102": dict(EMPTY_DTO, Id="102", Name="IPZZ-912",
+                        Path="/Media/9kg/avi/IPZZ-912.mp4"),
+        }
+        emby = FakeEmby()
+        emby.get_item = lambda item_id, user_id="": dict(dtos[str(item_id)])
+        cache = s11_cache(key="IPZZ912", display="IPZZ-912")
+        report = scraper.scrape_one("IPZZ912", store=store, cli=FakeCli(detail=None),
+                                    emby_client=emby,
+                                    opts={"now": "2026-10-14T00:00:00", "write_images": False,
+                                          "javdb_assets": False, "plot_sources": ("javtxt",),
+                                          "fetch_cache": cache, "metatube_base": ""})
+        assert report["total"] == 2 and report["written"] == 2
+        by_id = {one["emby_id"]: one for one in report["items"]}
+        assert by_id["101"]["version_tags"] == ["中字流出"]
+        assert by_id["102"]["version_tags"] == []
+        sent = {call["item_id"]: call["dto"] for call in emby.updated}
+        assert sent["101"]["Name"].startswith("IPZZ-912 [中字流出] ")
+        assert sent["102"]["Name"] == "IPZZ-912 中文标题"         # 普通版没有角标
+        # 台账也各自落对了
+        assert store.item_get("emby:101")["version_tags"]["is_zh_sub"] is True
+        assert store.item_get("emby:102")["version_tags"] == {}
+
+    def test_emby_id_key_gets_badge(self, scraper, store_mod, tmp_path):
+        """★ 硬性验收 ②：`emby:<id>` 键也要拿到角标（走 DTO 的 Path）。"""
+        store = make_store(store_mod, tmp_path)
+        store.item_upsert("emby:12595", "IPZZ912", display_number="IPZZ-912", emby_id="12595")
+        emby = FakeEmby(dto=dict(EMPTY_DTO, Id="12595", Name="IPZZ-912-UC",
+                                 Path="/Media/9kg/avi/IPZZ-912-UC.mp4"))
+        report = scraper.preview_one("emby:12595", store=store, cli=FakeCli(detail=None),
+                                     emby_client=emby,
+                                     opts={"fetch_cache": s11_cache(key="IPZZ912",
+                                                                    display="IPZZ-912"),
+                                           "cache_only": True})
+        assert report["version_tags"] == ["中字流出"]
+        assert report["number"] == "IPZZ-912"                    # 番号仍是干净号
+        name_row = next(r for r in report["fields"] if r["name"] == "Name")
+        assert name_row["target"].startswith("IPZZ-912 [中字流出] ")
+
+    def test_clean_key_preview_gets_badge(self, scraper, store_mod, tmp_path):
+        """主路径（工作台给干净键）也能出角标 —— 这正是缺陷 1 的真机症状。"""
+        store = make_store(store_mod, tmp_path)
+        store.item_upsert("emby:101", "IPZZ912", display_number="IPZZ-912", emby_id="101",
+                          file_path="/Media/9kg/avi/IPZZ-912-UC.mp4")
+        emby = FakeEmby(dto=dict(EMPTY_DTO, Id="101", Path="/Media/9kg/avi/IPZZ-912-UC.mp4"))
+        report = scraper.preview_one("IPZZ912", store=store, cli=FakeCli(detail=None),
+                                     emby_client=emby,
+                                     opts={"fetch_cache": s11_cache(key="IPZZ912",
+                                                                    display="IPZZ-912"),
+                                           "cache_only": True})
+        assert report["version_tags"] == ["中字流出"]
+        # `items[]` 保持已上线形状；逐实例角标在 `instances[]`
+        assert report["items"] == [{"item_key": "emby:101", "emby_id": "101"}]
+        assert report["instances"][0]["version_tags"] == ["中字流出"]
+    def test_no_path_falls_back_to_key_tags(self, scraper):
+        """条目没有 Path 时退回请求键解析出的角标（别把角标弄丢）。"""
+        resolved = scraper.resolve_key("IPZZ-912-UC")
+        assert resolved["version_tags"]["is_zh_sub"] is True
+        got = scraper.item_version_tags({}, resolved["version_tags"])
+        assert scraper.version_labels(got) == ["中字流出"]
+
+
+class TestChangedAccuracy:
+    """缺陷 2：`changed[]` 高估 —— `target=None`（会被跳过）的字段不算改动。"""
+
+    def test_none_targets_are_not_changed(self, scraper):
+        """真机反例：`FC2PPV4828968` 只会写 `ProviderIds`，旧实现报了 8 个改动。"""
+        target = targets({}, display_number="FC2-PPV-4828968", title_zh="", title_jp="",
+                         origin_title="", plot_zh="", plot_jp="", release_date="",
+                         studio="", series="", tags=[], score="", javdb_id="",
+                         actors=[], director="")
+        overrides = scraper.build_overrides(target, EMPTY_DTO)
+        assert overrides == {"ProviderIds": {"AVHelper": "FC2-PPV-4828968"}}
+        fields = scraper.field_diff(EMPTY_DTO, overrides)
+        assert [f["name"] for f in fields if f["changed"]] == ["ProviderIds"]
+        # `target=None` 的行仍然**列出来**（供人看"没取到"），只是不算改动
+        overview = next(f for f in fields if f["name"] == "Overview")
+        assert overview["target"] is None and overview["changed"] is False
+
+    def test_unwritable_key_is_not_changed(self, scraper):
+        """不在 S2 `WRITABLE_KEYS` 里的键传了也会被丢掉，**不该报成改动**。
+
+        ⚠️ 2026-10-14 复核：S2 已把 `SeriesName` 加进白名单（11 个矩阵字段现在**全部可写**），
+        所以这里改用合成键验证过滤逻辑本身 —— 过滤仍然必要（防的是"以后又有矩阵字段落在
+        白名单外"以及误传探针字段），只是今天它不再拦下任何矩阵字段。
+        """
+        assert set(scraper.MATRIX_FIELDS) <= set(scraper.emby.WRITABLE_KEYS)   # 现状：全可写
+        assert "SeriesName" in scraper.emby.WRITABLE_KEYS
+        out = scraper.build_overrides(targets({}, series="系列名"), EMPTY_DTO)
+        row = next(f for f in scraper.field_diff(EMPTY_DTO, out) if f["name"] == "SeriesName")
+        assert row["target"] == "系列名" and row["changed"] is True
+        # 白名单外的键（探针字段）进不了覆盖表，也就不算改动
+        assert scraper.effective_overrides({"RunTimeTicks": 1, "SeriesName": "x"}) == \
+            {"SeriesName": "x"}
+
+    def test_same_value_is_not_changed(self, scraper):
+        dto = dict(EMPTY_DTO, Name="SNOS-380 中文标题", CommunityRating=4.33)
+        out = scraper.build_overrides(targets({}), dto)
+        fields = scraper.field_diff(dto, out)
+        assert next(f for f in fields if f["name"] == "Name")["changed"] is False
+        assert next(f for f in fields if f["name"] == "CommunityRating")["changed"] is False
+
+    def test_collection_projection_ignores_ids(self, scraper):
+        """Emby 读回的 `GenreItems`/`People` 带 `Id`，我们只写 `Name`(+`Type`)：
+        不比投影的话这三个字段**每次刮削都会报"有改动"**（另一种高估）。"""
+        dto = dict(EMPTY_DTO,
+                   GenreItems=[{"Name": "OL", "Id": "114"}, {"Name": "巨乳", "Id": "17"}],
+                   Studios=[{"Name": "S1 NO.1 STYLE", "Id": "5"}],
+                   People=[{"Name": "雛形みくる", "Type": "Actor", "Id": "12617",
+                            "ImageTags": {"Primary": "x"}}])
+        out = scraper.build_overrides(targets({}, director=""), dto)
+        fields = {f["name"]: f for f in scraper.field_diff(dto, out)}
+        assert fields["GenreItems"]["changed"] is False
+        assert fields["Studios"]["changed"] is False
+        assert fields["People"]["changed"] is False
+        # 真变了就得报（换流派）
+        out2 = scraper.build_overrides(targets({}, tags=["新标签"], director=""), dto)
+        assert next(f for f in scraper.field_diff(dto, out2)
+                    if f["name"] == "GenreItems")["changed"] is True
+
+    def test_overview_empty_is_a_real_change(self, scraper):
+        """矩阵要求"清掉旧机翻"的 `Overview: ""` **必须**算改动（别被"空值=跳过"误伤）。"""
+        dto = dict(EMPTY_DTO, Overview="旧的错误机翻")
+        out = scraper.build_overrides(targets({}, plot_zh="", plot_jp="日文简介"), dto)
+        assert out["Overview"] == ""
+        assert next(f for f in scraper.field_diff(dto, out)
+                    if f["name"] == "Overview")["changed"] is True
+
+    def test_write_item_changed_matches_real_payload(self, scraper):
+        """`write_item().changed[]` 与真正发出去的载荷一致。"""
+        store = FakeStore()
+        emby = FakeEmby(dto=EMPTY_DTO)
+        target = targets({}, display_number="FC2-PPV-4828968", title_zh="", title_jp="",
+                         origin_title="", plot_zh="", plot_jp="", release_date="",
+                         studio="", series="", tags=[], score="", javdb_id="",
+                         actors=[], director="")
+        report = scraper.write_item(store, emby, target, item_key="emby:9", key="FC2PPV4828968",
+                                    emby_id="9", opts={"now": "2026-10-14T00:00:00",
+                                                       "write_images": False})
+        assert report["changed"] == ["ProviderIds"]
+        assert set(emby.updated[0]["dto"]) == {"ProviderIds"}
+
+    def test_effective_overrides_filters(self, scraper):
+        got = scraper.effective_overrides({"Name": "x", "SeriesName": "y", "Overview": None,
+                                           "_mode": "z", "ProviderIds": {"A": "1"},
+                                           "RunTimeTicks": 1, "MediaSources": []})
+        assert got == {"Name": "x", "SeriesName": "y", "ProviderIds": {"A": "1"}}
 
 
 # ---------------------------------------------------------------------------

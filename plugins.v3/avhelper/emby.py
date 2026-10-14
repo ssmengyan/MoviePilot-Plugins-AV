@@ -958,6 +958,21 @@ INEFFECTIVE_KEYS = {
 # 但它们是同一类「ToList 会炸」的字段，留着兜底不亏。
 COLLECTION_KEYS = ("People", "Studios", "Genres", "GenreItems", "MediaSources", "MediaStreams")
 
+# 标量元数据键：**回滚时 `None` 要当成「清空」写 `""`，不能静默丢掉**。
+#
+# 真机实测（S2 E2E，2026-10-14）：`SNOS-380` 的 `Overview` 在 DTO 与备份里都是 `null`。
+# 若把 `None` 一律当"没给"跳过，备份回灌就**清不掉**验证时写进去的值
+# （实测回滚后 `Overview` 仍是 `"S2-CT-OK 真机写路径验证"`，而基线是 `null`）
+# → D7 的「写前备份 + 一键回滚」在这类字段上是失效的。
+# 所以对这批键：拿到 `None` → 显式写 `""`（Emby 读回是 `null`，等价于原来的"没有值"）。
+# ⚠️ **不放** `ProviderIds`（它有自己的合并/覆盖语义）与集合键（`None` 要写 `[]`）；
+#    `PremiereDate`/`ProductionYear` 是日期/数值型，清空写法未实测，**故意留在表外**
+#    —— 宁可保持"不动"，也不要拿空串去赌它不会 400。
+NULL_CLEARABLE_KEYS = frozenset({
+    "Name", "OriginalTitle", "Overview", "SeriesName",
+    "OfficialRating", "CommunityRating", "Taglines",
+})
+
 # `update_item()` 的覆盖表里可以带这几个**控制标记**（下划线开头，不会被当成 DTO 字段）。
 CONTROL_KEYS = frozenset({"provider_ids_replace", "_mode", "_allow_sort_name"})
 
@@ -1024,6 +1039,11 @@ def writable_overrides(dto: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
         if name not in WRITABLE_KEYS:
             notes.append(f"忽略不在白名单里的键 {name!r}（防止误写探针字段）")
             continue
+        if value is None and name in NULL_CLEARABLE_KEYS:
+            # 回滚要把 `null` 还原成"没有值"：JSON 里这份 DTO 本来就是 `Overview: null`，
+            # 静默跳过会让备份回灌清不掉验证时写进去的内容（真机踩过）。
+            out[name] = ""
+            continue
         out[name] = value
 
     # 流派：`Genres` 字符串数组被忽略，真正生效的是 `GenreItems`（{:Name, :Id}）
@@ -1056,6 +1076,36 @@ def _with_sort_lock(existing: Any) -> List[str]:
     if "SortName" not in fields:
         fields.append("SortName")
     return fields
+
+
+def restore_overrides(backup: Dict[str, Any]) -> Dict[str, Any]:
+    """备份 DTO → **能真正还原**的覆盖表（给 `rollback_item()` 用）。
+
+    为什么不能直接把备份丢给 `update_item()`：`update_item` 是「以当前 DTO 为底、覆盖表改哪算哪」，
+    **备份里没有的键 = 不动**，而不是清空。而 Emby 对没有值的可选字段**会整个省略该键** ——
+    真机实测（S2 E2E，2026-10-14）：`SNOS-380` 写前的 DTO 与备份里都**没有 `Overview` 这个键**，
+    写一次 `Overview` 之后它才出现（45 键 → 46 键）。于是「备份原样回灌」回滚不掉 `Overview`，
+    条目会停在验证态、与备份 sha 不一致 —— D7 的「一键回滚」在这类字段上是失效的。
+
+    本函数把这件事补上：对**基线里缺席、但属于可清空标量**的键，显式写 `None`
+    （`writable_overrides()` 会把 `None` 落成 `""`，真机实测 `""` 能把 `Overview` 清成
+    Emby 的"没有值"）。集合键缺席则写 `[]`（`null` 会 400）。
+
+    调用方照旧必须是「已先 `store.item_backup_save()` 成功」的那条链（D7）；本函数不碰 store。
+    `ProviderIds` 沿用备份里的完整字典（配上 `provider_ids_replace=True` 才是原样回灌）。
+    """
+    src = backup if isinstance(backup, dict) else {}
+    out: Dict[str, Any] = {k: v for k, v in src.items()}
+    out["provider_ids_replace"] = True          # 备份里的 ProviderIds 是"当时全貌"，要整份还原
+    out.setdefault("ProviderIds", {})
+    for key in WRITABLE_KEYS:
+        if key in src or key in INEFFECTIVE_KEYS or key == "ProviderIds":
+            continue
+        if key in NULL_CLEARABLE_KEYS:
+            out[key] = None                    # 基线没有这个键 → 显式清空
+        elif key in COLLECTION_KEYS:
+            out[key] = []                      # 集合：null 会 400，写 []
+    return out
 
 
 class EmbyClient:
@@ -1209,7 +1259,16 @@ class EmbyClient:
         for note in drops:
             logger.debug(f"AVHelper Emby 写入 {item}：{note}")
 
-        res = self._request("post", f"/emby/Items/{item}", json=payload)
+        # ★ Content-Type **必须显式给**，不能靠 `json=` 自己带（0.7.0 上线后第一个真机写请求就这么挂的）：
+        # `RequestUtils.__init__` 的默认头是 `application/x-www-form-urlencoded; charset=UTF-8`，
+        # 而 requests 只在「调用方没给 Content-Type」时才用 `json=` 的 `application/json`
+        # —— 默认头把它占了，于是 JSON body 顶着表单头发出去，Emby 用表单解析器读它：
+        # body 长度被当成"表单 key 长度"，**超过 2048 直接 500
+        # `Form key length limit 2048 exceeded.`**（实测 8/10 条必挂，短条目碰运气能过）。
+        # requests 的 `json=` 默认 `ensure_ascii=True`，中文全变 `\uXXXX`（6 字节/字），
+        # 所以线上载荷轻松破 2 KB —— 这不是边缘情况，是必挂。
+        res = self._request("post", f"/emby/Items/{item}", json=payload,
+                            headers={"Content-Type": "application/json"})
         if res is None:
             return False, "请求未发出或超时"
         if res.status_code in (200, 204):                   # 实测成功码是 204
@@ -1326,7 +1385,16 @@ class EmbyClient:
     # ---------- 内部 ----------
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
-        """发一个带 api_key 的请求；**任何异常都吞掉**并返回 `None`（写侧不许把调用方带崩）。"""
+        """发一个带 api_key 的请求；**任何异常都吞掉**并返回 `None`（写侧不许把调用方带崩）。
+
+        ⚠️ **造 `RequestUtils` 时故意不给 `content_type`**（用宿主默认的
+        `application/x-www-form-urlencoded`）：本类的方法有三种截然不同的 body 语义 ——
+        `update_item` 是 JSON、`upload_image` 是 base64 文本要 `image/jpeg`、
+        GET/DELETE 没有 body。在**工厂这一层**钉死任何一种是错的，所以统一由**调用点**
+        用 `headers={"Content-Type": …}` 显式覆盖（`RequestUtils.request()` 里
+        `kwargs.get("headers", self._headers)` 会优先用调用方给的，已实测确认）。
+        → 以后新增「带 JSON body」的写方法，**必须自己带上 `application/json`**。
+        """
         if not self.ready():
             logger.warning("AVHelper Emby 写操作跳过：未配置 host/apikey")
             return None

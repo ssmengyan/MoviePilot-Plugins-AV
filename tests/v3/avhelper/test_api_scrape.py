@@ -21,8 +21,8 @@
 
 import asyncio
 import importlib.util
+import json
 import sys
-import threading
 import types
 from pathlib import Path
 
@@ -1221,6 +1221,112 @@ class TestScrapeConf:
         assert plugin.emby_client() is first
         use_emby(plugin, host="http://other:8096")
         assert plugin.emby_client() is not first
+
+
+class _FakeEmbyWrite:
+    """`EmbyClient`（写侧）的最小替身：preview 只用到读方法。"""
+
+    def __init__(self, dto=None):
+        self.dto = dict(dto or {})
+        self.reads = []
+        self.writes = []
+
+    def ready(self):
+        return True
+
+    def get_item(self, item_id, user_id=""):
+        self.reads.append(str(item_id))
+        return dict(self.dto)
+
+
+class TestPreviewLocateByNumber:
+    """S10 试点批抓到的**阻塞级**缺口：`meta`/`media_item` 都空时，按番号也要能定位到 Emby 条目。
+
+    根因是 `AVHelper.scrape_opts()` 从来没给过 `opts['library']`，于是
+    `scraper.locate_items()` 的第四条兜底（Emby 内存索引 `lookup()`）在 REST 路径上是死代码：
+    `/scrape/preview?key=SNOS380` 回 `items: []`、`/scrape/run` 十条全 `找不到该番号对应的 Emby 条目`。
+    """
+
+    @staticmethod
+    def _wire_library(plugin):
+        """把假 Emby 索引挂成"已配置 Emby"的样子（`_emby_sig` 必须与 `_emby_conn()` 一致）。"""
+        use_emby(plugin)
+        fake = FakeEmbyLib(_lib_index())
+        plugin._emby_lib = fake
+        plugin._emby_sig = ("http://emby.invalid:8096", "fake-apikey")
+        return fake
+
+    def test_scrape_opts_carries_the_emby_library(self, plugin):
+        fake = self._wire_library(plugin)
+        assert plugin.scrape_opts()["library"] is fake
+        assert plugin.scrape_deps()["opts"]["library"] is fake
+
+    def test_library_is_none_without_emby(self, plugin, api_mod, monkeypatch):
+        no_emby(api_mod, monkeypatch, plugin)
+        opts = plugin.scrape_opts()
+        assert "library" in opts and opts["library"] is None
+        assert plugin.scrape_deps()["opts"]["library"] is None
+
+    def test_number_lookup_falls_back_to_emby_index(self, plugin, store):
+        """`meta`/`media_item` 全空 → 靠 `opts['library']` 的 `lookup()` 定位。"""
+        scraper = importlib.import_module(f"{PKG_NAME}.scraper")
+        self._wire_library(plugin)
+        assert store.meta_list() == [] and store.item_list() == []
+        opts = plugin.scrape_opts()
+        assert scraper.locate_items(store, "SNOS380", "SNOS-380", opts, "") == \
+            [("emby:12598", "12598")]
+        assert scraper.locate_item(store, "SNOS380", "SNOS-380", opts, "") == ("emby:12598", "12598")
+
+    def test_library_none_degrades_without_raising(self, plugin, store):
+        scraper = importlib.import_module(f"{PKG_NAME}.scraper")
+        assert scraper.locate_items(store, "SNOS380", "SNOS-380", {"library": None}, "") == []
+        assert scraper.locate_items(store, "SNOS380", "SNOS-380", {}, "") == []
+
+    def test_preview_yields_items_and_current_by_number(self, plugin, store, monkeypatch):
+        """端到端：真 `scraper.preview_one()` + 假 Emby，**零网络**（`fetch_cache` + `cache_only`）。"""
+        scraper = importlib.import_module(f"{PKG_NAME}.scraper")
+        self._wire_library(plugin)
+        cache = {"numbers": {"SNOS380": {
+            "display": "SNOS-380",
+            "javdb": {"ok": True, "detail": {
+                "id": "96GB0p", "number": "SNOS-380", "title": "日文原标题",
+                "origin_title": "日文原标题", "release_date": "2026-09-01", "duration": 120,
+                "score": "4.33", "maker_name": "S1 NO.1 STYLE",
+                "actors": [{"id": "1", "name": "演员甲"}],
+                "tags": [{"id": "t1", "name": "中出"}],
+                "cover_url": "https://c0.jdbstatic.com/covers/96/96GB0p.jpg"}},
+            "javtxt": {"hit": True, "title_zh": "中文标题", "title_jp": "日文原标题",
+                       "plot_zh": "中文简介", "plot_jp": "", "zh_is_machine": True,
+                       "actors": []},
+        }}}
+        opts = dict(plugin.scrape_opts())
+        # `fetch_cache` 要的是**已展开的 dict**（`scraper.cache_row()` 直接按 key 查），
+        # 不是文件路径；配上 `cache_only=True` 就是"零网络"的 dry-run 语义。
+        opts.update({"fetch_cache": cache, "cache_only": True, "translate": False,
+                     "log_sources": False})
+
+        def no_network(*args, **kwargs):
+            raise AssertionError("preview 不该联网")
+
+        def no_subprocess(*args, **kwargs):
+            raise AssertionError("preview 不该起子进程")
+
+        monkeypatch.setattr(scraper, "http_get", no_network)
+        monkeypatch.setattr(scraper, "_run_cli", no_subprocess)
+        emby_client = _FakeEmbyWrite({"Id": "12598", "Name": "SNOS-380",
+                                      "Path": "/media/9kg/avi/SNOS-380.mp4",
+                                      "ProviderIds": {"MetaTube": "JavBus:SNOS-380"}})
+        result = scraper.preview_one("SNOS380", store=store, cli=FakeClient(),
+                                     emby_client=emby_client, opts=opts)
+        assert result["items"] == [{"item_key": "emby:12598", "emby_id": "12598"}]
+        assert result["item_key"] == "emby:12598" and result["emby_id"] == "12598"
+        assert not any("没有找到对应的 Emby 条目" in str(w) for w in result["warnings"])
+        assert result["sources"]["javdb"]["status"] == "cache"      # 骨架来自缓存，没打站点
+        assert emby_client.reads == ["12598"]          # 真的拿 DTO 去比对了 current
+        fields = {row["name"]: row for row in result["fields"]}
+        assert fields["Name"]["current"] == "SNOS-380"
+        assert str(fields["Name"]["target"]).startswith("SNOS-380")
+        assert fields["Name"]["changed"] is True
 
 
 # ---------------------------------------------------------------------------
