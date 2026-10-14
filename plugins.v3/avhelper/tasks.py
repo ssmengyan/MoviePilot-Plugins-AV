@@ -793,7 +793,12 @@ class TaskEngine:
             return {"ok": False, "message": "任务不存在或已被清理"}
         if str(task.get("state") or "") != "await":
             return {"ok": False, "message": "该任务已提交下载，取消请到下载器里操作"}
-        self.store.task_set_state(tid, "canceled")
+        # ★ P1-7：**条件写**而不是"读→比对→写"。上面那次 `task_get` 到下一条语句之间，
+        #   另一条路径（用户点「下载该影片」/ 定时任务）可能刚把它推成 `pushed`；
+        #   老写法会把 `canceled` 盖上去 —— 界面上说"已取消"，下载器里却在跑。
+        #   `only_from=("await",)` 让判断落在同一条 SQL 里，返回 False 就说明有人抢先了。
+        if not self.store.task_set_state(tid, "canceled", only_from=("await",)):
+            return {"ok": False, "message": "该任务状态刚刚变了（可能已提交下载），请刷新后重试"}
         logger.info(f"AVHelper 取消待确认任务：{task.get('number')}（{tid}）")
         return {"ok": True, "message": f"已取消 {task.get('number') or ''} 的待确认任务"}
 

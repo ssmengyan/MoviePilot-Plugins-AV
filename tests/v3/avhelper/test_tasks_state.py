@@ -552,6 +552,86 @@ class TestCancelAll:
 # ---------- Tier 1 / Tier 2 挂点 ----------
 
 
+class TestCancelTaskRace:
+    """P1-7：「取消待确认任务」必须是**条件写**，不是"读→比对→写"。
+
+    老写法的窗口：`task_get()` 读出 `await` → 用户（或定时任务）在这中间把它推成 `pushed`
+    → `task_set_state(canceled)` 把事实盖掉：界面说"已取消"，下载器里却在跑。
+    条件写（`only_from=("await",)`）把判断收进同一条 SQL，输掉就如实回报。
+    """
+
+    def test_cancel_wins_when_still_await(self, tasks_mod, store_mod, tmp_path):
+        engine, store, _chain, _ = make_engine(tasks_mod, store_mod, tmp_path)
+        store.task_add({"id": "t1", "number": "IPZZ-961", "state": "await"})
+        result = engine.cancel_task("t1")
+        assert result["ok"] is True
+        assert str(store.task_get("t1")["state"]) == "canceled"
+
+    def test_cancel_loses_the_race_and_says_so(self, tasks_mod, store_mod, tmp_path, monkeypatch):
+        """★ 竞态：快照读的是 `await`，库里已经是 `pushed` → 不许写、不许说"已取消"。"""
+        engine, store, _chain, _ = make_engine(tasks_mod, store_mod, tmp_path)
+        store.task_add({"id": "t1", "number": "IPZZ-961", "state": "pushed"})
+        # 让 `task_get` 返回一份**过期快照**（模拟"刚读完，别人就推进了下载器"）
+        monkeypatch.setattr(store, "task_get", lambda tid: {"id": "t1", "number": "IPZZ-961",
+                                                            "state": "await"})
+        result = engine.cancel_task("t1")
+        assert result["ok"] is False
+        assert "状态刚刚变了" in result["message"]
+        monkeypatch.undo()
+        assert str(store.task_get("t1")["state"]) == "pushed"      # 事实没被盖掉
+
+    def test_pushed_task_is_still_refused_by_the_read_check(self, tasks_mod, store_mod, tmp_path):
+        engine, store, _chain, _ = make_engine(tasks_mod, store_mod, tmp_path)
+        store.task_add({"id": "t1", "number": "IPZZ-961", "state": "pushed"})
+        result = engine.cancel_task("t1")
+        assert result["ok"] is False and "下载" in result["message"]
+
+    def test_missing_task_is_reported(self, tasks_mod, store_mod, tmp_path):
+        engine, _store, _chain, _ = make_engine(tasks_mod, store_mod, tmp_path)
+        assert engine.cancel_task("nope")["ok"] is False
+
+
+class TestTaskStateStore:
+    """P1-7：`store.task_set_state()` 的两种语义 + `updated_at`。"""
+
+    def test_unconditional_write_records_what_happened(self, store_mod, tmp_path):
+        store = store_mod.Store(db_path=tmp_path / "t.db")
+        store.init()
+        store.task_add({"id": "t1", "number": "IPZZ-961", "state": "await"})
+        assert store.task_set_state("t1", "pushed") is True
+        assert str(store.task_get("t1")["state"]) == "pushed"
+
+    def test_conditional_write_loses_quietly(self, store_mod, tmp_path):
+        store = store_mod.Store(db_path=tmp_path / "t.db")
+        store.init()
+        store.task_add({"id": "t1", "number": "IPZZ-961", "state": "pushed"})
+        assert store.task_set_state("t1", "canceled", only_from=("await",)) is False
+        assert str(store.task_get("t1")["state"]) == "pushed"
+
+    def test_updated_at_moves_on_state_change(self, store_mod, tmp_path):
+        store = store_mod.Store(db_path=tmp_path / "t.db")
+        store.init()
+        store.task_add({"id": "t1", "number": "IPZZ-961", "state": "await"})
+        before = str(store._exec("SELECT updated_at FROM task WHERE id='t1'", fetch=True)[0][0])
+        assert before == ""                      # 新建时为占位空串（`task_add` 不写 updated_at）
+        store.task_set_state("t1", "pushed")
+        after = str(store._exec("SELECT updated_at FROM task WHERE id='t1'", fetch=True)[0][0])
+        assert len(after) == 19 and after[:2] == "20"      # `YYYY-MM-DD HH:MM:SS`
+
+    def test_legacy_db_gets_updated_at_column(self, store_mod, tmp_path):
+        """老库补列：`ALTER TABLE task ADD COLUMN updated_at`（幂等，读出来是空串不是 NULL）。"""
+        import sqlite3
+        db = tmp_path / "legacy.db"
+        store = store_mod.Store(db_path=db)
+        store.init()
+        with sqlite3.connect(db) as conn:
+            conn.execute("ALTER TABLE task DROP COLUMN updated_at")
+        again = store_mod.Store(db_path=db)
+        again.init()
+        cols = {r[1] for r in again._exec("PRAGMA table_info(task)", fetch=True)}
+        assert "updated_at" in cols
+
+
 class TestScrapeTick:
     """`_scrape_tick()`：只取不刮，`scraper.py` 缺位时不许炸。"""
 

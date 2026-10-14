@@ -19,7 +19,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 from . import paths
@@ -64,7 +64,8 @@ CREATE TABLE IF NOT EXISTS task(
   cands TEXT, reason TEXT, state TEXT,
   thumb TEXT, auto INTEGER DEFAULT 0, created_at TEXT, rule TEXT,
   source TEXT DEFAULT 'manual',
-  pending TEXT DEFAULT '');
+  pending TEXT DEFAULT '',
+  updated_at TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS notice(
   id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, title TEXT, type TEXT,
   body TEXT, meta TEXT, image TEXT, created_at TEXT);
@@ -387,6 +388,14 @@ def _shift_days(days: int) -> str:
 
 #: 单条快照的体积上限（64KB）：快照是加速器，超了就不写 —— 别把库撑爆
 _SNAPSHOT_LIMIT = 65536
+
+#: 任务状态清单（0.8.0 / P1-7）：**只加不改**，改一个旧值就等于让历史行"状态未知"。
+#:
+#: - `await`      待确认（搜到候选、等用户点下载）
+#: - `pushed`     已提交下载器（种子在里面跑）
+#: - `canceled`   用户取消（只在 `await` 时允许 → `task_set_state(only_from=("await",))`）
+#: - `failed`     下载失败 / 所有源都没找到（`pending` 里带标记）
+TASK_STATES: Tuple[str, ...] = ("await", "pushed", "canceled", "failed")
 
 
 # 通知元信息里「发布源」永远是最后一段：「发布源：<站点> / <发布组> 发布」
@@ -746,6 +755,13 @@ class Store:
                 conn.execute("ALTER TABLE task ADD COLUMN pending TEXT DEFAULT ''")
             except sqlite3.OperationalError:
                 pass
+        # 兼容旧库：updated_at 是 0.8.0（P1-7）加的列 —— 条件写要能看出"这条什么时候动过"。
+        # 老行读出来是空串（不是 NULL）：界面按空串显示"—"，不做「1970 年」那种假时间。
+        if "updated_at" not in task_cols:
+            try:
+                conn.execute("ALTER TABLE task ADD COLUMN updated_at TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
         # 兼容旧库：downloads 的后加列（hidden 是 0.3.4 的墓碑列，v4 又加三条）。
         # 先看列在不在再 ALTER，绝不 DROP 重建——用户的台账不能丢。
         cols = {r[1] for r in conn.execute("PRAGMA table_info(downloads)").fetchall()}
@@ -831,6 +847,26 @@ class Store:
                 rows = cur.fetchall() if fetch else None
                 conn.commit()
                 return rows
+            except Exception:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+
+    def _exec_count(self, sql: str, args: tuple = ()) -> int:
+        """执行一条**写**语句并返回受影响行数（条件写要靠它判断"赢没赢"）。
+
+        与 `_exec` 的写路径同一把锁、同一套回滚语义；只是把 `rowcount` 带出来 ——
+        `_exec` 对所有写都返回 `None`（那是个被几十处调用的原语，不为一处需求改它的返回值）。
+        """
+        conn = self._connect()
+        with self._lock:
+            try:
+                cur = conn.execute(sql, args)
+                count = int(cur.rowcount or 0)
+                conn.commit()
+                return count
             except Exception:
                 try:
                     conn.rollback()
@@ -1011,9 +1047,27 @@ class Store:
              str(task.get("pending") or "")),
         )
 
-    def task_set_state(self, tid: str, state: str) -> None:
-        """更新任务状态（await/pushed）。"""
-        self._exec("UPDATE task SET state=? WHERE id=?", (state, tid))
+    def task_set_state(self, tid: str, state: str, *, only_from: Any = None) -> bool:
+        """更新任务状态；`only_from` 给了就**条件写**（P1-7 / 0.8.0），返回是否真的改到了。
+
+        - 无条件（`only_from=None`）：记录"已经发生的事"（例：种子推进下载器 → `pushed`）。
+        - 条件（`only_from=("await",)`）：**做判断**（例：取消待确认任务）。
+          老写法是"读 state → 比对 → 写"，两次操作之间别人把任务推成 `pushed` 时，
+          `canceled` 会把事实盖掉（用户看到"已取消"，下载器里却在跑）。
+          条件写把判断交给一条 SQL：`UPDATE … WHERE state IN (…)`，靠受影响行数判断赢没赢。
+
+        `TASK_STATES` 是这套取值的清单（**只加不改**）。
+        """
+        allowed = [str(item) for item in only_from] if only_from else []
+        if allowed:
+            marks = ",".join("?" * len(allowed))
+            count = self._exec_count(
+                f"UPDATE task SET state=?, updated_at=? WHERE id=? AND state IN ({marks})",
+                (str(state or ""), _now(), str(tid or ""), *allowed))
+        else:
+            count = self._exec_count("UPDATE task SET state=?, updated_at=? WHERE id=?",
+                                     (str(state or ""), _now(), str(tid or "")))
+        return bool(count)
 
     # ---------- 通知 ----------
 
