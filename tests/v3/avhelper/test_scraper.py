@@ -2123,6 +2123,28 @@ class TestSyncActorAvatars:
         assert report["ok"] is False and emby.calls["upload_image"] == 0
         assert report["planned"][0]["reason"] == "imgproxy.fetch 返回空"
 
+    def test_fetch_retries_once(self, scraper, store_mod, tmp_path, monkeypatch, nomap):
+        """★ 真机实测：Gfriends 大图偶尔被传到一半就断（`IncompleteRead` → fetch 回 None）。
+
+        本库批跑 113 张里有 2 张这样，其中 `藤咲舞` **重试即成功** —— 所以必须重试一次，
+        别让一次瞬时断流把头像判成"取不到"。
+        """
+        store = self._seed_store(store_mod, tmp_path, [
+            {"name": "A", "avatar": "https://a.jpg", "gender": 0}])
+        emby = self._persons({"A": {"Id": "9", "ImageTags": {}}})
+        calls = {"n": 0}
+
+        class Flaky:
+            @staticmethod
+            def fetch(url, proxy=""):
+                calls["n"] += 1
+                return None if calls["n"] == 1 else b"\xff\xd8\xffjpeg"
+
+        monkeypatch.setattr(scraper, "imgproxy", Flaky)
+        report = scraper.sync_actor_avatars(store, emby, dry_run=False, namemap_mod=nomap)
+        assert calls["n"] == 2
+        assert report["ok"] is True and len(report["applied"]) == 1
+
     def test_rejects_non_image_bytes_without_imgproxy(self, scraper, store_mod, tmp_path,
                                                      monkeypatch, nomap):
         """缺 imgproxy 时裸取会拿到 XOR 包装数据 —— 必须靠魔数挡住，不能喂给 Emby。"""
@@ -2264,6 +2286,144 @@ class TestSyncActorAvatars:
         report = scraper.sync_actor_avatars(store, emby, dry_run=True, namemap_mod=real)
         assert report["missing_person"] == 0
         assert report["planned"][0]["action"] == "upload_avatar"
+
+    # -----------------------------------------------------------------------
+    # ★ 0.7.4：头像清晰度（Gfriends 优先）+ 存量缺 gender 的演员不再被丢掉
+    #
+    # 真机证据（2026-10-15，同一批演员两源对照 18 例）：
+    #   javdb `tp.spfcas.com/…/avatars/xx/*.jpg` = 100×100 ~ 400×400 的**列表缩略图**；
+    #   Gfriends 命中时 564×720 / 600×783 / 1227×1840 / 1235×1851 —— 可比 9 例全胜，
+    #   javdb 无一例更大。老口径「javdb 第一顺位」就是"头像很低清"的根因。
+    # 另一条真机事实：存量 `actors_json` 大多**没有 gender 字段**（201 位里绝大多数是 None），
+    # 老代码在 gender 过滤处 `continue`，这批人一个头像都同步不到。
+    # -----------------------------------------------------------------------
+
+    @staticmethod
+    def _gfriends_hit(url: str = "https://raw.githubusercontent.com/x/gfriends/1.jpg",
+                      name: str = "A"):
+        """把 MetaTube 的 `/v1/actors/search` 换成一条 Gfriends 命中（名字默认与查询同名）。"""
+        payload = json.dumps({"data": [{"provider": "Gfriends", "name": name,
+                                        "images": [url]}]}).encode()
+        return lambda *args, **kwargs: (payload, "", 200)
+
+    def test_gfriends_name_must_match(self, scraper, store_mod, tmp_path, monkeypatch, nomap):
+        """★ 上游回了个**别人**：宁可不要头像，也绝不挂错人。
+
+        （真实教训来自番号查询那条端点：MetaTube `/v1/movies/search` 查不到时会回随机结果。
+        Gfriends 这条目前是精确的，但头像挂错人的代价太大，值得一道显式校验。）
+        """
+        store = self._seed_store(store_mod, tmp_path, [
+            {"name": "A", "jp": "A", "avatar": "https://tp.spfcas.com/a.jpg", "gender": 0}])
+        emby = self._persons({"A": {"Id": "9", "ImageTags": {}}})
+        monkeypatch.setattr(scraper, "_metatube_fetch",
+                            self._gfriends_hit(name="完全不相干的别人"))
+        report = scraper.sync_actor_avatars(store, emby, dry_run=True, namemap_mod=nomap,
+                                            opts={"metatube_base": "http://mt:8080"})
+        assert report["planned"][0]["source"] == "javdb"      # 回落 javdb，不用错图
+        assert report["ok"] is True and report["errors"] == []
+
+    def test_gfriends_name_tolerates_wrapping_form(self, scraper):
+        """宽松匹配：括号 / 简体名包住日文原名都算对得上（真机 `七森莉莉（七ツ森りり）` 那种）。"""
+        assert scraper._same_actor_name("七ツ森りり", "七ツ森りり")
+        assert scraper._same_actor_name("七森莉莉（七ツ森りり）", "七ツ森りり")
+        assert scraper._same_actor_name("さくらわかな", "さくらわかな")
+        assert not scraper._same_actor_name("三上悠亜", "松本いちか")
+        assert not scraper._same_actor_name("", "松本いちか")
+
+    def test_gfriends_beats_javdb_thumbnail(self, scraper, store_mod, tmp_path,
+                                            monkeypatch, nomap):
+        """两源都有图时必须挑 **Gfriends**（javdb 那张是列表缩略图）。"""
+        store = self._seed_store(store_mod, tmp_path, [
+            {"name": "A", "jp": "A", "avatar": "https://tp.spfcas.com/small100.jpg",
+             "gender": 0}])
+        emby = self._persons({"A": {"Id": "9", "ImageTags": {}}})
+        monkeypatch.setattr(scraper, "_metatube_fetch", self._gfriends_hit())
+        seen: list = []
+
+        class Proxy:
+            @staticmethod
+            def fetch(url, proxy=""):
+                seen.append(url)
+                return b"\xff\xd8\xffjpeg"
+
+        monkeypatch.setattr(scraper, "imgproxy", Proxy)
+        report = scraper.sync_actor_avatars(store, emby, dry_run=False, namemap_mod=nomap,
+                                            opts={"metatube_base": "http://mt:8080"})
+        assert report["planned"][0]["source"] == "gfriends"
+        assert seen == ["https://raw.githubusercontent.com/x/gfriends/1.jpg"]
+        assert report["ok"] is True and emby.calls["upload_image"] == 1
+
+    def test_gfriends_not_found_falls_back_to_javdb(self, scraper, store_mod, tmp_path,
+                                                    monkeypatch, nomap):
+        """Gfriends 404 = 该演员不在 Gfriends（**不是错误**）→ 回落 javdb。"""
+        store = self._seed_store(store_mod, tmp_path, [
+            {"name": "A", "jp": "A", "avatar": "https://tp.spfcas.com/a.jpg", "gender": 0}])
+        emby = self._persons({"A": {"Id": "9", "ImageTags": {}}})
+        monkeypatch.setattr(scraper, "_metatube_fetch", lambda *a, **k: (None, "nf", 404))
+        report = scraper.sync_actor_avatars(store, emby, dry_run=True, namemap_mod=nomap,
+                                            opts={"metatube_base": "http://mt:8080"})
+        assert report["planned"][0]["source"] == "javdb"
+        assert report["ok"] is True and report["errors"] == []
+
+    def test_gfriends_error_is_not_a_failure(self, scraper, store_mod, tmp_path,
+                                             monkeypatch, nomap):
+        """Gfriends 查询报错也不算失败：javdb 有图就照用，只在 `gfriends` 里留一句实话。"""
+        store = self._seed_store(store_mod, tmp_path, [
+            {"name": "A", "jp": "A", "avatar": "https://tp.spfcas.com/a.jpg", "gender": 0}])
+        emby = self._persons({"A": {"Id": "9", "ImageTags": {}}})
+        monkeypatch.setattr(scraper, "_metatube_fetch", lambda *a, **k: (None, "boom", 400))
+        report = scraper.sync_actor_avatars(store, emby, dry_run=True, namemap_mod=nomap,
+                                            opts={"metatube_base": "http://mt:8080"})
+        assert report["planned"][0]["source"] == "javdb"
+        assert report["ok"] is True and report["errors"] == []
+        assert "Gfriends" in report["planned"][0]["gfriends"]
+
+    def test_gender_unknown_still_syncs(self, scraper, store_mod, tmp_path, monkeypatch, nomap):
+        """存量行没有 gender 也必须能传头像（老代码在这里整批丢掉）。"""
+        store = self._seed_store(store_mod, tmp_path, [
+            {"name": "松本一香", "jp": "松本いちか", "avatar": "https://tp.spfcas.com/a.jpg"}])
+        emby = self._persons({"松本一香": {"Id": "9", "ImageTags": {}}})
+
+        class Proxy:
+            @staticmethod
+            def fetch(url, proxy=""):
+                return b"\xff\xd8\xffjpeg"
+
+        monkeypatch.setattr(scraper, "imgproxy", Proxy)
+        report = scraper.sync_actor_avatars(store, emby, dry_run=False, namemap_mod=nomap)
+        assert report["gender_unknown"] == 1            # 照实报数（界面要显示它）
+        assert report["actors"] == 1                    # 但不再被丢掉
+        assert emby.uploaded and emby.uploaded[0]["item_id"] == "9"
+
+    def test_male_actor_is_excluded(self, scraper, store_mod, tmp_path, nomap):
+        """`gender == 1`（明确是男的）仍然硬性排除（P8 口径）。"""
+        store = self._seed_store(store_mod, tmp_path, [
+            {"name": "男演员", "avatar": "https://a.jpg", "gender": 1}])
+        emby = self._persons({"男演员": {"Id": "9", "ImageTags": {}}})
+        report = scraper.sync_actor_avatars(store, emby, dry_run=False, namemap_mod=nomap)
+        assert report["actors"] == 0 and report["planned"] == []
+        assert emby.calls["upload_image"] == 0
+
+    def test_force_replaces_existing_avatar(self, scraper, store_mod, tmp_path,
+                                            monkeypatch, nomap):
+        """`avatar_force`：存量低清头像就靠它换掉（不加 force 时 `has_image` 一挡就跳过）。"""
+        store = self._seed_store(store_mod, tmp_path, [
+            {"name": "A", "jp": "A", "avatar": "https://tp.spfcas.com/a.jpg", "gender": 0}])
+        emby = self._persons({"A": {"Id": "9", "ImageTags": {"Primary": "old"}}})
+
+        class Proxy:
+            @staticmethod
+            def fetch(url, proxy=""):
+                return b"\xff\xd8\xffjpeg"
+
+        monkeypatch.setattr(scraper, "imgproxy", Proxy)
+        plain = scraper.sync_actor_avatars(store, emby, dry_run=False, namemap_mod=nomap)
+        assert plain["planned"][0]["reason"] == "has_image"
+        assert emby.calls["upload_image"] == 0
+        forced = scraper.sync_actor_avatars(store, emby, dry_run=False, namemap_mod=nomap,
+                                            opts={"avatar_force": True})
+        assert forced["planned"][0]["action"] == "upload_avatar"
+        assert emby.calls["upload_image"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -3155,6 +3315,76 @@ class TestCoverFallback:
 # ---------------------------------------------------------------------------
 # 14. 其他纯函数（图片代理地址 / 降级路径）
 # ---------------------------------------------------------------------------
+
+class TestWriteFieldSelection:
+    """0.7.4 手动刮削：界面逐字段勾选后 `POST /scrape/run {fields:[…]}` 只写勾中的那几项。
+
+    `fields` 的三种形态必须分清（写错就是"少写一项"或"多写一片"）：
+
+    - **没有这个键** → `_write_field_set()` 回 `None` = 不过滤（批量 / 定时刮削的老口径）；
+    - **`[]`（一个都没勾）** → **空集合** = 一项都不写（绝不能退化成"整份写"）；
+    - **`["Name", …]`** → 只保留这些键。图片槽位用伪字段名 `Primary` / `Backdrop`。
+    """
+
+    def test_no_key_means_write_everything(self, scraper):
+        overrides = scraper.build_overrides(targets({}), EMPTY_DTO)
+        assert scraper._write_field_set({}) is None
+        assert scraper._write_field_set({"write_fields": None}) is None
+        assert scraper._pick_fields(overrides, {}) == overrides
+
+    def test_empty_list_means_write_nothing(self, scraper):
+        overrides = scraper.build_overrides(targets({}), EMPTY_DTO)
+        assert scraper._write_field_set({"write_fields": []}) == set()
+        assert scraper._pick_fields(overrides, {"write_fields": []}) == {}
+
+    def test_only_checked_fields_survive(self, scraper):
+        overrides = scraper.build_overrides(targets({}), EMPTY_DTO)
+        assert "Name" in overrides and "Overview" in overrides
+        picked = scraper._pick_fields(overrides, {"write_fields": ["Name", "Primary"]})
+        assert picked == {"Name": overrides["Name"]}
+
+    def test_write_item_honours_write_fields(self, scraper):
+        store = FakeStore()
+        emby = FakeEmby(dto=EMPTY_DTO)
+        report = scraper.write_item(
+            store, emby, targets({}), item_key="emby:9", key="SNOS380", emby_id="9",
+            opts={"now": "2026-10-15T00:00:00", "write_images": False,
+                  "write_fields": ["Name"]})
+        assert report["ok"] is True
+        assert set(emby.updated[0]["dto"]) == {"Name"}
+        assert report["changed"] == ["Name"]
+
+    def test_write_item_empty_selection_writes_nothing(self, scraper):
+        """一项都没勾：连 Emby 都不碰（不是"整份写一遍"）。"""
+        store = FakeStore()
+        emby = FakeEmby(dto=EMPTY_DTO)
+        report = scraper.write_item(
+            store, emby, targets({}), item_key="emby:9", key="SNOS380", emby_id="9",
+            opts={"now": "2026-10-15T00:00:00", "write_images": False, "write_fields": []})
+        assert report["status"] == "nothing"
+        assert emby.updated == []
+
+    def test_cover_fallback_also_respects_the_gate(self, scraper, monkeypatch):
+        """★ 真机实测抓到：取消勾「封面」后，`cover_url` 兜底**照样把封面上传了**。
+
+        第 2 条取图路径（javdb 图集空 → 用 `cover_url`）以前不在闸门里：`cover` 被置空
+        → `raw` 为空 → 顺着兜底把封面传了上去。于是"我只勾一个字段"变成了"封面也被换了"。
+        """
+        store = FakeStore()
+        emby = FakeEmby(dto=EMPTY_DTO)
+        monkeypatch.setattr(scraper, "_fetch_cover_bytes",
+                            lambda url, opts: (b"\xff\xd8\xffjpeg", ""))
+        target = targets({}, cover_url="https://tp.spfcas.com/covers/x.jpg")
+        # 只允许写一个元数据字段：封面 / 剧照都不在清单里
+        scraper.write_item(store, emby, target, item_key="emby:9", key="SNOS380", emby_id="9",
+                           opts={"now": "2026-10-15T00:00:00", "write_fields": ["Name"]})
+        assert emby.uploaded == [], f"取消勾选封面后不该有任何图片上传，实际 {emby.uploaded}"
+        # 反向：把 Primary 勾上就该传
+        emby2 = FakeEmby(dto=EMPTY_DTO)
+        scraper.write_item(store, emby2, target, item_key="emby:9", key="SNOS380", emby_id="9",
+                           opts={"now": "2026-10-15T00:00:00", "write_fields": ["Name", "Primary"]})
+        assert [row["type"] for row in emby2.uploaded] == ["Primary"]
+
 
 class TestHelpers:
 

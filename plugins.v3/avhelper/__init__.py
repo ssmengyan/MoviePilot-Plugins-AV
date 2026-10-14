@@ -22,7 +22,7 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from urllib.parse import quote, unquote
 
 from fastapi import Request, Response
@@ -241,6 +241,27 @@ def scrape_state_of(meta: Any, item: Any = None) -> str:
     return _SCRAPE_STATE_MAP.get(completeness, "unscraped")
 
 
+def scrape_tier_of(completeness: Any, scraped: bool) -> str:
+    """`/scrape/status.items[].status`：工作台四档的**唯一判据**（0.7.4 收口）。
+
+    四档互斥且穷尽，所以四张状态卡的数字相加**恒等于**总行数 —— 界面再也不会出现
+    「卡片写着 114，点进去一条都没有」这种账。
+
+    - **`unscraped`（未刮削）**：**从没跑过刮削**（`meta.last_scraped_at` 为空），或连
+      `meta` 行都还没有。`completeness` 在这两种情况下通常已被兜底写成 `missing_core`
+      （`meta_stats`/`_persist` 的默认值），但那只是"什么都没拿到"的占位值，
+      **不等于"刮过了但缺核心"** —— 这就是 2026-10-15 真机 bug 的根因：
+      8 条从没刮过的片子被判成「缺核心」，而「未刮削」筛选一条也筛不出来。
+    - **`full` / `missing_plot` / `missing_core`**：**已经刮过**，按 `meta.completeness` 分档。
+
+    `completeness` 认不出时按 `unscraped` 处理（宁可让用户点一下重刮，也不谎称"已完整"）。
+    """
+    if not scraped:
+        return "unscraped"
+    value = str(completeness or "").strip()
+    return value if value in ("full", "missing_plot", "missing_core") else "unscraped"
+
+
 # 展示番号（`display_number`）与「一部片挑哪个键」（`emby.key_rank` / `emby.best_keys`）
 # 2026-10-12 起都住在 `emby.py`：与 `emby.norm_key()` 是同一套番号口径的几半，放一处才不会漂，
 # 顺带让「Emby 库 → 界面行」（`emby.library_rows()`）能脱离宿主被单测直接加载。
@@ -313,7 +334,7 @@ class AVHelper(_PluginBase):
     # 版本：0.7.3 = 修头像同步误报 person_missing（匹配名与写入名走同一条链，存量 actors_json 建索引时复算）
     # + 0.7.2 基座：自建刮削层（0.7.0 起：番号解析/中文简介/翻译/封面裁切/Emby 安全写入与回滚）
     # + 界面减负：手动刮削改搜索式、演员三显示项、列表翻页、刮削台去裁切锚点与回滚入口、设置台去裁切锚点
-    plugin_version = "0.7.3"
+    plugin_version = "0.7.4"
     plugin_label = "发现"
     plugin_author = "ssmengyan"
     plugin_config_prefix = "avhelper_"
@@ -2660,13 +2681,12 @@ class AVHelper(_PluginBase):
             logger.error(f"AVHelper 解析实例键失败（{text}）：{error}")
         return text
 
-    def _scrape_items(self, limit: int = 0, offset: int = 0,
-                      filter_text: str = "") -> List[Dict[str, Any]]:
-        """`/scrape/status` 的 `items[]`：`meta` 行 + 代表实例（`media_item`）合并。
+    def _scrape_rows(self) -> List[Dict[str, Any]]:
+        """`/scrape/status` 的**全量行集** —— 工作台列表与四张状态卡**唯一的共同数据源**。
 
         字段名与主统筹跟前端定死的那份**逐字一致**：`key` / `number` / `title` / `emby_id` /
         `completeness` / `scrape_state` / `has_backup` / `crop_anchor` / `version_tags[]` /
-        `updated_at`。
+        `updated_at`，另加一个 `status`（四档规范值，见 `scrape_tier_of()`；**界面只认它**）。
 
         - `has_backup` 取 S1 的**布尔位**（`item_list()` 给的，不是 `emby_backup_json` 本体）
           —— 回滚按钮的判据就是它，`False` 才禁用；
@@ -2675,8 +2695,15 @@ class AVHelper(_PluginBase):
         - 只有实例、没有作品行（`media_item` 里有、`meta` 里没有）的 key 也算一条，
           `completeness` 按 `missing_core` 计（作品级元数据确实什么都没有）；
         - **Emby 库里有、`meta` 表里也没有**的条目（连 `media_item` 行都没有）同样补一条，
-          `completeness` 给 `missing_core` / `scrape_state` 给 `unscraped`（R1，2026-10-15：
-          用户报「库里很多内容都没有」，根因就是这些条目既不进列表也不进队列）。
+          `status` 给 `unscraped`（R1，2026-10-15：用户报「库里很多内容都没有」，
+          根因就是这些条目既不进列表也不进队列）。
+
+        ★ **统计与列表同源**（0.7.4，2026-10-15 真机 bug 的修法）：`stats` 以前走
+        `store.meta_stats()` + 「Emby 库键 − meta 键」两套账，而列表走 `best_keys()` 收敛后的
+        另一套键集 —— 两边键集不同（真机实测 stats 报 `unscraped=114`，而列表里
+        `status=unscraped` 的行只有 8 条、还因为 `completeness='missing_core'` 被画成「缺核心」），
+        用户看到的就是「点『未刮削』→ 该状态下没有条目」。现在 `api_scrape_status` 直接数这份行集，
+        **不可能再对不上账**。
         """
         index = self._film_index()
         metas: Dict[str, Any] = index.get("meta") or {}
@@ -2685,7 +2712,10 @@ class AVHelper(_PluginBase):
         for key in list(metas.keys()) + [k for k in items.keys() if k not in metas]:
             meta = metas.get(key) if isinstance(metas.get(key), dict) else {}
             item = self._pick_item(items.get(key) or [])
-            completeness = str(meta.get("completeness") or "") or "missing_core"
+            has_meta = bool(meta)
+            completeness = (str(meta.get("completeness") or "").strip()
+                            or ("missing_core" if has_meta else "unscraped"))
+            scraped = bool(str(meta.get("last_scraped_at") or "").strip())
             rows.append({
                 "key": key,
                 "number": (str(meta.get("display_number") or "")
@@ -2694,6 +2724,7 @@ class AVHelper(_PluginBase):
                 "emby_id": str(item.get("emby_id") or ""),
                 "completeness": completeness,
                 "scrape_state": scrape_state_of(meta, item),
+                "status": scrape_tier_of(completeness, scraped),
                 "has_backup": bool(item.get("has_backup")),
                 "crop_anchor": str(item.get("crop_anchor") or "auto"),
                 "version_tags": version_labels(item.get("version_tags")),
@@ -2724,55 +2755,59 @@ class AVHelper(_PluginBase):
                 "number": emby.shown_number(key, entry.get("name")),
                 "title": "",
                 "emby_id": str(entry.get("id") or ""),
-                "completeness": "missing_core",
+                "completeness": "unscraped",
                 "scrape_state": "unscraped",
+                "status": "unscraped",
                 "has_backup": False,
                 "crop_anchor": "auto",
                 "version_tags": [],
                 "updated_at": "",
             })
         rows.sort(key=lambda row: str(row.get("updated_at") or ""), reverse=True)
+        return rows
+
+    def _slice_rows(self, rows: Sequence[Dict[str, Any]], limit: int = 0, offset: int = 0,
+                    filter_text: str = "") -> List[Dict[str, Any]]:
+        """行集 → `filter` 档位 → `limit/offset`（`_scrape_items` 与 `api_scrape_status` 共用）。
+
+        `filter` 收的是 `status` 四档（`full` / `missing_plot` / `missing_core` / `unscraped`），
+        与四张状态卡一一对应；**不再拿 `completeness` 当筛选键**（那正是老 bug：
+        `completeness='missing_core'` 的未刮条目永远筛不进「未刮削」）。
+        """
+        out = list(rows or [])
         wanted = str(filter_text or "").strip()
         if wanted:
-            rows = [row for row in rows if str(row.get("completeness") or "") == wanted]
+            out = [row for row in out if str(row.get("status") or "") == wanted]
         skip = max(to_int(offset), 0)
         size = max(to_int(limit), 0)
         if skip:
-            rows = rows[skip:]
-        return rows[:size] if size else rows
+            out = out[skip:]
+        return out[:size] if size else out
+
+    def _scrape_items(self, limit: int = 0, offset: int = 0,
+                      filter_text: str = "") -> List[Dict[str, Any]]:
+        """`/scrape/status` 的 `items[]`：`_scrape_rows()` 全量行 → `_slice_rows()` 筛选截断。"""
+        return self._slice_rows(self._scrape_rows(), limit=limit, offset=offset,
+                                filter_text=filter_text)
 
     def api_scrape_status(self, limit: int = 0, offset: int = 0,
                           filter: str = "") -> Dict[str, Any]:
         """`/scrape/status`：工作台首屏（契约 §3.7 + 主统筹 2026-10-14 补充的 `items[]`）。
 
-        `?limit=&offset=&filter=` 三个参数（`filter` 就是 completeness 档位：前端点状态卡片筛选）。
+        `?limit=&offset=&filter=` 三个参数（`filter` 就是四档 `status`：前端点状态卡片筛选）。
 
-        `stats.unscraped` 的口径是**本模块定的**（契约没写怎么算）：「作品表里 completeness
-        落在三档之外的行」＋「Emby 库里已经入库、但 `meta` 表里还没有的番号」，于是
-        `full + missing_plot + missing_core + unscraped == total`，四张状态卡能对上账。
-        拿不到 Emby 索引时只算前半部分，不影响出数。
+        ★ **四档口径（0.7.4 收口）**：`stats` 与 `items` **同源** —— 都是 `_scrape_rows()` 那份行集，
+        `stats[tier]` 就是该档的行数，`total` 就是行数。于是
+        `full + missing_plot + missing_core + unscraped == total == len(全部行)` 恒成立，
+        界面上"卡片数字"与"点进去看到的行"再也不会互相矛盾。判据见 `scrape_tier_of()`。
         """
-        try:
-            raw = self.store.meta_stats() or {}
-        except Exception as error:
-            logger.error(f"AVHelper 读刮削统计失败：{error}")
-            raw = {}
-        full = int(raw.get("full") or 0)
-        missing_plot = int(raw.get("missing_plot") or 0)
-        missing_core = int(raw.get("missing_core") or 0)
-        meta_total = int(raw.get("total") or 0)
-        others = max(meta_total - full - missing_plot - missing_core, 0)
-        unscraped = others
-        try:
-            index = self.emby().index() or {}
-            meta_keys = {str(k) for k in (self._film_index().get("meta") or {})}
-            lib_keys = {canon_of(key) for key in index.keys()}
-            unscraped += len({k for k in lib_keys if k and k not in meta_keys})
-        except Exception as error:
-            logger.error(f"AVHelper 统计未刮条目失败（只按 meta 表算）：{error}")
-        stats = {"full": full, "missing_plot": missing_plot, "missing_core": missing_core,
-                 "unscraped": unscraped,
-                 "total": full + missing_plot + missing_core + unscraped}
+        rows = self._scrape_rows()
+        counts = {"full": 0, "missing_plot": 0, "missing_core": 0, "unscraped": 0}
+        for row in rows:
+            tier = str(row.get("status") or "")
+            if tier in counts:
+                counts[tier] += 1
+        stats = dict(counts, total=len(rows))
         try:
             queue = {"tier1": len(self.store.meta_due(tier=1, limit=SCRAPE_QUEUE_PROBE)),
                      "tier2": len(self.store.meta_due(tier=2, limit=SCRAPE_QUEUE_PROBE))}
@@ -2786,11 +2821,7 @@ class AVHelper(_PluginBase):
                 last_run = str(recent[0].get("created_at") or "")
         except Exception as error:
             logger.error(f"AVHelper 读最近一次刮削时间失败：{error}")
-        try:
-            items = self._scrape_items(limit=limit, offset=offset, filter_text=filter)
-        except Exception as error:
-            logger.error(f"AVHelper 组装刮削列表失败：{error}")
-            items = []
+        items = self._slice_rows(rows, limit=limit, offset=offset, filter_text=filter)
         return {"success": True, "stats": stats, "sources": self._scrape_sources(),
                 "queue": queue, "last_run": last_run, "items": items,
                 "scraper": bool(self.scrape_module() is not None)}
@@ -2862,6 +2893,12 @@ class AVHelper(_PluginBase):
             if payload.get("anchor") not in (None, ""):
                 opts["anchor"] = str(payload.get("anchor") or "").strip()
             opts["force"] = pick_bool(payload.get("force"), False)
+            # 0.7.4 手动刮削：`fields` 给了就**按它裁**（界面上逐字段勾选后提交），
+            # 没给 = 整份写（批量 / 自动刮削的老口径，一字未改）。
+            # `[]` 是"一项都没勾"的意思，照样往下传（`_write_field_set()` 认这个区分）。
+            if isinstance(payload.get("fields"), list):
+                opts["write_fields"] = [str(x).strip() for x in payload.get("fields")
+                                        if str(x).strip()]
             deps["opts"] = opts
             raw = await asyncio.to_thread(mod.scrape_batch, keys, **deps)
         except Exception as error:
@@ -2976,8 +3013,10 @@ class AVHelper(_PluginBase):
     async def api_scrape_avatars(self, request: Request) -> Dict[str, Any]:
         """`/scrape/avatars`：手动把演员头像同步进 Emby 的 Person 实体（P0-②）。
 
-        三个入参全可选：`dry_run`（默认 true：只 `find_person` + 出动作清单，零写请求）、
-        `limit`（只处理前 N 位）、`names`（只处理这几个规范名，单片用）。
+        入参全可选：`dry_run`（默认 true：只 `find_person` + 出动作清单，零写请求）、
+        `limit`（只处理前 N 位）、`names`（只处理这几个规范名，单片用）、
+        `force`（0.7.4：**覆盖已有头像**——存量头像多是 MetaTube/javdb 时代 100×100 的缩略图，
+        不覆盖就没法换成 Gfriends 的整图）。
         `emby_client` 为 None **不在这里特判** —— 干活的 `sync_actor_avatars()` 自己会回
         `errors:["未配置 Emby…"]`；返回体原样透传
         （`{ok, dry_run, actors, planned, applied, errors, missing_person, gender_unknown}`）。
@@ -2989,11 +3028,13 @@ class AVHelper(_PluginBase):
         names_raw = payload.get("names")
         names = [str(item).strip() for item in names_raw
                  if str(item).strip()] if isinstance(names_raw, list) else None
+        opts = dict(self.scrape_opts() or {})
+        opts["avatar_force"] = pick_bool(payload.get("force"), False)
         try:
             result = await asyncio.to_thread(
                 mod.sync_actor_avatars, self.store, self.emby_client(),
                 limit=to_int(payload.get("limit")), dry_run=pick_bool(payload.get("dry_run"), True),
-                namemap_mod=self.namemap_module(), opts=self.scrape_opts(), names=names)
+                namemap_mod=self.namemap_module(), opts=opts, names=names)
         except Exception as error:
             logger.error(f"AVHelper 同步演员头像失败：{error}")
             return {"success": False, "ok": False, "planned": [], "applied": [],

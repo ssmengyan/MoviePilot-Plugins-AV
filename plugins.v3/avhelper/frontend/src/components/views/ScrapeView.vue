@@ -3,10 +3,10 @@
  * 视图：刮削（数据台第八栏，v4 刮削线 S9 新增）。
  *
  * 两个页签（契约 §3.8 / v4.1 §10.2）：
- * 1. **全库刮削工作台** —— 首屏「搜索刮削」入口（`common/SearchScrapePanel.vue`）+
- *    顶部状态卡片（`full` / `missing_plot` / `missing_core` / `unscraped` / `total`，
- *    点一下筛选）、行列表（番号 / 标题 / 状态徽标 / 预览·刮削）、
- *    全选 + 批量刮削（**二次确认，文案写明「将写入 Emby」**）；
+ * 1. **全库刮削工作台** —— 顶部四张状态卡片（点一下筛选）+ 番号列表；
+ *    **点某一行的「刮削」→ 打开 `common/ScrapeDialog.vue`：勾选这次要写入的字段，确认写 Emby**
+ *    （用户 2026-10-15 的原话：「点开影片刮削后，能手动选择影片的具体信息」）；
+ *    另有全选 + 批量刮削（**二次确认，文案写明「将写入 Emby」**）与「同步演员头像」；
  * 2. **数据源自检** —— `sources[]` 表格（源名 / 最近状态 / 耗时 / 错误摘要 / 检查时间）、
  *    「立即自检」按钮、`scrape_log` 最近 50 条流水。
  *
@@ -15,42 +15,41 @@
  * | --- | --- |
  * | 状态 + 列表 | `GET /scrape/status`（`{stats, sources, queue, last_run, items}`） |
  * | 列表回落 | `GET /library`（`items[]` 缺失时用它，行里已带 `states` / `version_tags`） |
- * | 字段级 diff | `GET /scrape/preview?key=` |
+ * | 手动刮削（抓取预览 + 按字段写） | `common/ScrapeDialog.vue` → `GET /scrape/preview` / `POST /scrape/run` |
  * | 单条 / 批量刮削 | `POST /scrape/run {keys?, all?, force?, confirm?}` |
  * | 流水 | `GET /scrape/log?limit=50` |
- * | 同步演员头像 | `POST /scrape/avatars {dry_run?, limit?, names?}` |
+ * | 同步演员头像 | `POST /scrape/avatars {dry_run?, limit?, names?, force?}` |
  *
- * `items[]` 的字段名由主统筹 2026-10-14 定死：
- * `{key, number, title, emby_id, completeness, scrape_state, has_backup, crop_anchor, version_tags[], updated_at}`
- * —— 缺字段一律容错（`—` / 不画），**不猜**。本视图只消费 `key` / `number` / `title` / `emby_id` /
- * `completeness` / `scrape_state` / `version_tags` / `updated_at`；`has_backup` / `crop_anchor` 仍由
- * 后端返回与使用（写前留底闸门、裁切自判），但**界面不展示、也不再提交**（见下条）。
+ * `items[]` 的字段名由主统筹 2026-10-14 定死：`{key, number, title, emby_id, completeness,
+ * scrape_state, status, has_backup, crop_anchor, version_tags[], updated_at}` —— 缺字段一律容错
+ * （`—` / 不画），**不猜**。本视图只消费 `key` / `number` / `title` / `status` / `version_tags` /
+ * `updated_at`；`has_backup` / `crop_anchor` 仍由后端返回与使用（写前留底闸门、裁切自判），
+ * 但**界面不展示、也不再提交**。
  *
- * 五处刻意的口径（都有实测/裁决依据，改之前先读文档）：
+ * 六处刻意的口径（都有实测/裁决依据，改之前先读文档）：
+ * - **四档只看 `status`**（0.7.4 收口）：`GET /scrape/status` 的 `stats` 与 `items[]` 同源，
+ *   `status` ∈ `full` / `missing_plot` / `missing_core` / `unscraped`，四张卡片数字相加 **恒等于**
+ *   行数。老版本拿 `completeness` 当筛选键 + 另算一套 `stats`，两边键集不同 —— 真机症状就是
+ *   「点『未刮削』→ 该状态下没有条目」（卡片写 114，列表里一条都没有）。
+ *   `/library` 回落行没有 `status`，按 `states.scrape` 现算（见 `statusOf()`）。
+ * - **「缺核心」是什么意思**：`completeness == 'missing_core'` —— **刮过了，但标题/封面/演员/
+ *   发行日这些核心信息一个都没拿到**（`scraper.completeness_of()` 的判据）。卡片下面那句图例
+ *   就是答案；用户 2026-10-15 反馈「『缺核心』到底是什么意思」，所以它必须写在界面上。
  * - **「立即自检」只重读 `GET /scrape/status`**：契约 §3.7 **没有**触发式自检端点
  *   （`scraper.sources_selfcheck()` 是 Python 侧函数），所以这里把「刷新各源最近状态」如实
  *   说成「重新读取 `/scrape/status`」，不发明端点名。
  * - **批量刮削必须二次确认**（宿主 `moviepilot:confirm`，拿不到就 `window.confirm` 降级），
  *   文案写明「将写入 Emby」；载荷带 `confirm: true`（后端对 `all=true` 要求它）。
+ *   批量**不带 `fields`** = 整份写（老口径）；手动刮削才带白名单。
  * - **2026-10-15 界面减负**（用户要求「裁切锚点不需要出现、备份这些也都可以取消掉」）：
- *   锚点固定 `auto`、由后端裁切逻辑自判，界面不出现，`POST /scrape/run` 也不带 `anchor`；
- *   行内「回滚」按钮与「备份」列一并撤掉，文案不再提备份/回滚。**写前留底闸门
- *   （`has_backup`）与 `POST /scrape/rollback` 端点在后端原样保留**——只是界面不给入口。
- * - **2026-10-16 手动刮削改搜索式交互**（用户原话要义：「手动刮削预览信息过多；希望像搜索
- *   一样只显示几个搜到的结果；找到想要的点确认，数据直接导入；自动刮削无所谓」）：
- *   工作台首屏多一个**「搜索刮削」入口**（`common/SearchScrapePanel.vue`：输入番号或关键词 →
- *   回车即搜 `GET /search` → 只列几条候选卡片 → 点一条出**精简确认卡**（只画将写入的
- *   中文标题 / 原名 / 演员数 / 封面缩略 / 发行日）→ 「确认导入」走 `POST /scrape/run`）。
- *   **`GET /scrape/preview` 与字段级 diff 表原样保留，只是降级为默认收起的「高级」折叠**
- *   （展开后点一下才请求），行内那颗「预览」按钮也改由该面板承载 —— 全页只有一份 diff 表实现，
- *   所以本文件不再持有预览状态。**自动刮削（Tier 1/2 定时）相关交互一律未动**（用户："无所谓"）。
- * - **2026-10-16「同步演员头像」按钮（P8，方案 §2.6）**：工具栏那颗按钮接 `POST /scrape/avatars`，
- *   走**两段式**：点一下先弹一次宿主二次确认（写明会向 Emby 的 **Person 实体**上传头像、且下一步
- *   的 `dry_run` **零写请求**）→ `{dry_run:true}` 只读拿计划、把「上传 N / 跳过 M / 失败 K」摆到
- *   结果条上 → 再确认一次才 `{dry_run:false}` 真写。计划里 `up === 0` 时**不再问第二遍**
- *   （没有要写的东西，真跑只会把同一份只读计划重算一遍），计划本身照常留在结果条上。
- *   结果文案固定含「上传 N / 跳过 M / 失败 K」，另有一行说明 `gender_unknown`（旧数据缺 gender
- *   会保守跳过、重刮后自然补齐）与 `missing_person`（都不算失败），`errors` 只摆前几条。
+ *   锚点固定 `auto`、由后端裁切逻辑自判，界面不出现；行内「回滚」按钮与「备份」列一并撤掉，
+ *   文案不再提备份/回滚。**写前留底闸门（`has_backup`）与 `POST /scrape/rollback` 端点在后端
+ *   原样保留** —— 只是界面不给入口。
+ * - **2026-10-16 手动刮削再改**（用户原话要义：「『搜索候选』功能完全没用，我不知道是干啥的，
+ *   不需要这个搜索候选功能」「『高级』下面的下拉栏感觉完全没用」「我想要的效果是：点开影片刮削后，
+ *   能手动选择影片的具体信息」）：**全库搜索刮削面板与「高级」字段级 diff 折叠一并删除**
+ *   （组件 `common/SearchScrapePanel.vue` 已删），改成**行内「刮削」→ 对话框里逐字段勾选**。
+ *   自动刮削（Tier 1/2 定时）相关交互一律未动（用户："无所谓"）。
  *
  * 降级纪律（本线的硬要求）：接口 404 / 网络失败 / 字段缺失 → 空态或错误态 + 一句原因，
  * **不白屏、不抛未捕获异常**、不因为一个端点坏了就把另一块也画成坏的（两块各自 try/catch）。
@@ -58,7 +57,7 @@
 import { computed, ref } from 'vue'
 import EmptyState from '../common/EmptyState.vue'
 import ErrorState from '../common/ErrorState.vue'
-import SearchScrapePanel from '../common/SearchScrapePanel.vue'
+import ScrapeDialog from '../common/ScrapeDialog.vue'
 import { errorText, hostToast, unwrap, type PluginApi } from '../../composables/usePluginApi'
 import { useHostConfirm } from '../../composables/useHostDialogs'
 import { shortTime } from '../../composables/storeTypes'
@@ -137,14 +136,34 @@ function pickTab(key: TabKey): void {
 
 // ---------------------------------------------------------------- 状态与列表
 
-/** 状态四档（`stats` 的键就是这四个 + `total`）。 */
+/** 状态四档（后端 `items[].status` 就是这四个 + `stats` 里多一个 `total`）。 */
 type StatusKey = 'full' | 'missing_plot' | 'missing_core' | 'unscraped'
 
-const STATUS_META: Record<StatusKey, { label: string; color: string; hint: string }> = {
-  full: { label: '已完整', color: 'success', hint: '核心字段与简介都齐了' },
-  missing_plot: { label: '缺简介', color: 'warning', hint: '标题/封面/演员有，简介还没拿到（Tier 1 退避重刮）' },
-  missing_core: { label: '缺核心', color: 'error', hint: '核心字段（标题/封面/演员/发行日）还没补齐' },
-  unscraped: { label: '未刮削', color: 'info', hint: '还没跑过自建刮削层' },
+/**
+ * 四档的人话解释。`legend` 会**常驻画在卡片下面** —— 用户 2026-10-15 明确问过
+ * 「『缺核心』到底是什么意思」，只放在 `title` 悬浮里不算回答。
+ */
+const STATUS_META: Record<StatusKey, { label: string; color: string; hint: string; legend: string }> = {
+  full: {
+    label: '已完整', color: 'success',
+    hint: '标题、简介、演员、封面都齐了',
+    legend: '已完整＝标题/简介/演员/封面都齐了',
+  },
+  missing_plot: {
+    label: '缺简介', color: 'warning',
+    hint: '标题/封面/演员都有，只差简介（定时任务会隔一段时间重试）',
+    legend: '缺简介＝别的都有，只差简介',
+  },
+  missing_core: {
+    label: '缺核心信息', color: 'error',
+    hint: '刮过了，但标题/封面/演员/发行日这些核心信息一个都没拿到',
+    legend: '缺核心信息＝刮过了，但标题/封面/演员/发行日都没拿到',
+  },
+  unscraped: {
+    label: '未刮削', color: 'info',
+    hint: '还没刮过，Emby 里什么都没有（点行内「刮削」手动补）',
+    legend: '未刮削＝还没刮过',
+  },
 }
 const STATUS_ORDER: StatusKey[] = ['full', 'missing_plot', 'missing_core', 'unscraped']
 
@@ -162,14 +181,24 @@ interface WorkRow {
   raw: Record<string, any>
 }
 
-/** 后端状态词 → 四档（认不出的归「未刮削」，并把原词留在 `statusRaw` 里照实显示）。 */
-function statusKeyOf(raw: unknown): { key: StatusKey; raw: string } {
-  const value = text(raw).trim()
-  const lower = value.toLowerCase()
-  if (lower === 'full' || lower === 'scraped_full' || lower === 'complete') return { key: 'full', raw: value }
-  if (lower === 'missing_plot' || lower === 'scraped_partial' || lower === 'partial') return { key: 'missing_plot', raw: value }
-  if (lower === 'missing_core') return { key: 'missing_core', raw: value }
-  return { key: 'unscraped', raw: value }
+/**
+ * 一行 → 四档。**首选后端给的 `status`**（`api_scrape_status` 与 `items[]` 同源，0.7.4 起
+ * 四档互斥且穷尽）；后端是老版本时按 `states.scrape` / `completeness` 兜底，别白屏。
+ */
+function statusOf(row: Record<string, any>): { key: StatusKey; raw: string } {
+  const direct = text(row.status).trim().toLowerCase()
+  if (direct === 'full' || direct === 'missing_plot' || direct === 'missing_core'
+      || direct === 'unscraped') {
+    return { key: direct as StatusKey, raw: text(row.status) }
+  }
+  const state = text(row.states?.scrape ?? row.scrape_state).trim().toLowerCase()
+  if (state === 'scraped_full') return { key: 'full', raw: state }
+  if (state === 'scraped_partial') return { key: 'missing_plot', raw: state }
+  const completeness = text(row.completeness).trim().toLowerCase()
+  if (completeness === 'full') return { key: 'full', raw: completeness }
+  if (completeness === 'missing_plot') return { key: 'missing_plot', raw: completeness }
+  if (completeness === 'missing_core') return { key: 'missing_core', raw: completeness }
+  return { key: 'unscraped', raw: state || completeness }
 }
 
 /** `item_key` 缺省时按契约 §4 的格式从 `emby_id` 拼（`emby:<id>`）——勾选与选中集的去重身份。 */
@@ -184,7 +213,7 @@ function itemKeyOf(row: Record<string, any>): string {
 function normalizeRow(row: Record<string, any>): WorkRow {
   const number = text(row.number || row.display_number || row.key)
   const key = text(row.key || number)
-  const status = statusKeyOf(row.completeness ?? row.scrape_state ?? row.status ?? row.states?.scrape)
+  const status = statusOf(row)
   return {
     key,
     number: number || key,
@@ -206,8 +235,6 @@ const error = ref('')
 const statusError = ref('')
 const statusData = ref<any>(null)
 const rows = ref<WorkRow[]>([])
-/** 列表来自哪：`status` = `/scrape/status.items`；`library` = 回落 `/library`；`''` = 没有。 */
-const listSource = ref<'' | 'status' | 'library'>('')
 
 /** 顶部卡片：`stats` 五档（字段缺失按 0，`total` 缺失就用列表长度兜底）。 */
 const stats = computed<Record<string, number>>(() => {
@@ -298,8 +325,8 @@ async function loadLibraryRows(): Promise<WorkRow[]> {
       number: item.number,
       title: item.title,
       emby_id: item.emby_id || item.id,
-      // `/library` 没有 completeness：用 `states.scrape` 认档（`film_view` 的口径）
-      completeness: item.states?.scrape,
+      // `/library` 没有 `status`：把 `states.scrape` 原样带过来（`statusOf()` 认它）
+      states: item.states,
       version_tags: item.version_tags,
       updated_at: item.updated_at,
     }))
@@ -321,14 +348,11 @@ async function load(notify = false): Promise<void> {
       rows.value = inline
         .filter((item: any) => item && typeof item === 'object')
         .map((item: any) => normalizeRow(item))
-      listSource.value = 'status'
     } else {
       try {
         rows.value = await loadLibraryRows()
-        listSource.value = rows.value.length ? 'library' : ''
       } catch (err) {
         rows.value = []
-        listSource.value = ''
         // 两个来源都失败：把能说的原因合起来给用户（优先 /scrape/status 的那句）
         error.value = statusError.value || errorText(err)
       }
@@ -346,20 +370,20 @@ async function load(notify = false): Promise<void> {
 
 void load(false)
 
-// ---------------------------------------------------------------- 预览（字段级 diff）
+// ---------------------------------------------------------------- 手动刮削（对话框）
 
 /**
- * 字段级 diff 已**降级为搜索面板里的「高级」折叠**（0.7.2）：预览状态、请求与那张
- * diff 表全部搬到了 `common/SearchScrapePanel.vue`，本视图的行内按钮只把番号交给它。
+ * 行内「刮削」= 打开 `common/ScrapeDialog.vue`：那里先 `GET /scrape/preview?key=` 抓一遍，
+ * 把「Emby 现在的值 / 这次抓到的值」并排列出来，**用户自己勾要写哪几项**，再提交
+ * `POST /scrape/run {keys, fields:[…]}`。
  *
- * 为什么不留两份：`GET /scrape/preview` 的回包同时喂着「确认卡的关键字段」与「diff 表」，
- * 分成两处持有就会出现"刚看过的那份值"和"确认卡上那份值"不一致。全页一份实现，
- * 行内「预览」与折叠里的「预览字段差异」也就天然同源。
+ * 全页只有这一份「抓取 → 勾选 → 写入」实现（老版本的「搜索刮削」面板与「高级」diff 折叠
+ * 已按用户要求删除，见文件头）。
  */
-const pickRef = ref<InstanceType<typeof SearchScrapePanel> | null>(null)
+const scrapeDialog = ref<InstanceType<typeof ScrapeDialog> | null>(null)
 
-function openPreview(row: WorkRow): void {
-  void pickRef.value?.openPreview({ key: row.key, number: row.number })
+function openScrape(row: WorkRow): void {
+  scrapeDialog.value?.openFor({ key: row.key, number: row.number, title: row.title })
 }
 
 // ---------------------------------------------------------------- 刮削
@@ -406,35 +430,12 @@ function summarizeRun(payload: any): ActionResult {
   }
 }
 
-/** 单条「刮削」：直接跑（用户明确点了这一行），跑完把结论留在页面上。 */
-async function runOne(row: WorkRow): Promise<void> {
-  if (busy.value) return
-  const id = rowId(row)
-  busy.value = `run:${id}`
-  runResult.value = null
-  t.info(`正在刮削 ${row.number || row.key} …`)
-  try {
-    const payload: any = await postJson('plugin/scrape/run', {
-      keys: [row.key || row.number],
-      force: false,
-    })
-    const summary = summarizeRun(payload)
-    runResult.value = summary
-    if (summary.ok) t.success(`刮削完成：${summary.text}`)
-    else t.warning(`刮削未全部成功：${summary.text}`)
-    emit('refreshSide')
-    await load(false)
-  } catch (err) {
-    runResult.value = { ok: false, text: '刮削请求失败', errors: [errorText(err)] }
-    t.warning(`刮削失败：${errorText(err)}`)
-  } finally {
-    busy.value = ''
-  }
-}
-
 /**
  * 批量「刮削选中」：**必须二次确认**（会写 Emby），文案写明「将写入 Emby」。
  * 载荷带 `confirm: true`（后端对 `all=true` 要求该字段；这里也一并发，语义一致）。
+ *
+ * ⚠️ 批量**不带 `fields`** = 整份写（老口径：抓到的字段全写一遍）。逐字段挑选只走
+ * `common/ScrapeDialog.vue` 的单条路径。
  */
 async function runSelected(): Promise<void> {
   if (busy.value) return
@@ -532,12 +533,13 @@ function avatarText(counts: AvatarCounts, dryRun: boolean): string {
 /**
  * 补充说明（既不是失败也不算"跳过"的那些）：`gender_unknown` 与 `missing_person`。
  *
- * `gender_unknown` **照实报数**（0 也画）——它是"旧数据缺 gender 保守跳过"的口径本身，
- * 用户看到 0 才知道这次不是被它挡住的；`missing_person` 只在非 0 时说一句，免得刷屏。
+ * `gender_unknown` **照实报数**（0 也画）：0.7.4 起这批人**不再被丢掉**（旧数据缺 `gender`
+ * 时保守保留 —— 那正是「女优头像设置还是不行」的一半原因），所以这句话是"我尽力了、这批人
+ * 是按缺字段放行的"，不是"被它挡住了"；`missing_person` 只在非 0 时说一句，免得刷屏。
  */
 function avatarNotes(counts: AvatarCounts): string[] {
   const notes = [
-    `缺 gender 的旧数据保守跳过 ${counts.genderUnknown} 位（不算失败；那条影片重刮一遍后自然补齐）`,
+    `其中 ${counts.genderUnknown} 位是旧数据、没有性别字段（按"保守保留"放行，不算失败；重刮一遍后性别会补齐）`,
   ]
   if (counts.missing > 0) {
     notes.push(`跳过里 ${counts.missing} 位还没在 Emby 建过 Person 实体（影片 People 写对后自会收敛）`)
@@ -570,16 +572,23 @@ function avatarResult(counts: AvatarCounts, dryRun: boolean, extraNotes: string[
  * 计划里 `up === 0`（全都有头像了 / 还没建过 Person 实体 / 两源都没图 / 没配 Emby）时
  * **不再问第二遍**：没有要写的东西，真跑只会把同一份只读计划重算一遍；计划与 `errors`
  * 照常留在结果条上，用户一眼能看出是被什么挡住的。
+ *
+ * `force`（0.7.4）＝**覆盖已有头像**。用户报「很多女优头像非常不清晰、很低清」的根因是
+ * 存量头像里有大量 MetaTube/javdb 时代的 100×100 缩略图，而 `has_image` 一挡就永远换不掉；
+ * 后端已改成 Gfriends（564×720 ~ 1235×1851 整图）优先，但要**真的换上去**还得跑一次覆盖。
  */
-async function syncAvatars(): Promise<void> {
+async function syncAvatars(force = false): Promise<void> {
   if (busy.value) return
   const proceed = await confirm({
     type: 'warn',
-    title: '同步演员头像',
+    title: force ? '重新同步全部演员头像（覆盖已有）' : '同步演员头像',
     content:
       '这一步只读：先跑一次 dry_run 计划，零写请求，不会向 Emby 写任何东西。\n\n' +
       '真正的上传在你看到计划条数、再确认一次之后才发生：届时会把头像写进 Emby 的 Person 实体' +
-      '（Person 的 Primary 图，必要时合并写 ProviderIds.JavDB）。已经写过头像的 Person 会跳过。',
+      '（Person 的 Primary 图，必要时合并写 ProviderIds.JavDB）。' +
+      (force
+        ? '\n\n★ 这次带 force：**已经写过头像的 Person 也会被重新上传覆盖**（用来把旧的糊头像换成高清图）。'
+        : '已经写过头像的 Person 会跳过。'),
     confirmText: '先看计划',
     cancelText: '取消',
   })
@@ -590,7 +599,8 @@ async function syncAvatars(): Promise<void> {
     t.info('正在读取头像同步计划（dry_run，零写请求）…')
     let plan: AvatarCounts
     try {
-      const planPayload: any = await postJson('plugin/scrape/avatars', { dry_run: true })
+      const planPayload: any = await postJson('plugin/scrape/avatars',
+                                             { dry_run: true, force })
       plan = countAvatarActions(planPayload)
     } catch (err) {
       runResult.value = { ok: false, text: '头像同步计划读取失败', errors: [errorText(err)] }
@@ -619,7 +629,7 @@ async function syncAvatars(): Promise<void> {
       return
     }
     t.info(`正在上传 ${plan.up} 张头像…`)
-    const payload: any = await postJson('plugin/scrape/avatars', { dry_run: false })
+    const payload: any = await postJson('plugin/scrape/avatars', { dry_run: false, force })
     const done = countAvatarActions(payload)
     runResult.value = avatarResult(done, false)
     if (runResult.value.ok) t.success(`头像同步完成：${avatarText(done, false)}`)
@@ -753,12 +763,7 @@ function logStatusColor(status: unknown): string {
       </div>
 
       <span v-if="tab === 'workbench'" class="avh-scrape__hint">
-        搜索刮削走 GET /search · 行内「刮削」与「确认导入」同一条写入链路 ·
-        列表来源：{{
-          listSource === 'library' ? 'GET /library（/scrape/status 没有 items）'
-            : listSource === 'status' ? 'GET /scrape/status'
-              : '暂无（两个端点都没读到）'
-        }}
+        点行内「刮削」可以自己挑这次写哪些信息；批量刮削会把抓到的全部信息写一遍
       </span>
       <span v-else class="avh-scrape__hint">各源最近状态取自 GET /scrape/status · 流水取自 GET /scrape/log</span>
 
@@ -774,20 +779,6 @@ function logStatusColor(status: unknown): string {
 
     <!-- ================= 页签 1：全库刮削工作台 ================= -->
     <template v-if="tab === 'workbench'">
-      <!--
-        搜索刮削入口（0.7.2，首屏第一块）：输入番号或关键词 → 候选卡片 → 精简确认卡 → 确认导入。
-        `GET /scrape/preview` 与字段级 diff 表在这个组件里降级为默认收起的「高级」折叠；
-        行内「预览」按钮也走它的 `openPreview()`（`ref` 见 `<script>` 里的 `pickRef`）。
-      -->
-      <SearchScrapePanel
-        ref="pickRef"
-        :api="api"
-        :plugin-id="pluginId"
-        :toast="toast"
-        @refresh-side="emit('refreshSide')"
-        @done="load(false)"
-      />
-
       <!-- 状态卡片：点一下筛选，再点一下取消；「全部」清筛选 -->
       <div class="avh-stats">
         <div
@@ -812,10 +803,21 @@ function logStatusColor(status: unknown): string {
         </div>
       </div>
 
+      <!--
+        四档的解释**常驻画在卡片下面**（用户 2026-10-15：「『缺核心』到底是什么意思」）：
+        四个数字相加恒等于「全部」，每一档说的是"缺什么"，不是"刮了几次"。
+      -->
+      <div class="avh-scrape__legend">
+        <span v-for="key in STATUS_ORDER" :key="`legend#${key}`" class="avh-scrape__legenditem">
+          <v-icon icon="mdi-circle" :color="STATUS_META[key].color" size="8" class="me-1" />
+          {{ STATUS_META[key].legend }}
+        </span>
+      </div>
+
       <div class="avh-scrape__meta">
         <span class="avh-scrape__hint">
-          定时重刮队列：Tier 1 {{ queueInfo.tier1 === null ? '—' : queueInfo.tier1 }} ·
-          Tier 2 {{ queueInfo.tier2 === null ? '—' : queueInfo.tier2 }} ·
+          定时重刮队列：等重试 {{ queueInfo.tier1 === null ? '—' : queueInfo.tier1 }} ·
+          排队补刮 {{ queueInfo.tier2 === null ? '—' : queueInfo.tier2 }} ·
           上次运行 {{ lastRun || '—' }}
         </span>
         <span v-if="filter" class="avh-scrape__hint">· 正在筛选「{{ filterLabel }}」（{{ visibleRows.length }} 条）</span>
@@ -867,10 +869,11 @@ function logStatusColor(status: unknown): string {
           :loading="busy === 'run:batch'"
           @click="runSelected"
         >批量刮削（{{ selected.size }}）</v-btn>
-        <span class="avh-scrape__hint">批量会先弹一次确认，文案里写明「将写入 Emby」</span>
+        <span class="avh-scrape__hint">批量会先弹一次确认，把抓到的全部信息写一遍</span>
         <!--
           同步演员头像（0.7.2，方案 §2.6）：**与上面的勾选无关**（整份 meta 索引），
           两段式 —— 先 dry_run 出计划（零写请求），确认后才写 Emby 的 Person 实体。
+          0.7.4 加第二个入口「重新同步全部」= `force`，用来把存量低清头像换成高清（Gfriends）。
         -->
         <v-btn
           variant="outlined"
@@ -878,9 +881,30 @@ function logStatusColor(status: unknown): string {
           prepend-icon="mdi-account-box-outline"
           :disabled="!!busy"
           :loading="busy === 'avatars'"
-          @click="syncAvatars"
+          @click="syncAvatars(false)"
         >同步演员头像</v-btn>
-        <span class="avh-scrape__hint">全库同步、与勾选无关 · 先 dry_run 出计划（零写请求），确认后才写 Person 实体</span>
+        <v-menu location="bottom">
+          <template #activator="{ props: menuProps }">
+            <v-btn
+              variant="text"
+              size="small"
+              icon="mdi-dots-vertical"
+              :disabled="!!busy"
+              v-bind="menuProps"
+            />
+          </template>
+          <v-list density="compact">
+            <v-list-item
+              title="重新同步全部头像（覆盖已有）"
+              subtitle="把旧的糊头像换成高清图"
+              @click="syncAvatars(true)"
+            />
+          </v-list>
+        </v-menu>
+        <span class="avh-scrape__hint">
+          全库同步、与勾选无关 · 先出计划（零写请求），确认后才写 Person 实体 ·
+          头像优先取高清源（Gfriends），换不掉旧图时用右边菜单里的「重新同步全部」
+        </span>
       </div>
 
       <div v-if="loading && !rows.length" class="avh-scrape__loading">正在读取刮削状态…</div>
@@ -940,14 +964,13 @@ function logStatusColor(status: unknown): string {
               </td>
               <td class="avh-table__right">
                 <div class="avh-rowbtns">
-                  <v-btn size="x-small" variant="outlined" @click="openPreview(row)">预览</v-btn>
+                  <!-- 行内「刮削」= 手动挑字段写（对话框里勾选，见 `openScrape`） -->
                   <v-btn
                     size="x-small"
                     variant="outlined"
                     color="primary"
-                    :loading="busy === `run:${rowId(row)}`"
                     :disabled="!!busy"
-                    @click="runOne(row)"
+                    @click="openScrape(row)"
                   >刮削</v-btn>
                 </div>
               </td>
@@ -1103,10 +1126,16 @@ function logStatusColor(status: unknown): string {
     </template>
 
     <!--
-      字段级 diff 表（0.7.2）：**已搬进 `SearchScrapePanel.vue`** ——
-      它默认收在「高级」折叠里，工作台行内「预览」与折叠里的按钮共用同一份实现与状态。
-      这里不再放第二张表（原因见 `<script>` 里 `pickRef` 那段注释）。
+      手动刮削对话框（0.7.4）：行内「刮削」把番号交给它，由它抓取预览、让用户勾选字段、再写入。
+      全页只有这一份「抓取 → 勾选 → 写入」实现（老版本的「搜索刮削」面板与「高级」diff 折叠已删）。
     -->
+    <ScrapeDialog
+      ref="scrapeDialog"
+      :api="api"
+      :plugin-id="pluginId"
+      :toast="toast"
+      @done="load(false)"
+    />
   </div>
 </template>
 
@@ -1194,6 +1223,21 @@ function logStatusColor(status: unknown): string {
   color: rgba(var(--v-theme-on-surface), 0.6);
 }
 
+/* 四档的常驻图例（用户问过「缺核心是什么意思」，答案必须看得见，不能只藏在悬浮提示里） */
+.avh-scrape__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: -2px 0 10px;
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.55);
+}
+
+.avh-scrape__legenditem {
+  display: inline-flex;
+  align-items: center;
+}
+
 /* 表格（`table-layout: fixed` + 显式列宽：宽屏不把「操作」列挤出去，照 S6 候选表的教训） */
 .avh-tablewrap {
   overflow-x: auto;
@@ -1269,8 +1313,9 @@ function logStatusColor(status: unknown): string {
 
 /*
  * `.avh-table--diff` / `.avh-diff__changed` / `.avh-diff__cell` / `.avh-srcgrid*` 五条规则
- * 随 diff 表一起搬去了 `SearchScrapePanel.vue`（0.7.2）：scoped CSS 不会跨组件生效，
- * 留在这里就是五条永远选不中任何元素（本文件模板里已经没有 `--diff` / `srcgrid` 的类名了）。
+ * 曾随 diff 表搬去 `SearchScrapePanel.vue`（0.7.2）；**那个组件与那张全字段 diff 表已按用户
+ * 要求删除**（0.7.4），字段对照表现在住在 `common/ScrapeDialog.vue` 里、有自己的 scoped CSS。
+ * 这几条规则在这里**已经没有对应元素**，所以一并删掉（留着就是永远选不中的死规则）。
  */
 
 /* 页签胶囊：与「下载」栏那组同一套（两份 scoped CSS 各有作用域，本项目既有做法） */

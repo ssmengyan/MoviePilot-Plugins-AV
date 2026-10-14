@@ -538,6 +538,22 @@ class TestScrapeRunGates:
         opts = fake.calls["batch"][0][1]["opts"]
         assert opts["force"] is True and opts["anchor"] == "center"
 
+    def test_fields_selection_goes_into_opts(self, plugin, api_mod, monkeypatch):
+        """0.7.4 手动刮削：`fields` 原样进 `opts['write_fields']`。
+
+        三种形态都要分清（见 `TestWriteFieldSelection`）：给了清单就只写清单里的；
+        `[]` 是"一项都没勾"（照样往下传，**不许**被当成"没给"）；没给才是老口径整份写。
+        """
+        fake = with_scraper(api_mod, monkeypatch, FakeScraper())
+        use_emby(plugin)
+        call(plugin.api_scrape_run(FakeRequest({"keys": ["SNOS380"],
+                                                "fields": ["Name", "  ", "Overview"]})))
+        assert fake.calls["batch"][0][1]["opts"]["write_fields"] == ["Name", "Overview"]
+        call(plugin.api_scrape_run(FakeRequest({"keys": ["SNOS380"], "fields": []})))
+        assert fake.calls["batch"][1][1]["opts"]["write_fields"] == []
+        call(plugin.api_scrape_run(FakeRequest({"keys": ["SNOS380"]})))
+        assert "write_fields" not in fake.calls["batch"][2][1]["opts"]
+
     def test_results_are_normalized_to_contract_shape(self, plugin, api_mod, monkeypatch):
         fake = with_scraper(api_mod, monkeypatch,
                             FakeScraper(batch=[{"key": "", "extra": 1}, "垃圾"]))
@@ -684,18 +700,30 @@ class TestScrapeRollbackAndSelfcheck:
 # E. `/scrape/status`（含主统筹补充的 items[]）
 # ---------------------------------------------------------------------------
 
-ITEM_KEYS = {"key", "number", "title", "emby_id", "completeness", "scrape_state",
+ITEM_KEYS = {"key", "number", "title", "emby_id", "completeness", "scrape_state", "status",
              "has_backup", "crop_anchor", "version_tags", "updated_at"}
 
 
 class TestScrapeStatus:
     def test_stats_shape(self, plugin, api_mod, monkeypatch, store):
+        """四档 = `status`，且四张卡的数字**恒等于行数**（0.7.4 收口的可加性）。
+
+        ⚠️ 判据是「刮过没有」看 `meta.last_scraped_at`（`scrape_tier_of()`）：只写
+        `completeness` 而不写 `last_scraped_at` 的行是**从没刮过**的，按 `unscraped` 计 ——
+        老版本把它们按 `completeness` 分档，正是真机「点未刮削一条都筛不出来」的根因。
+        """
         no_scraper(api_mod, monkeypatch)
-        store.meta_upsert("SNOS380", display_number="SNOS-380", completeness="missing_plot")
-        store.meta_upsert("IPZZ912", display_number="IPZZ-912", completeness="full")
+        store.meta_upsert("SNOS380", display_number="SNOS-380", completeness="missing_plot",
+                          last_scraped_at="2026-10-15 10:00:00")
+        store.meta_upsert("IPZZ912", display_number="IPZZ-912", completeness="full",
+                          last_scraped_at="2026-10-15 10:00:00")
+        store.meta_upsert("MIDV278", display_number="MIDV-278", completeness="missing_core")
         stats = plugin.api_scrape_status()["stats"]
         assert set(stats) == {"full", "missing_plot", "missing_core", "unscraped", "total"}
         assert stats["full"] == 1 and stats["missing_plot"] == 1
+        assert stats["unscraped"] == 1        # 从没刮过（last_scraped_at 空）→ 未刮削
+        assert stats["missing_core"] == 0     # 没有"刮过但核心字段没拿到"的行
+        assert stats["total"] == 3
         assert stats["total"] == stats["full"] + stats["missing_plot"] + stats["missing_core"] \
             + stats["unscraped"]
 
@@ -724,21 +752,28 @@ class TestScrapeStatus:
         assert plugin.api_scrape_status()["items"][0]["has_backup"] is True
 
     def test_filter_limit_offset(self, plugin, api_mod, monkeypatch, store):
+        """`filter` 收的是四档 `status`；刮过没刮过由 `last_scraped_at` 决定。"""
         no_scraper(api_mod, monkeypatch)
-        store.meta_upsert("A1", display_number="A-1", completeness="full")
-        store.meta_upsert("B1", display_number="B-1", completeness="missing_plot")
-        store.meta_upsert("C1", display_number="C-1", completeness="missing_plot")
+        stamp = "2026-10-15 10:00:00"
+        store.meta_upsert("A1", display_number="A-1", completeness="full", last_scraped_at=stamp)
+        store.meta_upsert("B1", display_number="B-1", completeness="missing_plot",
+                          last_scraped_at=stamp)
+        store.meta_upsert("C1", display_number="C-1", completeness="missing_plot",
+                          last_scraped_at=stamp)
+        store.meta_upsert("D1", display_number="D-1", completeness="missing_core")
         assert len(plugin.api_scrape_status(filter="missing_plot")["items"]) == 2
+        assert len(plugin.api_scrape_status(filter="unscraped")["items"]) == 1
         assert len(plugin.api_scrape_status(limit=2)["items"]) == 2
-        assert len(plugin.api_scrape_status(limit=2, offset=2)["items"]) == 1
+        assert len(plugin.api_scrape_status(limit=2, offset=2)["items"]) == 2
 
     def test_instance_without_meta_row_still_listed(self, plugin, api_mod, monkeypatch, store):
-        """只有 media_item、没有 meta 行的条目也算一条（按 `missing_core` 计）。"""
+        """只有 media_item、没有 meta 行的条目也算一条（按 `unscraped` 计）。"""
         no_scraper(api_mod, monkeypatch)
         store.item_upsert("emby:1", "ORPHAN1", emby_id="1", display_number="ORPHAN-1")
         items = plugin.api_scrape_status()["items"]
         assert len(items) == 1
-        assert items[0]["key"] == "ORPHAN1" and items[0]["completeness"] == "missing_core"
+        assert items[0]["key"] == "ORPHAN1" and items[0]["completeness"] == "unscraped"
+        assert items[0]["status"] == "unscraped"          # 没有 meta 行 = 从没刮过
         assert items[0]["number"] == "ORPHAN-1"
 
     def test_queue_counts_due_items(self, plugin, api_mod, monkeypatch, store):

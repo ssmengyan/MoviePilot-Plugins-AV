@@ -1903,7 +1903,7 @@ const Thumb = /* @__PURE__ */ _export_sfc(_sfc_main$r, [["__scopeId", "data-v-82
 
 const {defineComponent:_defineComponent$q} = await importShared('vue');
 
-const {resolveComponent:_resolveComponent$m,createVNode:_createVNode$n,createTextVNode:_createTextVNode$k,withCtx:_withCtx$m,createElementVNode:_createElementVNode$p,renderList:_renderList$g,Fragment:_Fragment$i,openBlock:_openBlock$q,createElementBlock:_createElementBlock$p,toDisplayString:_toDisplayString$p,createBlock:_createBlock$l,createCommentVNode:_createCommentVNode$k,withKeys:_withKeys$4,normalizeClass:_normalizeClass$d} = await importShared('vue');
+const {resolveComponent:_resolveComponent$m,createVNode:_createVNode$n,createTextVNode:_createTextVNode$k,withCtx:_withCtx$m,createElementVNode:_createElementVNode$p,renderList:_renderList$g,Fragment:_Fragment$i,openBlock:_openBlock$q,createElementBlock:_createElementBlock$p,toDisplayString:_toDisplayString$p,createBlock:_createBlock$l,createCommentVNode:_createCommentVNode$k,withKeys:_withKeys$3,normalizeClass:_normalizeClass$d} = await importShared('vue');
 
 const _hoisted_1$o = { class: "avh-chips mb-2" };
 const _hoisted_2$n = {
@@ -1941,12 +1941,12 @@ const _hoisted_21$5 = {
   key: 0,
   class: "avh-map__sub"
 };
-const _hoisted_22$5 = {
+const _hoisted_22$4 = {
   key: 2,
   class: "text-caption text-medium-emphasis"
 };
-const _hoisted_23$5 = { class: "avh-map__right" };
-const _hoisted_24$5 = {
+const _hoisted_23$4 = { class: "avh-map__right" };
+const _hoisted_24$4 = {
   key: 1,
   class: "text-caption text-medium-emphasis mb-3"
 };
@@ -2253,7 +2253,7 @@ const _sfc_main$q = /* @__PURE__ */ _defineComponent$q({
                   "hide-details": "",
                   "single-line": "",
                   placeholder: "新增一个词，如 -UC / _4K / CD1",
-                  onKeydown: _withKeys$4(addSuffix, ["enter"])
+                  onKeydown: _withKeys$3(addSuffix, ["enter"])
                 }, null, 8, ["modelValue"]),
                 _createVNode$n(_component_v_btn, {
                   variant: "outlined",
@@ -2437,7 +2437,7 @@ const _sfc_main$q = /* @__PURE__ */ _defineComponent$q({
                   clearable: "",
                   "prepend-inner-icon": "mdi-magnify",
                   placeholder: entity.value === "actor" ? "查演员名（中文 / 日文 / 别名）" : "查标签名",
-                  onKeydown: _withKeys$4(loadMap, ["enter"])
+                  onKeydown: _withKeys$3(loadMap, ["enter"])
                 }, null, 8, ["modelValue", "placeholder"]),
                 _createVNode$n(_component_v_btn, {
                   variant: "outlined",
@@ -2487,9 +2487,9 @@ const _sfc_main$q = /* @__PURE__ */ _defineComponent$q({
                         ])
                       ], 10, _hoisted_17$7);
                     }), 128))
-                  ])) : !listError.value ? (_openBlock$q(), _createElementBlock$p("div", _hoisted_22$5, _toDisplayString$p(listLoading.value ? "正在读取…" : "没有匹配的记录（后端还没有返回数据，或查询词没命中）"), 1)) : _createCommentVNode$k("", true)
+                  ])) : !listError.value ? (_openBlock$q(), _createElementBlock$p("div", _hoisted_22$4, _toDisplayString$p(listLoading.value ? "正在读取…" : "没有匹配的记录（后端还没有返回数据，或查询词没命中）"), 1)) : _createCommentVNode$k("", true)
                 ]),
-                _createElementVNode$p("div", _hoisted_23$5, [
+                _createElementVNode$p("div", _hoisted_23$4, [
                   _createVNode$n(_component_v_text_field, {
                     modelValue: draftName.value,
                     "onUpdate:modelValue": _cache[5] || (_cache[5] = ($event) => draftName.value = $event),
@@ -2516,7 +2516,7 @@ const _sfc_main$q = /* @__PURE__ */ _defineComponent$q({
                     variant: "outlined",
                     density: "comfortable",
                     class: "mb-3"
-                  }, null, 8, ["modelValue"])) : (_openBlock$q(), _createElementBlock$p("p", _hoisted_24$5, _cache[24] || (_cache[24] = [
+                  }, null, 8, ["modelValue"])) : (_openBlock$q(), _createElementBlock$p("p", _hoisted_24$4, _cache[24] || (_cache[24] = [
                     _createTextVNode$k(" 标签的 "),
                     _createElementVNode$p("code", null, "zh", -1),
                     _createTextVNode$k(" 留空 = 删除规则（后端 "),
@@ -3965,7 +3965,7 @@ function nowStr() {
 
 const {defineComponent:_defineComponent$i} = await importShared('vue');
 
-const {resolveComponent:_resolveComponent$f,withKeys:_withKeys$3,createVNode:_createVNode$g,toDisplayString:_toDisplayString$h,createTextVNode:_createTextVNode$d,withCtx:_withCtx$f,createElementVNode:_createElementVNode$i,openBlock:_openBlock$i,createBlock:_createBlock$f,createElementBlock:_createElementBlock$i} = await importShared('vue');
+const {resolveComponent:_resolveComponent$f,withKeys:_withKeys$2,createVNode:_createVNode$g,toDisplayString:_toDisplayString$h,createTextVNode:_createTextVNode$d,withCtx:_withCtx$f,createElementVNode:_createElementVNode$i,openBlock:_openBlock$i,createBlock:_createBlock$f,createElementBlock:_createElementBlock$i} = await importShared('vue');
 
 const _hoisted_1$h = { class: "avh-sitesearch" };
 const _hoisted_2$h = { class: "avh-sitesearch__toolbar" };
@@ -4109,7 +4109,7 @@ const _sfc_main$i = /* @__PURE__ */ _defineComponent$i({
             variant: "outlined",
             "hide-details": "",
             disabled: searching.value,
-            onKeydown: _withKeys$3(doSearch, ["enter"])
+            onKeydown: _withKeys$2(doSearch, ["enter"])
           }, null, 8, ["modelValue", "disabled"]),
           _createVNode$g(_component_v_btn, {
             color: "primary",
@@ -4774,26 +4774,26 @@ const _hoisted_18$5 = {
 const _hoisted_19$5 = { class: "avh-q__hd" };
 const _hoisted_20$5 = { class: "avh-q__main" };
 const _hoisted_21$4 = { class: "avh-q__no" };
-const _hoisted_22$4 = {
+const _hoisted_22$3 = {
   key: 0,
   class: "avh-q__ttl"
 };
-const _hoisted_23$4 = { class: "avh-q__hint avh-q__meta" };
-const _hoisted_24$4 = ["title"];
-const _hoisted_25$4 = { class: "avh-downloads__secttl" };
-const _hoisted_26$4 = {
+const _hoisted_23$3 = { class: "avh-q__hint avh-q__meta" };
+const _hoisted_24$3 = ["title"];
+const _hoisted_25$3 = { class: "avh-downloads__secttl" };
+const _hoisted_26$3 = {
   key: 0,
   class: "avh-vbadge"
 };
-const _hoisted_27$4 = { class: "avh-q__hd" };
-const _hoisted_28$4 = { class: "avh-q__main" };
-const _hoisted_29$4 = { class: "avh-q__no" };
-const _hoisted_30$4 = {
+const _hoisted_27$3 = { class: "avh-q__hd" };
+const _hoisted_28$3 = { class: "avh-q__main" };
+const _hoisted_29$3 = { class: "avh-q__no" };
+const _hoisted_30$3 = {
   key: 0,
   class: "avh-q__ttl"
 };
-const _hoisted_31$4 = { class: "avh-q__hint avh-q__meta" };
-const _hoisted_32$4 = {
+const _hoisted_31$3 = { class: "avh-q__hint avh-q__meta" };
+const _hoisted_32$3 = {
   key: 5,
   class: "avh-downloads__hint"
 };
@@ -5038,17 +5038,17 @@ const _sfc_main$g = /* @__PURE__ */ _defineComponent$g({
                         _: 1
                       })
                     ]),
-                    item.title ? (_openBlock$g(), _createElementBlock$g("div", _hoisted_22$4, _toDisplayString$f(item.title), 1)) : _createCommentVNode$c("", true),
-                    _createElementVNode$g("div", _hoisted_23$4, _toDisplayString$f(metaOf(item)), 1),
+                    item.title ? (_openBlock$g(), _createElementBlock$g("div", _hoisted_22$3, _toDisplayString$f(item.title), 1)) : _createCommentVNode$c("", true),
+                    _createElementVNode$g("div", _hoisted_23$3, _toDisplayString$f(metaOf(item)), 1),
                     _createElementVNode$g("div", {
                       class: "avh-q__hint avh-q__path",
                       title: failReasonOf(item)
-                    }, " 失败原因：" + _toDisplayString$f(failReasonOf(item)), 9, _hoisted_24$4)
+                    }, " 失败原因：" + _toDisplayString$f(failReasonOf(item)), 9, _hoisted_24$3)
                   ])
                 ])
               ], 2);
             }), 128)) : _createCommentVNode$c("", true),
-            _createElementVNode$g("div", _hoisted_25$4, [
+            _createElementVNode$g("div", _hoisted_25$3, [
               _createElementVNode$g("span", null, "已完成（" + _toDisplayString$f(doneRows.value.length) + "）", 1),
               _cache[5] || (_cache[5] = _createElementVNode$g("span", { class: "avh-downloads__secttl-note" }, "完整清单见本页「下载历史」", -1))
             ]),
@@ -5057,8 +5057,8 @@ const _sfc_main$g = /* @__PURE__ */ _defineComponent$g({
                 key: rowKey(item, index),
                 class: _normalizeClass$b(["avh-q avh-q--done", { "avh-q--vtag": hasBadge(item) }])
               }, [
-                hasBadge(item) ? (_openBlock$g(), _createElementBlock$g("span", _hoisted_26$4, _toDisplayString$f(versionBadgeOf(item)), 1)) : _createCommentVNode$c("", true),
-                _createElementVNode$g("div", _hoisted_27$4, [
+                hasBadge(item) ? (_openBlock$g(), _createElementBlock$g("span", _hoisted_26$3, _toDisplayString$f(versionBadgeOf(item)), 1)) : _createCommentVNode$c("", true),
+                _createElementVNode$g("div", _hoisted_27$3, [
                   _createVNode$e(Thumb, {
                     class: "avh-q__poster",
                     variant: "tposter",
@@ -5066,14 +5066,14 @@ const _sfc_main$g = /* @__PURE__ */ _defineComponent$g({
                     alt: "无图",
                     "plugin-id": _ctx.pluginId
                   }, null, 8, ["src", "plugin-id"]),
-                  _createElementVNode$g("div", _hoisted_28$4, [
-                    _createElementVNode$g("div", _hoisted_29$4, _toDisplayString$f(item.number || ""), 1),
-                    item.title ? (_openBlock$g(), _createElementBlock$g("div", _hoisted_30$4, _toDisplayString$f(item.title), 1)) : _createCommentVNode$c("", true),
-                    _createElementVNode$g("div", _hoisted_31$4, _toDisplayString$f(doneInfoOf(item)), 1)
+                  _createElementVNode$g("div", _hoisted_28$3, [
+                    _createElementVNode$g("div", _hoisted_29$3, _toDisplayString$f(item.number || ""), 1),
+                    item.title ? (_openBlock$g(), _createElementBlock$g("div", _hoisted_30$3, _toDisplayString$f(item.title), 1)) : _createCommentVNode$c("", true),
+                    _createElementVNode$g("div", _hoisted_31$3, _toDisplayString$f(doneInfoOf(item)), 1)
                   ])
                 ])
               ], 2);
-            }), 128)) : (_openBlock$g(), _createElementBlock$g("div", _hoisted_32$4, _cache[6] || (_cache[6] = [
+            }), 128)) : (_openBlock$g(), _createElementBlock$g("div", _hoisted_32$3, _cache[6] || (_cache[6] = [
               _createTextVNode$b(" 暂无已完成条目"),
               _createElementVNode$g("br", null, null, -1),
               _createTextVNode$b("完成的下载会记入「下载历史」，这里只在旧快照与刷新间隙里短暂出现 ")
@@ -6246,46 +6246,46 @@ const _hoisted_19$4 = {
 };
 const _hoisted_20$4 = ["onClick"];
 const _hoisted_21$3 = { class: "avh-filmyears__n" };
-const _hoisted_22$3 = { class: "avh-films" };
-const _hoisted_23$3 = ["title", "onClick", "onMouseenter"];
-const _hoisted_24$3 = { class: "avh-film__ft" };
-const _hoisted_25$3 = { class: "avh-film__fn" };
-const _hoisted_26$3 = {
+const _hoisted_22$2 = { class: "avh-films" };
+const _hoisted_23$2 = ["title", "onClick", "onMouseenter"];
+const _hoisted_24$2 = { class: "avh-film__ft" };
+const _hoisted_25$2 = { class: "avh-film__fn" };
+const _hoisted_26$2 = {
   key: 0,
   class: "avh-film__ftt"
 };
-const _hoisted_27$3 = { class: "avh-film__fd" };
-const _hoisted_28$3 = {
+const _hoisted_27$2 = { class: "avh-film__fd" };
+const _hoisted_28$2 = {
   key: 0,
   class: "avh-tag avh-tag--lib"
 };
-const _hoisted_29$3 = {
+const _hoisted_29$2 = {
   key: 0,
   class: "avh-morebar"
 };
-const _hoisted_30$3 = {
+const _hoisted_30$2 = {
   key: 1,
   class: "avh-morebar"
 };
-const _hoisted_31$3 = { class: "avh-hint avh-morebar__tip" };
-const _hoisted_32$3 = {
+const _hoisted_31$2 = { class: "avh-hint avh-morebar__tip" };
+const _hoisted_32$2 = {
   key: 2,
   class: "avh-morebar"
 };
-const _hoisted_33$3 = { class: "avh-hint" };
-const _hoisted_34$3 = { class: "avh-actors__toolbar" };
-const _hoisted_35$3 = { class: "avh-hint" };
-const _hoisted_36$3 = { class: "avh-actors" };
-const _hoisted_37$3 = { class: "avh-hint" };
-const _hoisted_38$3 = {
+const _hoisted_33$2 = { class: "avh-hint" };
+const _hoisted_34$2 = { class: "avh-actors__toolbar" };
+const _hoisted_35$2 = { class: "avh-hint" };
+const _hoisted_36$2 = { class: "avh-actors" };
+const _hoisted_37$2 = { class: "avh-hint" };
+const _hoisted_38$2 = {
   key: 0,
   class: "avh-loading"
 };
-const _hoisted_39$3 = {
+const _hoisted_39$2 = {
   key: 2,
   class: "avh-hint"
 };
-const _hoisted_40$1 = { class: "avh-actors avh-actors--pick" };
+const _hoisted_40$2 = { class: "avh-actors avh-actors--pick" };
 const {computed: computed$8,nextTick: nextTick$2,onUnmounted,reactive: reactive$1,ref: ref$a,watch: watch$5} = await importShared('vue');
 const FILM_PAGE = 30;
 const FAVS_PAGE_SIZE = 60;
@@ -6935,7 +6935,7 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
               }), 128))
             ])) : _createCommentVNode$8("", true),
             list.value.length ? (_openBlock$9(), _createElementBlock$9(_Fragment$8, { key: 1 }, [
-              _createElementVNode$9("div", _hoisted_22$3, [
+              _createElementVNode$9("div", _hoisted_22$2, [
                 (_openBlock$9(true), _createElementBlock$9(_Fragment$8, null, _renderList$8(list.value, (mv, index) => {
                   return _openBlock$9(), _createElementBlock$9("div", {
                     key: filmKey(mv, index),
@@ -6955,22 +6955,22 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
                         "plugin-id": _ctx.pluginId
                       }, null, 8, ["src", "alt", "plugin-id"])
                     ], 4),
-                    _createElementVNode$9("div", _hoisted_24$3, [
-                      _createElementVNode$9("div", _hoisted_25$3, _toDisplayString$9(mv.number || ""), 1),
-                      mv.title ? (_openBlock$9(), _createElementBlock$9("div", _hoisted_26$3, _toDisplayString$9(mv.title), 1)) : _createCommentVNode$8("", true),
-                      _createElementVNode$9("div", _hoisted_27$3, [
+                    _createElementVNode$9("div", _hoisted_24$2, [
+                      _createElementVNode$9("div", _hoisted_25$2, _toDisplayString$9(mv.number || ""), 1),
+                      mv.title ? (_openBlock$9(), _createElementBlock$9("div", _hoisted_26$2, _toDisplayString$9(mv.title), 1)) : _createCommentVNode$8("", true),
+                      _createElementVNode$9("div", _hoisted_27$2, [
                         _createElementVNode$9("span", null, _toDisplayString$9(mv.date || ""), 1),
                         _createElementVNode$9("span", {
                           class: _normalizeClass$6(["avh-tag", { "avh-tag--on": !!mv.cnsub }])
                         }, _toDisplayString$9(mv.cnsub ? "中字" : "无中字"), 3),
                         _createElementVNode$9("span", null, "🧲 " + _toDisplayString$9(mv.magnets || 0), 1),
-                        mv.lib ? (_openBlock$9(), _createElementBlock$9("span", _hoisted_28$3, "已入库")) : _createCommentVNode$8("", true)
+                        mv.lib ? (_openBlock$9(), _createElementBlock$9("span", _hoisted_28$2, "已入库")) : _createCommentVNode$8("", true)
                       ])
                     ])
-                  ], 40, _hoisted_23$3);
+                  ], 40, _hoisted_23$2);
                 }), 128))
               ]),
-              hasMore.value ? (_openBlock$9(), _createElementBlock$9("div", _hoisted_29$3, [
+              hasMore.value ? (_openBlock$9(), _createElementBlock$9("div", _hoisted_29$2, [
                 _createVNode$8(_component_v_btn, {
                   variant: "outlined",
                   size: "small",
@@ -6996,10 +6996,10 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
                   _: 1
                 }, 8, ["variant", "color", "disabled"])
               ])) : _createCommentVNode$8("", true),
-              allCapped.value ? (_openBlock$9(), _createElementBlock$9("div", _hoisted_30$3, [
-                _createElementVNode$9("span", _hoisted_31$3, " 已一次拉满 " + _toDisplayString$9(ALL_MAX_PAGES * ALL_LIMIT) + " 部（与 javdb-cli 的 --all 同口径）， 再点一次「加载全部」可以接着往下拉。 ", 1)
-              ])) : !hasMore.value && movies.value.length > FILM_PAGE ? (_openBlock$9(), _createElementBlock$9("div", _hoisted_32$3, [
-                _createElementVNode$9("span", _hoisted_33$3, "已加载全部 " + _toDisplayString$9(movies.value.length) + " 部", 1)
+              allCapped.value ? (_openBlock$9(), _createElementBlock$9("div", _hoisted_30$2, [
+                _createElementVNode$9("span", _hoisted_31$2, " 已一次拉满 " + _toDisplayString$9(ALL_MAX_PAGES * ALL_LIMIT) + " 部（与 javdb-cli 的 --all 同口径）， 再点一次「加载全部」可以接着往下拉。 ", 1)
+              ])) : !hasMore.value && movies.value.length > FILM_PAGE ? (_openBlock$9(), _createElementBlock$9("div", _hoisted_32$2, [
+                _createElementVNode$9("span", _hoisted_33$2, "已加载全部 " + _toDisplayString$9(movies.value.length) + " 部", 1)
               ])) : _createCommentVNode$8("", true)
             ], 64)) : (_openBlock$9(), _createBlock$9(EmptyState, {
               key: 2,
@@ -7008,8 +7008,8 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
           ], 64))
         ], 64)) : (_openBlock$9(), _createElementBlock$9(_Fragment$8, { key: 1 }, [
           hasFavs.value ? (_openBlock$9(), _createElementBlock$9(_Fragment$8, { key: 0 }, [
-            _createElementVNode$9("div", _hoisted_34$3, [
-              _createElementVNode$9("span", _hoisted_35$3, "共 " + _toDisplayString$9(favs.value.length) + " 位", 1),
+            _createElementVNode$9("div", _hoisted_34$2, [
+              _createElementVNode$9("span", _hoisted_35$2, "共 " + _toDisplayString$9(favs.value.length) + " 位", 1),
               _cache[18] || (_cache[18] = _createElementVNode$9("div", { class: "avh-actors__spacer" }, null, -1)),
               _createVNode$8(_component_v_btn, {
                 variant: "outlined",
@@ -7022,7 +7022,7 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
                 _: 1
               })
             ]),
-            _createElementVNode$9("div", _hoisted_36$3, [
+            _createElementVNode$9("div", _hoisted_36$2, [
               (_openBlock$9(true), _createElementBlock$9(_Fragment$8, null, _renderList$8(_unref$3(pagedRows), (item) => {
                 return _openBlock$9(), _createBlock$9(ActorRow, {
                   key: item.name,
@@ -7041,7 +7041,7 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
               ref: sentinel,
               class: "avh-actors__more"
             }, [
-              _createElementVNode$9("span", _hoisted_37$3, _toDisplayString$9(pagedHint.value), 1)
+              _createElementVNode$9("span", _hoisted_37$2, _toDisplayString$9(pagedHint.value), 1)
             ], 512)
           ], 64)) : (_openBlock$9(), _createBlock$9(EmptyState, {
             key: 1,
@@ -7080,14 +7080,14 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
                 }),
                 _createVNode$8(_component_v_card_text, null, {
                   default: _withCtx$9(() => [
-                    pickerLoading.value ? (_openBlock$9(), _createElementBlock$9("div", _hoisted_38$3, "正在抓取演员榜…")) : pickerError.value ? (_openBlock$9(), _createBlock$9(ErrorState, {
+                    pickerLoading.value ? (_openBlock$9(), _createElementBlock$9("div", _hoisted_38$2, "正在抓取演员榜…")) : pickerError.value ? (_openBlock$9(), _createBlock$9(ErrorState, {
                       key: 1,
                       message: pickerError.value,
                       retrying: pickerLoading.value,
                       onRetry: retryRank
-                    }, null, 8, ["message", "retrying"])) : !pickerRows.value.length ? (_openBlock$9(), _createElementBlock$9("div", _hoisted_39$3, "演员榜里的人都已收藏。")) : (_openBlock$9(), _createElementBlock$9(_Fragment$8, { key: 3 }, [
+                    }, null, 8, ["message", "retrying"])) : !pickerRows.value.length ? (_openBlock$9(), _createElementBlock$9("div", _hoisted_39$2, "演员榜里的人都已收藏。")) : (_openBlock$9(), _createElementBlock$9(_Fragment$8, { key: 3 }, [
                       _cache[21] || (_cache[21] = _createElementVNode$9("div", { class: "avh-actorpick__tip avh-hint" }, "点 ➕ 加入收藏", -1)),
-                      _createElementVNode$9("div", _hoisted_40$1, [
+                      _createElementVNode$9("div", _hoisted_40$2, [
                         (_openBlock$9(true), _createElementBlock$9(_Fragment$8, null, _renderList$8(pickerRows.value, (row) => {
                           return _openBlock$9(), _createBlock$9(ActorRow, {
                             key: row.name,
@@ -7463,92 +7463,71 @@ const DiscoverView = /* @__PURE__ */ _export_sfc(_sfc_main$8, [["__scopeId", "da
 
 const {defineComponent:_defineComponent$7} = await importShared('vue');
 
-const {resolveComponent:_resolveComponent$7,withKeys:_withKeys$2,createVNode:_createVNode$6,toDisplayString:_toDisplayString$7,createTextVNode:_createTextVNode$5,withCtx:_withCtx$7,createElementVNode:_createElementVNode$7,openBlock:_openBlock$7,createBlock:_createBlock$7,createCommentVNode:_createCommentVNode$6,renderList:_renderList$6,Fragment:_Fragment$6,createElementBlock:_createElementBlock$7,normalizeClass:_normalizeClass$4} = await importShared('vue');
+const {resolveComponent:_resolveComponent$7,createVNode:_createVNode$6,toDisplayString:_toDisplayString$7,openBlock:_openBlock$7,createElementBlock:_createElementBlock$7,createCommentVNode:_createCommentVNode$6,createTextVNode:_createTextVNode$5,withCtx:_withCtx$7,createBlock:_createBlock$7,renderList:_renderList$6,Fragment:_Fragment$6,createElementVNode:_createElementVNode$7,normalizeClass:_normalizeClass$4} = await importShared('vue');
 
-const _hoisted_1$7 = { class: "avh-pick" };
-const _hoisted_2$7 = { class: "avh-pick__bar" };
-const _hoisted_3$5 = { class: "avh-pick__secttl" };
-const _hoisted_4$5 = {
-  key: 3,
-  class: "avh-pick__list"
-};
-const _hoisted_5$5 = ["title", "onClick"];
-const _hoisted_6$5 = { class: "avh-pickrow__mini" };
-const _hoisted_7$5 = { class: "avh-pickrow__main" };
-const _hoisted_8$4 = { class: "avh-pickrow__num" };
-const _hoisted_9$4 = {
+const _hoisted_1$7 = {
   key: 0,
-  class: "avh-pick__tag avh-pick__tag--cn"
+  class: "avh-sd__subtitle"
+};
+const _hoisted_2$7 = {
+  key: 0,
+  class: "avh-sd__loading"
+};
+const _hoisted_3$5 = {
+  key: 0,
+  class: "avh-sd__media"
+};
+const _hoisted_4$5 = {
+  key: 0,
+  class: "avh-sd__cover"
+};
+const _hoisted_5$5 = ["src"];
+const _hoisted_6$5 = { class: "avh-sd__mediainfo" };
+const _hoisted_7$5 = {
+  key: 0,
+  class: "avh-sd__checkline"
+};
+const _hoisted_8$4 = {
+  key: 1,
+  class: "avh-sd__checkline"
+};
+const _hoisted_9$4 = {
+  key: 2,
+  class: "avh-sd__hint"
 };
 const _hoisted_10$4 = {
   key: 1,
-  class: "avh-pick__tag avh-pick__tag--uc"
+  class: "avh-sd__sources"
 };
-const _hoisted_11$4 = {
-  key: 2,
-  class: "avh-pick__tag avh-pick__tag--lib"
-};
+const _hoisted_11$4 = { class: "avh-sd__head" };
 const _hoisted_12$4 = {
-  key: 3,
-  class: "avh-pick__tag avh-pick__tag--warn"
-};
-const _hoisted_13$4 = { class: "avh-pickrow__actor" };
-const _hoisted_14$4 = { class: "avh-pickrow__ttl avh-pick__hint" };
-const _hoisted_15$3 = {
-  key: 4,
-  class: "mt-2"
-};
-const _hoisted_16$3 = { class: "avh-pick__adv" };
-const _hoisted_17$3 = {
-  key: 0,
-  class: "avh-pick__advbody"
-};
-const _hoisted_18$3 = {
-  key: 0,
-  class: "avh-pick__loading"
-};
-const _hoisted_19$3 = { class: "avh-confirm" };
-const _hoisted_20$3 = { class: "avh-confirm__mini" };
-const _hoisted_21$2 = { class: "avh-confirm__main" };
-const _hoisted_22$2 = { class: "avh-confirm__row" };
-const _hoisted_23$2 = { class: "avh-confirm__v" };
-const _hoisted_24$2 = { class: "avh-confirm__row" };
-const _hoisted_25$2 = { class: "avh-confirm__v" };
-const _hoisted_26$2 = { class: "avh-confirm__row" };
-const _hoisted_27$2 = { class: "avh-confirm__v" };
-const _hoisted_28$2 = { class: "avh-confirm__row" };
-const _hoisted_29$2 = { class: "avh-confirm__v" };
-const _hoisted_30$2 = { class: "avh-confirm__row" };
-const _hoisted_31$2 = { class: "avh-confirm__v avh-pick__hint" };
-const _hoisted_32$2 = {
-  key: 0,
-  class: "avh-pick__loading"
-};
-const _hoisted_33$2 = {
-  key: 0,
-  class: "avh-tablewrap"
-};
-const _hoisted_34$2 = { class: "avh-table avh-table--diff" };
-const _hoisted_35$2 = { class: "avh-diff__cell" };
-const _hoisted_36$2 = { class: "avh-diff__cell" };
-const _hoisted_37$2 = {
   key: 2,
-  class: "avh-pick__secttl"
+  class: "avh-sd__tablewrap"
 };
-const _hoisted_38$2 = {
-  key: 3,
-  class: "avh-srcgrid"
+const _hoisted_13$4 = { class: "avh-sd__table" };
+const _hoisted_14$4 = ["title"];
+const _hoisted_15$3 = ["title"];
+const _hoisted_16$3 = ["title"];
+const _hoisted_17$3 = { key: 0 };
+const _hoisted_18$3 = {
+  key: 1,
+  class: "avh-sd__hint"
 };
-const _hoisted_39$2 = { class: "avh-srcgrid__k" };
+const _hoisted_19$3 = {
+  key: 4,
+  class: "avh-sd__more"
+};
+const _hoisted_20$3 = { class: "avh-sd__head" };
+const _hoisted_21$2 = { class: "avh-sd__people" };
 const {computed: computed$6,ref: ref$7} = await importShared('vue');
 const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
-  __name: "SearchScrapePanel",
+  __name: "ScrapeDialog",
   props: {
     api: { default: null },
     pluginId: { default: "" },
     toast: { default: null }
   },
-  emits: ["refreshSide", "done"],
+  emits: ["done"],
   setup(__props, { expose: __expose, emit: __emit }) {
     const props = __props;
     const emit = __emit;
@@ -7559,692 +7538,510 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
     async function getJson(path, params) {
       const api = props.api;
       if (!api || typeof api.get !== "function") throw new Error("宿主 api 不可用");
-      const payload = unwrap(await api.get(path, params ? { params } : void 0));
-      if (payload && typeof payload === "object" && payload.success === false) {
-        throw new Error(text(payload.message) || "接口返回失败");
+      const payload2 = unwrap(await api.get(path, params ? { params } : void 0));
+      if (payload2 && typeof payload2 === "object" && payload2.success === false) {
+        throw new Error(text(payload2.message) || "接口返回失败");
       }
-      return payload;
+      return payload2;
     }
     async function postJson(path, body) {
       const api = props.api;
       if (!api || typeof api.post !== "function") throw new Error("宿主 api 不可用");
-      const payload = unwrap(await api.post(path, body));
-      if (payload && typeof payload === "object" && payload.success === false) {
-        throw new Error(text(payload.message) || "接口返回失败");
+      const payload2 = unwrap(await api.post(path, body));
+      if (payload2 && typeof payload2 === "object" && payload2.success === false) {
+        throw new Error(text(payload2.message) || "接口返回失败");
       }
-      return payload;
+      return payload2;
     }
-    function firstArray(source, keys) {
-      if (!source || typeof source !== "object") return null;
-      for (const key of keys) {
-        if (Array.isArray(source[key])) return source[key];
-      }
-      return null;
-    }
+    const FIELD_LABELS = {
+      Name: "标题",
+      OriginalTitle: "原名",
+      Overview: "简介",
+      PremiereDate: "发行日",
+      ProductionYear: "年份",
+      Studios: "制作商",
+      SeriesName: "系列",
+      GenreItems: "标签",
+      CommunityRating: "评分",
+      People: "演员",
+      ProviderIds: "番号标识"
+    };
+    const FIELD_HINTS = {
+      Name: "Emby 列表里显示的名字：番号 + 版本角标 + 标题",
+      OriginalTitle: "日文原名（Emby 用它做二次匹配）",
+      Overview: "简介正文：中文优先，没有中文才写日文",
+      People: "写入的演员（只写女演员，导演不写）",
+      ProviderIds: "番号标识，用于 Emby 侧识别（不会覆盖别的插件写的键）"
+    };
     function valueText(value) {
-      if (value === null || value === void 0 || value === "") return "—";
+      if (value === null || value === void 0 || value === "") return "";
+      if (Array.isArray(value)) {
+        return value.map((item) => {
+          if (item && typeof item === "object") {
+            const obj = item;
+            return text(obj.Name ?? obj.name);
+          }
+          return text(item);
+        }).filter(Boolean).join("、");
+      }
       if (typeof value === "object") {
-        try {
-          return JSON.stringify(value);
-        } catch {
-          return String(value);
-        }
+        const obj = value;
+        return Object.keys(obj).map((key2) => `${key2}=${text(obj[key2])}`).join(" · ");
       }
-      return String(value);
+      const raw = text(value);
+      return /^\d{4}-\d{2}-\d{2}T/.test(raw) ? raw.slice(0, 10) : raw;
     }
-    const keyword = ref$7("");
-    const searching = ref$7(false);
-    const searchError = ref$7("");
-    const movies = ref$7([]);
-    const searched = ref$7(false);
-    const lastKeyword = ref$7("");
-    function coverOf(movie) {
-      return text(movie.thumb || movie.cover);
+    function clip(value, size = 110) {
+      return value.length > size ? `${value.slice(0, size)}…` : value;
     }
-    async function doSearch() {
-      const kw = keyword.value.trim();
-      if (!kw) {
-        t.warning("先输入番号或关键词");
-        return;
-      }
-      if (searching.value) return;
-      searching.value = true;
-      searchError.value = "";
-      lastKeyword.value = kw;
+    const open = ref$7(false);
+    const loading = ref$7(false);
+    const busy = ref$7(false);
+    const error = ref$7("");
+    const warnings = ref$7([]);
+    const key = ref$7("");
+    const number = ref$7("");
+    const title = ref$7("");
+    const payload = ref$7(null);
+    const picked = ref$7({});
+    const coverOn = ref$7(false);
+    const samplesOn = ref$7(false);
+    const showEmpty = ref$7(false);
+    const fieldRows = computed$6(() => {
+      const list = Array.isArray(payload.value?.fields) ? payload.value.fields : [];
+      return list.map((item) => {
+        const name = text(item?.name);
+        return {
+          name,
+          label: FIELD_LABELS[name] || name,
+          hint: FIELD_HINTS[name] || "",
+          current: valueText(item?.current),
+          target: valueText(item?.target),
+          changed: item?.changed === true,
+          hasValue: item?.target !== null && item?.target !== void 0
+        };
+      });
+    });
+    const shownRows = computed$6(() => fieldRows.value.filter((row) => row.hasValue || showEmpty.value));
+    const emptyCount = computed$6(() => fieldRows.value.filter((row) => !row.hasValue).length);
+    const coverUrl = computed$6(() => text(payload.value?.images?.cover));
+    const sampleCount = computed$6(() => {
+      const list = payload.value?.images?.samples;
+      return Array.isArray(list) ? list.length : 0;
+    });
+    const people = computed$6(() => {
+      const list = payload.value?.people;
+      return Array.isArray(list) ? list.map((item) => text(item)).filter(Boolean) : [];
+    });
+    const sourceRows = computed$6(() => {
+      const src = payload.value?.sources;
+      if (!src || typeof src !== "object") return [];
+      return Object.keys(src).map((name) => {
+        const row = src[name];
+        const info = row && typeof row === "object" ? row : {};
+        return {
+          name,
+          status: text(info.status) || (row ? text(row) : ""),
+          why: text(info.why) || text(info.error)
+        };
+      });
+    });
+    const writeFields = computed$6(() => {
+      const out = fieldRows.value.filter((row) => row.hasValue && picked.value[row.name]).map((row) => row.name);
+      if (coverOn.value && coverUrl.value) out.push("Primary");
+      if (samplesOn.value && sampleCount.value) out.push("Backdrop");
+      return out;
+    });
+    const checkedCount = computed$6(() => writeFields.value.length);
+    function proxySrc(url) {
+      if (!url) return "";
+      const id = props.pluginId || "AVHelper";
+      return `/api/v1/plugin/${id}/img?url=${encodeURIComponent(url)}`;
+    }
+    function resetChecks() {
+      const next = {};
+      for (const row of fieldRows.value) next[row.name] = row.hasValue;
+      picked.value = next;
+      coverOn.value = Boolean(coverUrl.value);
+      samplesOn.value = sampleCount.value > 0;
+      showEmpty.value = false;
+    }
+    async function reload() {
+      if (!key.value) return;
+      loading.value = true;
+      error.value = "";
+      warnings.value = [];
       try {
-        const payload = await getJson("plugin/search", { keyword: kw });
-        const list = firstArray(payload, ["movies", "list", "films"]) || [];
-        movies.value = list.filter((item) => item && typeof item === "object");
-        searched.value = true;
-        const count = movies.value.length;
-        if (count) t.success(`搜到 ${count} 条候选`);
-        else t.warning("没有匹配的影片");
+        const data = await getJson("plugin/scrape/preview", { key: key.value });
+        payload.value = data;
+        if (text(data?.number)) number.value = text(data.number);
+        title.value = text(data?.title);
+        warnings.value = Array.isArray(data?.warnings) ? data.warnings.map((item) => text(item)).filter(Boolean) : [];
+        resetChecks();
       } catch (err) {
-        searchError.value = errorText(err);
-        t.warning(`搜索失败：${searchError.value}`);
+        payload.value = null;
+        error.value = errorText(err);
       } finally {
-        searching.value = false;
+        loading.value = false;
       }
     }
-    async function retrySearch() {
-      keyword.value = lastKeyword.value;
-      await doSearch();
+    function openFor(row) {
+      key.value = text(row?.key) || text(row?.number);
+      number.value = text(row?.number) || key.value;
+      title.value = text(row?.title);
+      payload.value = null;
+      error.value = "";
+      warnings.value = [];
+      picked.value = {};
+      coverOn.value = false;
+      samplesOn.value = false;
+      open.value = true;
+      void reload();
     }
-    function resetSearch() {
-      keyword.value = "";
-      movies.value = [];
-      searched.value = false;
-      searchError.value = "";
-      lastKeyword.value = "";
-      pick.value = null;
-    }
-    const pick = ref$7(null);
-    const confirmOpen = ref$7(false);
-    const detailLoading = ref$7(false);
-    const detailError = ref$7("");
-    const previewData = ref$7(null);
-    const previewNumber = ref$7("");
-    const previewFields = computed$6(() => {
-      const list = firstArray(previewData.value, ["fields"]) || [];
-      return list.map((item) => ({
-        name: text(item?.name),
-        current: valueText(item?.current),
-        target: valueText(item?.target),
-        changed: item?.changed === true
-      }));
-    });
-    const previewChanged = computed$6(() => previewFields.value.filter((item) => item.changed).length);
-    const previewWarnings = computed$6(() => {
-      const raw = previewData.value?.warnings;
-      return Array.isArray(raw) ? raw.map((item) => text(item)).filter(Boolean) : [];
-    });
-    const previewSources = computed$6(() => {
-      const raw = previewData.value?.sources;
-      return raw && typeof raw === "object" ? raw : null;
-    });
-    function targetOf(name) {
-      const hit = previewFields.value.filter((item) => item.name === name)[0];
-      if (!hit) return "";
-      return hit.target !== "—" ? hit.target : hit.current !== "—" ? hit.current : "";
-    }
-    const titleZh = computed$6(() => text(previewData.value?.title_zh) || targetOf("Name"));
-    const titleJp = computed$6(() => text(previewData.value?.title_jp) || targetOf("OriginalTitle"));
-    const actorCount = computed$6(() => {
-      const raw = previewData.value;
-      if (!raw || typeof raw !== "object") return null;
-      const list = firstArray(raw, ["fields"]) || [];
-      const hit = list.filter((item) => text(item?.name) === "People")[0];
-      if (!hit) return null;
-      return Array.isArray(hit.target) ? hit.target.length : 0;
-    });
-    const coverSrc = computed$6(() => {
-      const planned = text(previewData.value?.images?.cover);
-      return planned || (pick.value ? coverOf(pick.value) : "");
-    });
-    const releaseDate = computed$6(() => targetOf("PremiereDate").slice(0, 10));
-    async function selectPick(movie) {
-      pick.value = movie;
-      confirmOpen.value = true;
-      detailLoading.value = true;
-      detailError.value = "";
-      previewData.value = null;
-      previewNumber.value = text(movie.number);
+    async function write() {
+      if (busy.value || !writeFields.value.length) return;
+      busy.value = true;
       try {
-        const key = text(movie.number);
-        const payload = await getJson("plugin/scrape/preview", { key });
-        previewData.value = payload;
-        if (payload?.number) previewNumber.value = text(payload.number);
-      } catch (err) {
-        detailError.value = errorText(err);
-      } finally {
-        detailLoading.value = false;
-      }
-    }
-    const importing = ref$7(false);
-    const importResult = ref$7(null);
-    function summarizeRun(payload) {
-      const results = Array.isArray(payload?.results) ? payload.results : [];
-      const errors = [];
-      let okCount = 0;
-      for (const item of results) {
-        const err = text(item?.error);
-        const status = text(item?.status);
-        if (err || status === "error" || status === "failed") {
-          errors.push(`${text(item?.key) || "(未知)"}：${err || status || "失败"}`);
-          continue;
-        }
-        okCount += 1;
-      }
-      const declared = payload?.ok;
-      const ok = declared === void 0 ? errors.length === 0 : declared !== false && errors.length === 0;
-      return {
-        ok,
-        text: `成功 ${okCount} 条${errors.length ? ` · 失败 ${errors.length} 条` : ""}`,
-        errors
-      };
-    }
-    async function confirmImport() {
-      if (importing.value) return;
-      const key = previewNumber.value || text(pick.value?.number);
-      if (!key) return;
-      importing.value = true;
-      importResult.value = null;
-      t.info(`正在导入 ${key} …`);
-      try {
-        const payload = await postJson("plugin/scrape/run", { keys: [key], force: false });
-        const summary = summarizeRun(payload);
-        importResult.value = summary;
-        if (summary.ok) {
-          t.success(`导入完成：${summary.text}`);
-          confirmOpen.value = false;
+        const body = { keys: [key.value], fields: writeFields.value };
+        const result = await postJson("plugin/scrape/run", body);
+        const rows = Array.isArray(result?.results) ? result.results : [];
+        const failed = rows.filter((row) => text(row?.error));
+        const changed = rows.reduce(
+          (sum, row) => sum + (Array.isArray(row?.changed) ? row.changed.length : 0),
+          0
+        );
+        if (failed.length) {
+          t.warning(`写入未全部成功：${text(failed[0]?.error) || "原因未知"}`);
         } else {
-          t.warning(`导入未全部成功：${summary.text}`);
+          t.success(`已写入 ${number.value || key.value}：${changed} 个字段（勾选 ${checkedCount.value} 项）`);
         }
-        emit("refreshSide");
+        open.value = false;
         emit("done");
       } catch (err) {
-        importResult.value = { ok: false, text: "导入请求失败", errors: [errorText(err)] };
-        t.warning(`导入失败：${errorText(err)}`);
+        t.warning(`写入失败：${errorText(err)}`);
       } finally {
-        importing.value = false;
+        busy.value = false;
       }
     }
-    const advancedOpen = ref$7(false);
-    const previewDialog = ref$7({ open: false, loading: false, error: "", key: "", number: "" });
-    async function openPreview(target) {
-      const key = text(target?.key || target?.number);
-      if (!key) return;
-      previewDialog.value = { open: true, loading: true, error: "", key, number: text(target?.number || key) };
-      previewData.value = null;
-      previewNumber.value = text(target?.number || key);
-      try {
-        const payload = await getJson("plugin/scrape/preview", { key });
-        previewData.value = payload;
-        if (payload?.number) {
-          previewNumber.value = text(payload.number);
-          previewDialog.value.number = text(payload.number);
-        }
-      } catch (err) {
-        previewDialog.value.error = errorText(err);
-      } finally {
-        previewDialog.value.loading = false;
-      }
+    function toggleAll(value) {
+      const next = {};
+      for (const row of fieldRows.value) next[row.name] = value && row.hasValue;
+      picked.value = next;
+      coverOn.value = value && Boolean(coverUrl.value);
+      samplesOn.value = value && sampleCount.value > 0;
     }
-    function previewPicked() {
-      const movie = pick.value;
-      if (!movie) {
-        t.info("先在候选里点一条影片");
-        return;
-      }
-      void openPreview({ key: text(movie.number), number: text(movie.number) });
-    }
-    __expose({ openPreview });
+    __expose({ openFor });
     return (_ctx, _cache) => {
-      const _component_v_text_field = _resolveComponent$7("v-text-field");
-      const _component_v_btn = _resolveComponent$7("v-btn");
-      const _component_v_alert = _resolveComponent$7("v-alert");
       const _component_v_icon = _resolveComponent$7("v-icon");
       const _component_v_toolbar_title = _resolveComponent$7("v-toolbar-title");
       const _component_v_spacer = _resolveComponent$7("v-spacer");
+      const _component_v_chip = _resolveComponent$7("v-chip");
+      const _component_v_btn = _resolveComponent$7("v-btn");
       const _component_v_toolbar = _resolveComponent$7("v-toolbar");
       const _component_v_divider = _resolveComponent$7("v-divider");
+      const _component_v_alert = _resolveComponent$7("v-alert");
+      const _component_v_checkbox = _resolveComponent$7("v-checkbox");
       const _component_v_card_text = _resolveComponent$7("v-card-text");
       const _component_v_card_actions = _resolveComponent$7("v-card-actions");
       const _component_v_card = _resolveComponent$7("v-card");
       const _component_v_dialog = _resolveComponent$7("v-dialog");
-      const _component_v_chip = _resolveComponent$7("v-chip");
-      return _openBlock$7(), _createElementBlock$7("div", _hoisted_1$7, [
-        _createElementVNode$7("div", _hoisted_2$7, [
-          _createVNode$6(_component_v_text_field, {
-            modelValue: keyword.value,
-            "onUpdate:modelValue": _cache[0] || (_cache[0] = ($event) => keyword.value = $event),
-            class: "avh-pick__input",
-            placeholder: "番号或关键词（如 MIDV-946、三上悠亜）…",
-            autocomplete: "off",
-            density: "compact",
-            variant: "outlined",
-            "hide-details": "",
-            "prepend-inner-icon": "mdi-magnify",
-            disabled: searching.value,
-            onKeydown: _withKeys$2(doSearch, ["enter"])
-          }, null, 8, ["modelValue", "disabled"]),
-          _createVNode$6(_component_v_btn, {
-            color: "primary",
-            variant: "flat",
-            size: "small",
-            loading: searching.value,
-            disabled: searching.value,
-            "prepend-icon": "mdi-magnify",
-            onClick: doSearch
-          }, {
+      return _openBlock$7(), _createBlock$7(_component_v_dialog, {
+        modelValue: open.value,
+        "onUpdate:modelValue": _cache[7] || (_cache[7] = ($event) => open.value = $event),
+        "max-width": "900",
+        scrollable: ""
+      }, {
+        default: _withCtx$7(() => [
+          _createVNode$6(_component_v_card, null, {
             default: _withCtx$7(() => [
-              _createTextVNode$5(_toDisplayString$7(searching.value ? "搜索中…" : "搜索刮削"), 1)
-            ]),
-            _: 1
-          }, 8, ["loading", "disabled"]),
-          _cache[8] || (_cache[8] = _createElementVNode$7("span", { class: "avh-pick__hint" }, [
-            _createTextVNode$5(" 走 "),
-            _createElementVNode$7("code", null, "GET /search"),
-            _createTextVNode$5("（javdb 搜索 + 番号校验）· 点一条候选即可确认导入 ")
-          ], -1))
-        ]),
-        _createElementVNode$7("div", _hoisted_3$5, [
-          _createElementVNode$7("span", null, "搜索候选" + _toDisplayString$7(searched.value ? `（${movies.value.length}）` : ""), 1),
-          searched.value ? (_openBlock$7(), _createBlock$7(_component_v_btn, {
-            key: 0,
-            variant: "text",
-            size: "x-small",
-            class: "ms-1",
-            onClick: resetSearch
-          }, {
-            default: _withCtx$7(() => _cache[9] || (_cache[9] = [
-              _createTextVNode$5("清空")
-            ])),
-            _: 1
-          })) : _createCommentVNode$6("", true),
-          _cache[10] || (_cache[10] = _createElementVNode$7("span", { class: "avh-pick__hint" }, [
-            _createTextVNode$5("候选最多 24 条（后端 "),
-            _createElementVNode$7("code", null, "movies[:24]"),
-            _createTextVNode$5("）")
-          ], -1))
-        ]),
-        searchError.value ? (_openBlock$7(), _createBlock$7(ErrorState, {
-          key: 0,
-          message: `搜索失败：${searchError.value}`,
-          retrying: searching.value,
-          onRetry: retrySearch
-        }, null, 8, ["message", "retrying"])) : searched.value && !movies.value.length ? (_openBlock$7(), _createBlock$7(EmptyState, {
-          key: 1,
-          text: "没有匹配的影片",
-          hint: "换个番号或关键词再搜一次；番号带不带连字符都行"
-        })) : !searched.value ? (_openBlock$7(), _createBlock$7(EmptyState, {
-          key: 2,
-          text: "输入番号或关键词后回车，从候选里点一条",
-          hint: "点中之后会出现一张精简确认卡：只画将写入的关键字段，确认即导入 Emby"
-        })) : (_openBlock$7(), _createElementBlock$7("div", _hoisted_4$5, [
-          (_openBlock$7(true), _createElementBlock$7(_Fragment$6, null, _renderList$6(movies.value, (movie, index) => {
-            return _openBlock$7(), _createElementBlock$7("div", {
-              key: `${movie.number}#${index}`,
-              class: _normalizeClass$4(["avh-pickrow", { "avh-pickrow--on": pick.value === movie }]),
-              title: movie.title || movie.number || "",
-              onClick: ($event) => selectPick(movie)
-            }, [
-              _createElementVNode$7("div", _hoisted_6$5, [
-                _createVNode$6(Thumb, {
-                  variant: "mini",
-                  src: coverOf(movie),
-                  alt: text(movie.number),
-                  "plugin-id": _ctx.pluginId
-                }, null, 8, ["src", "alt", "plugin-id"])
-              ]),
-              _createElementVNode$7("div", _hoisted_7$5, [
-                _createElementVNode$7("div", _hoisted_8$4, [
-                  _createTextVNode$5(_toDisplayString$7(movie.number) + " ", 1),
-                  movie.cnsub ? (_openBlock$7(), _createElementBlock$7("span", _hoisted_9$4, "中字")) : _createCommentVNode$6("", true),
-                  movie.uncensored ? (_openBlock$7(), _createElementBlock$7("span", _hoisted_10$4, "破解")) : _createCommentVNode$6("", true),
-                  movie.lib ? (_openBlock$7(), _createElementBlock$7("span", _hoisted_11$4, "已入库")) : (_openBlock$7(), _createElementBlock$7("span", _hoisted_12$4, "不在库"))
+              _createVNode$6(_component_v_toolbar, {
+                density: "comfortable",
+                color: "surface"
+              }, {
+                default: _withCtx$7(() => [
+                  _createVNode$6(_component_v_icon, {
+                    icon: "mdi-auto-fix",
+                    color: "primary",
+                    class: "ms-2"
+                  }),
+                  _createVNode$6(_component_v_toolbar_title, { class: "text-body-1" }, {
+                    default: _withCtx$7(() => [
+                      _createTextVNode$5(" 手动刮削 · " + _toDisplayString$7(number.value || key.value) + " ", 1),
+                      title.value ? (_openBlock$7(), _createElementBlock$7("span", _hoisted_1$7, _toDisplayString$7(clip(title.value, 60)), 1)) : _createCommentVNode$6("", true)
+                    ]),
+                    _: 1
+                  }),
+                  _createVNode$6(_component_v_spacer),
+                  !loading.value && !error.value ? (_openBlock$7(), _createBlock$7(_component_v_chip, {
+                    key: 0,
+                    size: "small",
+                    variant: "tonal",
+                    class: "me-2"
+                  }, {
+                    default: _withCtx$7(() => [
+                      _createTextVNode$5(" 将写入 " + _toDisplayString$7(checkedCount.value) + " 项 ", 1)
+                    ]),
+                    _: 1
+                  })) : _createCommentVNode$6("", true),
+                  _createVNode$6(_component_v_btn, {
+                    variant: "text",
+                    icon: "mdi-close",
+                    onClick: _cache[0] || (_cache[0] = ($event) => open.value = false)
+                  })
                 ]),
-                _createElementVNode$7("div", _hoisted_13$4, _toDisplayString$7(movie.actor || "—"), 1),
-                _createElementVNode$7("div", _hoisted_14$4, _toDisplayString$7(movie.title || "—"), 1)
-              ]),
-              _cache[11] || (_cache[11] = _createElementVNode$7("span", { class: "avh-pick__hint" }, "选它 ›", -1))
-            ], 10, _hoisted_5$5);
-          }), 128))
-        ])),
-        importResult.value ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_15$3, [
-          _createVNode$6(_component_v_alert, {
-            type: importResult.value.ok ? "success" : "warning",
-            variant: "tonal",
-            density: "compact",
-            class: "text-caption"
-          }, {
-            default: _withCtx$7(() => [
-              _createElementVNode$7("div", null, _toDisplayString$7(importResult.value.text), 1),
-              (_openBlock$7(true), _createElementBlock$7(_Fragment$6, null, _renderList$6(importResult.value.errors, (line, index) => {
-                return _openBlock$7(), _createElementBlock$7("div", { key: index }, _toDisplayString$7(line), 1);
-              }), 128))
-            ]),
-            _: 1
-          }, 8, ["type"])
-        ])) : _createCommentVNode$6("", true),
-        _createElementVNode$7("div", _hoisted_16$3, [
-          _createElementVNode$7("button", {
-            class: "avh-pick__advhead",
-            onClick: _cache[1] || (_cache[1] = ($event) => advancedOpen.value = !advancedOpen.value)
-          }, [
-            _createVNode$6(_component_v_icon, {
-              icon: advancedOpen.value ? "mdi-chevron-down" : "mdi-chevron-right",
-              size: "small"
-            }, null, 8, ["icon"]),
-            _cache[12] || (_cache[12] = _createElementVNode$7("span", null, "高级：字段级 diff（默认收起）", -1))
-          ]),
-          advancedOpen.value ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_17$3, [
-            _cache[13] || (_cache[13] = _createElementVNode$7("span", { class: "avh-pick__hint" }, [
-              _createTextVNode$5(" 展开不会自动请求：点下面那颗按钮才调 "),
-              _createElementVNode$7("code", null, "GET /scrape/preview"),
-              _createTextVNode$5("， 画出当前值 ⇄ 目标值的全字段对照（与工作台行内「预览」是同一张表）。 ")
-            ], -1)),
-            _createVNode$6(_component_v_btn, {
-              variant: "outlined",
-              size: "x-small",
-              "prepend-icon": "mdi-compare-horizontal",
-              disabled: !pick.value,
-              onClick: previewPicked
-            }, {
-              default: _withCtx$7(() => [
-                _createTextVNode$5("预览字段差异" + _toDisplayString$7(pick.value ? `（${text(pick.value.number)}）` : ""), 1)
-              ]),
-              _: 1
-            }, 8, ["disabled"])
-          ])) : _createCommentVNode$6("", true)
-        ]),
-        _createVNode$6(_component_v_dialog, {
-          modelValue: confirmOpen.value,
-          "onUpdate:modelValue": _cache[4] || (_cache[4] = ($event) => confirmOpen.value = $event),
-          "max-width": "620",
-          scrollable: "",
-          attach: "body"
-        }, {
-          default: _withCtx$7(() => [
-            _createVNode$6(_component_v_card, null, {
-              default: _withCtx$7(() => [
-                _createVNode$6(_component_v_toolbar, {
-                  density: "comfortable",
-                  color: "surface"
-                }, {
-                  default: _withCtx$7(() => [
-                    _createVNode$6(_component_v_icon, {
-                      icon: "mdi-check-decagram-outline",
-                      color: "primary",
-                      class: "ms-2"
-                    }),
-                    _createVNode$6(_component_v_toolbar_title, { class: "text-body-1" }, {
-                      default: _withCtx$7(() => [
-                        _createTextVNode$5("确认导入 · " + _toDisplayString$7(previewNumber.value), 1)
-                      ]),
-                      _: 1
-                    }),
-                    _createVNode$6(_component_v_spacer),
-                    _createVNode$6(_component_v_btn, {
-                      variant: "text",
-                      icon: "mdi-close",
-                      onClick: _cache[2] || (_cache[2] = ($event) => confirmOpen.value = false)
-                    })
-                  ]),
-                  _: 1
-                }),
-                _createVNode$6(_component_v_divider),
-                _createVNode$6(_component_v_card_text, null, {
-                  default: _withCtx$7(() => [
-                    detailLoading.value ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_18$3, "正在读取将写入的字段…")) : (_openBlock$7(), _createElementBlock$7(_Fragment$6, { key: 1 }, [
-                      detailError.value ? (_openBlock$7(), _createBlock$7(_component_v_alert, {
-                        key: 0,
+                _: 1
+              }),
+              _createVNode$6(_component_v_divider),
+              _createVNode$6(_component_v_card_text, null, {
+                default: _withCtx$7(() => [
+                  loading.value ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_2$7, " 正在抓取「" + _toDisplayString$7(number.value || key.value) + "」的信息…（javdb / Javtxt / MetaTube 逐个问一遍，通常几秒） ", 1)) : error.value ? (_openBlock$7(), _createBlock$7(EmptyState, {
+                    key: 1,
+                    text: "抓取失败",
+                    hint: `GET /scrape/preview 返回：${error.value}`
+                  }, null, 8, ["hint"])) : payload.value ? (_openBlock$7(), _createElementBlock$7(_Fragment$6, { key: 2 }, [
+                    (_openBlock$7(true), _createElementBlock$7(_Fragment$6, null, _renderList$6(warnings.value, (line, index) => {
+                      return _openBlock$7(), _createBlock$7(_component_v_alert, {
+                        key: `warn#${index}`,
                         type: "warning",
                         variant: "tonal",
                         density: "compact",
                         class: "text-caption mb-2"
                       }, {
                         default: _withCtx$7(() => [
-                          _createTextVNode$5("读取预览失败（GET /scrape/preview）：" + _toDisplayString$7(detailError.value) + "——仍可直接导入", 1)
+                          _createTextVNode$5(_toDisplayString$7(line), 1)
                         ]),
-                        _: 1
-                      })) : _createCommentVNode$6("", true),
-                      (_openBlock$7(true), _createElementBlock$7(_Fragment$6, null, _renderList$6(previewWarnings.value, (line, index) => {
-                        return _openBlock$7(), _createBlock$7(_component_v_alert, {
-                          key: `warn#${index}`,
-                          type: "warning",
+                        _: 2
+                      }, 1024);
+                    }), 128)),
+                    coverUrl.value || sampleCount.value ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_3$5, [
+                      coverUrl.value ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_4$5, [
+                        _createElementVNode$7("img", {
+                          src: proxySrc(coverUrl.value),
+                          alt: "封面",
+                          referrerpolicy: "no-referrer"
+                        }, null, 8, _hoisted_5$5)
+                      ])) : _createCommentVNode$6("", true),
+                      _createElementVNode$7("div", _hoisted_6$5, [
+                        coverUrl.value ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_7$5, [
+                          _createVNode$6(_component_v_checkbox, {
+                            "model-value": coverOn.value,
+                            density: "compact",
+                            "hide-details": "",
+                            label: "写入封面",
+                            "onUpdate:modelValue": _cache[1] || (_cache[1] = (value) => coverOn.value = Boolean(value))
+                          }, null, 8, ["model-value"]),
+                          _cache[8] || (_cache[8] = _createElementVNode$7("span", { class: "avh-sd__hint" }, "右边这张图会写进 Emby 的主图（Primary）", -1))
+                        ])) : _createCommentVNode$6("", true),
+                        sampleCount.value ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_8$4, [
+                          _createVNode$6(_component_v_checkbox, {
+                            "model-value": samplesOn.value,
+                            density: "compact",
+                            "hide-details": "",
+                            label: `写入剧照（${sampleCount.value} 张）`,
+                            "onUpdate:modelValue": _cache[2] || (_cache[2] = (value) => samplesOn.value = Boolean(value))
+                          }, null, 8, ["model-value", "label"]),
+                          _cache[9] || (_cache[9] = _createElementVNode$7("span", { class: "avh-sd__hint" }, "写进 Emby 的横版剧照位（Backdrop）", -1))
+                        ])) : _createCommentVNode$6("", true),
+                        !coverUrl.value ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_9$4, "这次没抓到封面图")) : _createCommentVNode$6("", true)
+                      ])
+                    ])) : _createCommentVNode$6("", true),
+                    sourceRows.value.length ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_10$4, [
+                      _cache[10] || (_cache[10] = _createElementVNode$7("span", { class: "avh-sd__hint" }, "数据源：", -1)),
+                      (_openBlock$7(true), _createElementBlock$7(_Fragment$6, null, _renderList$6(sourceRows.value, (row) => {
+                        return _openBlock$7(), _createBlock$7(_component_v_chip, {
+                          key: row.name,
+                          size: "x-small",
                           variant: "tonal",
-                          density: "compact",
-                          class: "text-caption mb-2"
+                          class: "me-1",
+                          title: row.why
                         }, {
                           default: _withCtx$7(() => [
-                            _createTextVNode$5(_toDisplayString$7(line), 1)
+                            _createTextVNode$5(_toDisplayString$7(row.name) + " " + _toDisplayString$7(row.status), 1)
                           ]),
                           _: 2
-                        }, 1024);
-                      }), 128)),
-                      _createElementVNode$7("div", _hoisted_19$3, [
-                        _createElementVNode$7("div", _hoisted_20$3, [
-                          _createVNode$6(Thumb, {
-                            variant: "mini",
-                            src: coverSrc.value,
-                            alt: previewNumber.value,
-                            "plugin-id": _ctx.pluginId
-                          }, null, 8, ["src", "alt", "plugin-id"])
-                        ]),
-                        _createElementVNode$7("div", _hoisted_21$2, [
-                          _createElementVNode$7("div", _hoisted_22$2, [
-                            _cache[14] || (_cache[14] = _createElementVNode$7("span", { class: "avh-confirm__k" }, "中文标题", -1)),
-                            _createElementVNode$7("span", _hoisted_23$2, _toDisplayString$7(titleZh.value || "—"), 1)
-                          ]),
-                          _createElementVNode$7("div", _hoisted_24$2, [
-                            _cache[15] || (_cache[15] = _createElementVNode$7("span", { class: "avh-confirm__k" }, "原名", -1)),
-                            _createElementVNode$7("span", _hoisted_25$2, _toDisplayString$7(titleJp.value || "—"), 1)
-                          ]),
-                          _createElementVNode$7("div", _hoisted_26$2, [
-                            _cache[16] || (_cache[16] = _createElementVNode$7("span", { class: "avh-confirm__k" }, "演员数", -1)),
-                            _createElementVNode$7("span", _hoisted_27$2, _toDisplayString$7(actorCount.value === null ? "—" : `${actorCount.value} 人`), 1)
-                          ]),
-                          _createElementVNode$7("div", _hoisted_28$2, [
-                            _cache[17] || (_cache[17] = _createElementVNode$7("span", { class: "avh-confirm__k" }, "发行日", -1)),
-                            _createElementVNode$7("span", _hoisted_29$2, _toDisplayString$7(releaseDate.value || "—"), 1)
-                          ]),
-                          _createElementVNode$7("div", _hoisted_30$2, [
-                            _cache[18] || (_cache[18] = _createElementVNode$7("span", { class: "avh-confirm__k" }, "封面", -1)),
-                            _createElementVNode$7("span", _hoisted_31$2, _toDisplayString$7(coverSrc.value ? "见左侧缩略图（写入 Emby 的那张）" : "没有可用封面"), 1)
+                        }, 1032, ["title"]);
+                      }), 128))
+                    ])) : _createCommentVNode$6("", true),
+                    _createElementVNode$7("div", _hoisted_11$4, [
+                      _cache[13] || (_cache[13] = _createElementVNode$7("span", null, "抓到的信息（勾上的才会写进 Emby）", -1)),
+                      _createVNode$6(_component_v_spacer),
+                      _createVNode$6(_component_v_btn, {
+                        variant: "text",
+                        size: "x-small",
+                        onClick: _cache[3] || (_cache[3] = ($event) => toggleAll(true))
+                      }, {
+                        default: _withCtx$7(() => _cache[11] || (_cache[11] = [
+                          _createTextVNode$5("全选")
+                        ])),
+                        _: 1
+                      }),
+                      _createVNode$6(_component_v_btn, {
+                        variant: "text",
+                        size: "x-small",
+                        onClick: _cache[4] || (_cache[4] = ($event) => toggleAll(false))
+                      }, {
+                        default: _withCtx$7(() => _cache[12] || (_cache[12] = [
+                          _createTextVNode$5("全不选")
+                        ])),
+                        _: 1
+                      })
+                    ]),
+                    shownRows.value.length ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_12$4, [
+                      _createElementVNode$7("table", _hoisted_13$4, [
+                        _cache[15] || (_cache[15] = _createElementVNode$7("colgroup", null, [
+                          _createElementVNode$7("col", { style: { "width": "40px" } }),
+                          _createElementVNode$7("col", { style: { "width": "110px" } }),
+                          _createElementVNode$7("col"),
+                          _createElementVNode$7("col")
+                        ], -1)),
+                        _cache[16] || (_cache[16] = _createElementVNode$7("thead", null, [
+                          _createElementVNode$7("tr", null, [
+                            _createElementVNode$7("th"),
+                            _createElementVNode$7("th", null, "字段"),
+                            _createElementVNode$7("th", null, "Emby 现在的值"),
+                            _createElementVNode$7("th", null, "这次抓到的值")
                           ])
+                        ], -1)),
+                        _createElementVNode$7("tbody", null, [
+                          (_openBlock$7(true), _createElementBlock$7(_Fragment$6, null, _renderList$6(shownRows.value, (row) => {
+                            return _openBlock$7(), _createElementBlock$7("tr", {
+                              key: row.name,
+                              class: _normalizeClass$4({ "avh-sd__row--off": !row.hasValue })
+                            }, [
+                              _createElementVNode$7("td", null, [
+                                _createVNode$6(_component_v_checkbox, {
+                                  "model-value": Boolean(picked.value[row.name]) && row.hasValue,
+                                  disabled: !row.hasValue,
+                                  density: "compact",
+                                  "hide-details": "",
+                                  "onUpdate:modelValue": (value) => picked.value = { ...picked.value, [row.name]: Boolean(value) }
+                                }, null, 8, ["model-value", "disabled", "onUpdate:modelValue"])
+                              ]),
+                              _createElementVNode$7("td", {
+                                title: row.hint
+                              }, [
+                                _createTextVNode$5(_toDisplayString$7(row.label) + " ", 1),
+                                row.changed ? (_openBlock$7(), _createBlock$7(_component_v_chip, {
+                                  key: 0,
+                                  size: "x-small",
+                                  color: "warning",
+                                  variant: "tonal",
+                                  class: "ms-1"
+                                }, {
+                                  default: _withCtx$7(() => _cache[14] || (_cache[14] = [
+                                    _createTextVNode$5(" 有变化 ")
+                                  ])),
+                                  _: 1
+                                })) : _createCommentVNode$6("", true)
+                              ], 8, _hoisted_14$4),
+                              _createElementVNode$7("td", {
+                                class: "avh-sd__cell",
+                                title: row.current
+                              }, _toDisplayString$7(clip(row.current) || "—"), 9, _hoisted_15$3),
+                              _createElementVNode$7("td", {
+                                class: "avh-sd__cell",
+                                title: row.target
+                              }, [
+                                row.hasValue ? (_openBlock$7(), _createElementBlock$7("span", _hoisted_17$3, _toDisplayString$7(clip(row.target)), 1)) : (_openBlock$7(), _createElementBlock$7("span", _hoisted_18$3, "没抓到"))
+                              ], 8, _hoisted_16$3)
+                            ], 2);
+                          }), 128))
                         ])
                       ])
-                    ], 64))
-                  ]),
-                  _: 1
-                }),
-                _createVNode$6(_component_v_divider),
-                _createVNode$6(_component_v_card_actions, null, {
-                  default: _withCtx$7(() => [
-                    _cache[21] || (_cache[21] = _createElementVNode$7("span", { class: "avh-pick__hint" }, " 确认后会写入 Emby：标题 / 原名 / 简介 / 演员 / 封面 / 发行日等字段， 覆盖这部片现在的取值。想看全字段对照请展开「高级」。 ", -1)),
-                    _createVNode$6(_component_v_spacer),
-                    _createVNode$6(_component_v_btn, {
-                      variant: "text",
-                      onClick: _cache[3] || (_cache[3] = ($event) => confirmOpen.value = false)
-                    }, {
-                      default: _withCtx$7(() => _cache[19] || (_cache[19] = [
-                        _createTextVNode$5("取消")
-                      ])),
-                      _: 1
-                    }),
-                    _createVNode$6(_component_v_btn, {
-                      color: "primary",
-                      variant: "flat",
-                      "prepend-icon": "mdi-download",
-                      loading: importing.value,
-                      disabled: importing.value,
-                      onClick: confirmImport
-                    }, {
-                      default: _withCtx$7(() => _cache[20] || (_cache[20] = [
-                        _createTextVNode$5("确认导入")
-                      ])),
-                      _: 1
-                    }, 8, ["loading", "disabled"])
-                  ]),
-                  _: 1
-                })
-              ]),
-              _: 1
-            })
-          ]),
-          _: 1
-        }, 8, ["modelValue"]),
-        _createVNode$6(_component_v_dialog, {
-          modelValue: previewDialog.value.open,
-          "onUpdate:modelValue": _cache[7] || (_cache[7] = ($event) => previewDialog.value.open = $event),
-          "max-width": "880",
-          scrollable: "",
-          attach: "body"
-        }, {
-          default: _withCtx$7(() => [
-            _createVNode$6(_component_v_card, null, {
-              default: _withCtx$7(() => [
-                _createVNode$6(_component_v_toolbar, {
-                  density: "comfortable",
-                  color: "surface"
-                }, {
-                  default: _withCtx$7(() => [
-                    _createVNode$6(_component_v_icon, {
-                      icon: "mdi-compare-horizontal",
-                      color: "primary",
-                      class: "ms-2"
-                    }),
-                    _createVNode$6(_component_v_toolbar_title, { class: "text-body-1" }, {
-                      default: _withCtx$7(() => [
-                        _createTextVNode$5(" 刮削预览 · " + _toDisplayString$7(previewDialog.value.number || previewDialog.value.key), 1)
-                      ]),
-                      _: 1
-                    }),
-                    _createVNode$6(_component_v_spacer),
-                    !previewDialog.value.loading && !previewDialog.value.error ? (_openBlock$7(), _createBlock$7(_component_v_chip, {
-                      key: 0,
-                      size: "small",
-                      variant: "tonal",
-                      class: "me-2"
-                    }, {
-                      default: _withCtx$7(() => [
-                        _createTextVNode$5(" 变更 " + _toDisplayString$7(previewChanged.value) + " / " + _toDisplayString$7(previewFields.value.length) + " 项 ", 1)
-                      ]),
-                      _: 1
-                    })) : _createCommentVNode$6("", true),
-                    _createVNode$6(_component_v_btn, {
-                      variant: "text",
-                      icon: "mdi-close",
-                      onClick: _cache[5] || (_cache[5] = ($event) => previewDialog.value.open = false)
-                    })
-                  ]),
-                  _: 1
-                }),
-                _createVNode$6(_component_v_divider),
-                _createVNode$6(_component_v_card_text, null, {
-                  default: _withCtx$7(() => [
-                    previewDialog.value.loading ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_32$2, "正在计算字段差异…")) : previewDialog.value.error ? (_openBlock$7(), _createBlock$7(_component_v_alert, {
-                      key: 1,
-                      type: "warning",
-                      variant: "tonal",
-                      density: "compact",
-                      class: "text-caption"
-                    }, {
-                      default: _withCtx$7(() => [
-                        _createTextVNode$5("预览失败（GET /scrape/preview）：" + _toDisplayString$7(previewDialog.value.error), 1)
-                      ]),
-                      _: 1
-                    })) : (_openBlock$7(), _createElementBlock$7(_Fragment$6, { key: 2 }, [
-                      (_openBlock$7(true), _createElementBlock$7(_Fragment$6, null, _renderList$6(previewWarnings.value, (line, index) => {
-                        return _openBlock$7(), _createBlock$7(_component_v_alert, {
-                          key: `pvwarn#${index}`,
-                          type: "warning",
-                          variant: "tonal",
-                          density: "compact",
-                          class: "text-caption mb-2"
-                        }, {
-                          default: _withCtx$7(() => [
-                            _createTextVNode$5(_toDisplayString$7(line), 1)
-                          ]),
-                          _: 2
-                        }, 1024);
-                      }), 128)),
-                      previewFields.value.length ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_33$2, [
-                        _createElementVNode$7("table", _hoisted_34$2, [
-                          _cache[23] || (_cache[23] = _createElementVNode$7("colgroup", null, [
-                            _createElementVNode$7("col", { style: { "width": "150px" } }),
-                            _createElementVNode$7("col"),
-                            _createElementVNode$7("col")
-                          ], -1)),
-                          _cache[24] || (_cache[24] = _createElementVNode$7("thead", null, [
-                            _createElementVNode$7("tr", null, [
-                              _createElementVNode$7("th", null, "字段"),
-                              _createElementVNode$7("th", null, "当前值"),
-                              _createElementVNode$7("th", null, "目标值")
-                            ])
-                          ], -1)),
-                          _createElementVNode$7("tbody", null, [
-                            (_openBlock$7(true), _createElementBlock$7(_Fragment$6, null, _renderList$6(previewFields.value, (field) => {
-                              return _openBlock$7(), _createElementBlock$7("tr", {
-                                key: field.name,
-                                class: _normalizeClass$4({ "avh-diff__changed": field.changed })
-                              }, [
-                                _createElementVNode$7("td", null, [
-                                  _createElementVNode$7("span", null, _toDisplayString$7(field.name), 1),
-                                  field.changed ? (_openBlock$7(), _createBlock$7(_component_v_chip, {
-                                    key: 0,
-                                    size: "x-small",
-                                    color: "warning",
-                                    variant: "tonal",
-                                    class: "ms-1"
-                                  }, {
-                                    default: _withCtx$7(() => _cache[22] || (_cache[22] = [
-                                      _createTextVNode$5(" 有变化 ")
-                                    ])),
-                                    _: 1
-                                  })) : _createCommentVNode$6("", true)
-                                ]),
-                                _createElementVNode$7("td", _hoisted_35$2, _toDisplayString$7(field.current), 1),
-                                _createElementVNode$7("td", _hoisted_36$2, _toDisplayString$7(field.target), 1)
-                              ], 2);
-                            }), 128))
-                          ])
-                        ])
-                      ])) : (_openBlock$7(), _createBlock$7(EmptyState, {
-                        key: 1,
-                        text: "没有可预览的字段",
-                        hint: "GET /scrape/preview 返回的 fields 里没有条目（或后端还没算）"
-                      })),
-                      previewSources.value ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_37$2, "本次取值来源")) : _createCommentVNode$6("", true),
-                      previewSources.value ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_38$2, [
-                        (_openBlock$7(true), _createElementBlock$7(_Fragment$6, null, _renderList$6(previewSources.value, (value, key) => {
-                          return _openBlock$7(), _createElementBlock$7("div", {
-                            key: String(key),
-                            class: "avh-srcgrid__item"
-                          }, [
-                            _createElementVNode$7("span", _hoisted_39$2, _toDisplayString$7(key), 1),
-                            _createElementVNode$7("span", null, _toDisplayString$7(valueText(value)), 1)
-                          ]);
-                        }), 128))
-                      ])) : _createCommentVNode$6("", true)
-                    ], 64))
-                  ]),
-                  _: 1
-                }),
-                _createVNode$6(_component_v_divider),
-                _createVNode$6(_component_v_card_actions, null, {
-                  default: _withCtx$7(() => [
-                    _cache[26] || (_cache[26] = _createElementVNode$7("span", { class: "avh-pick__hint" }, " 预览不写任何东西；确认无误后在确认卡上点「确认导入」才真正写 Emby。 ", -1)),
-                    _createVNode$6(_component_v_spacer),
-                    _createVNode$6(_component_v_btn, {
-                      variant: "text",
-                      onClick: _cache[6] || (_cache[6] = ($event) => previewDialog.value.open = false)
-                    }, {
-                      default: _withCtx$7(() => _cache[25] || (_cache[25] = [
-                        _createTextVNode$5("关闭")
-                      ])),
-                      _: 1
-                    })
-                  ]),
-                  _: 1
-                })
-              ]),
-              _: 1
-            })
-          ]),
-          _: 1
-        }, 8, ["modelValue"])
-      ]);
+                    ])) : (_openBlock$7(), _createBlock$7(EmptyState, {
+                      key: 3,
+                      text: "这次什么都没抓到",
+                      hint: "三个数据源都没有这部片的值，换一部或稍后重试"
+                    })),
+                    emptyCount.value ? (_openBlock$7(), _createElementBlock$7("div", _hoisted_19$3, [
+                      _createVNode$6(_component_v_btn, {
+                        variant: "text",
+                        size: "x-small",
+                        onClick: _cache[5] || (_cache[5] = ($event) => showEmpty.value = !showEmpty.value)
+                      }, {
+                        default: _withCtx$7(() => [
+                          _createTextVNode$5(_toDisplayString$7(showEmpty.value ? "收起" : `展开没抓到的 ${emptyCount.value} 项`), 1)
+                        ]),
+                        _: 1
+                      })
+                    ])) : _createCommentVNode$6("", true),
+                    people.value.length ? (_openBlock$7(), _createElementBlock$7(_Fragment$6, { key: 5 }, [
+                      _createElementVNode$7("div", _hoisted_20$3, "要写入的演员（" + _toDisplayString$7(people.value.length) + "）", 1),
+                      _createElementVNode$7("div", _hoisted_21$2, [
+                        (_openBlock$7(true), _createElementBlock$7(_Fragment$6, null, _renderList$6(people.value, (name) => {
+                          return _openBlock$7(), _createBlock$7(_component_v_chip, {
+                            key: name,
+                            size: "x-small",
+                            variant: "tonal",
+                            class: "me-1 mb-1"
+                          }, {
+                            default: _withCtx$7(() => [
+                              _createTextVNode$5(_toDisplayString$7(name), 1)
+                            ]),
+                            _: 2
+                          }, 1024);
+                        }), 128)),
+                        _cache[17] || (_cache[17] = _createElementVNode$7("span", { class: "avh-sd__hint" }, "只写女演员，导演不写；不想要演员就取消上面「演员」那一行的勾", -1))
+                      ])
+                    ], 64)) : _createCommentVNode$6("", true)
+                  ], 64)) : _createCommentVNode$6("", true)
+                ]),
+                _: 1
+              }),
+              _createVNode$6(_component_v_divider),
+              _createVNode$6(_component_v_card_actions, null, {
+                default: _withCtx$7(() => [
+                  _createVNode$6(_component_v_btn, {
+                    variant: "text",
+                    loading: loading.value,
+                    onClick: reload
+                  }, {
+                    default: _withCtx$7(() => _cache[18] || (_cache[18] = [
+                      _createTextVNode$5("↻ 重新抓取")
+                    ])),
+                    _: 1
+                  }, 8, ["loading"]),
+                  _createVNode$6(_component_v_spacer),
+                  _cache[20] || (_cache[20] = _createElementVNode$7("span", { class: "avh-sd__hint" }, " 写入前会自动存一份完整的 Emby 原数据（出问题可回滚），界面上不出现这一步 ", -1)),
+                  _createVNode$6(_component_v_btn, {
+                    variant: "text",
+                    onClick: _cache[6] || (_cache[6] = ($event) => open.value = false)
+                  }, {
+                    default: _withCtx$7(() => _cache[19] || (_cache[19] = [
+                      _createTextVNode$5("取消")
+                    ])),
+                    _: 1
+                  }),
+                  _createVNode$6(_component_v_btn, {
+                    color: "primary",
+                    variant: "flat",
+                    disabled: !checkedCount.value || loading.value,
+                    loading: busy.value,
+                    onClick: write
+                  }, {
+                    default: _withCtx$7(() => [
+                      _createTextVNode$5("写入 Emby（" + _toDisplayString$7(checkedCount.value) + " 项）", 1)
+                    ]),
+                    _: 1
+                  }, 8, ["disabled", "loading"])
+                ]),
+                _: 1
+              })
+            ]),
+            _: 1
+          })
+        ]),
+        _: 1
+      }, 8, ["modelValue"]);
     };
   }
 });
 
-const SearchScrapePanel = /* @__PURE__ */ _export_sfc(_sfc_main$7, [["__scopeId", "data-v-1fd1a1e3"]]);
+const ScrapeDialog = /* @__PURE__ */ _export_sfc(_sfc_main$7, [["__scopeId", "data-v-928a7adf"]]);
 
 const {defineComponent:_defineComponent$6} = await importShared('vue');
 
-const {renderList:_renderList$5,Fragment:_Fragment$5,openBlock:_openBlock$6,createElementBlock:_createElementBlock$6,toDisplayString:_toDisplayString$6,normalizeClass:_normalizeClass$3,createElementVNode:_createElementVNode$6,createCommentVNode:_createCommentVNode$5,createTextVNode:_createTextVNode$4,resolveComponent:_resolveComponent$6,withCtx:_withCtx$6,createVNode:_createVNode$5,createBlock:_createBlock$6,unref:_unref$2} = await importShared('vue');
+const {renderList:_renderList$5,Fragment:_Fragment$5,openBlock:_openBlock$6,createElementBlock:_createElementBlock$6,toDisplayString:_toDisplayString$6,normalizeClass:_normalizeClass$3,createElementVNode:_createElementVNode$6,createCommentVNode:_createCommentVNode$5,createTextVNode:_createTextVNode$4,resolveComponent:_resolveComponent$6,withCtx:_withCtx$6,createVNode:_createVNode$5,createBlock:_createBlock$6,mergeProps:_mergeProps,unref:_unref$2} = await importShared('vue');
 
 const _hoisted_1$6 = { class: "avh-scrape" };
 const _hoisted_2$6 = { class: "avh-scrape__toolbar" };
@@ -8263,73 +8060,74 @@ const _hoisted_8$3 = ["title", "onClick"];
 const _hoisted_9$3 = { class: "avh-stat__num" };
 const _hoisted_10$3 = { class: "avh-stat__label" };
 const _hoisted_11$3 = { class: "avh-stat__num" };
-const _hoisted_12$3 = { class: "avh-scrape__meta" };
-const _hoisted_13$3 = { class: "avh-scrape__hint" };
-const _hoisted_14$3 = {
+const _hoisted_12$3 = { class: "avh-scrape__legend" };
+const _hoisted_13$3 = { class: "avh-scrape__meta" };
+const _hoisted_14$3 = { class: "avh-scrape__hint" };
+const _hoisted_15$2 = {
   key: 0,
   class: "avh-scrape__hint"
 };
-const _hoisted_15$2 = {
+const _hoisted_16$2 = {
   key: 2,
   class: "mb-2"
 };
-const _hoisted_16$2 = {
+const _hoisted_17$2 = {
   key: 3,
   class: "avh-scrape__actions"
 };
-const _hoisted_17$2 = {
+const _hoisted_18$2 = {
   key: 4,
   class: "avh-scrape__loading"
 };
-const _hoisted_18$2 = {
+const _hoisted_19$2 = {
   key: 7,
   class: "avh-tablewrap"
 };
-const _hoisted_19$2 = { class: "avh-table" };
-const _hoisted_20$2 = { class: "avh-table__num" };
-const _hoisted_21$1 = {
+const _hoisted_20$2 = { class: "avh-table" };
+const _hoisted_21$1 = { class: "avh-table__num" };
+const _hoisted_22$1 = {
   key: 0,
   class: "avh-vbadge avh-vbadge--inline"
 };
-const _hoisted_22$1 = ["title"];
-const _hoisted_23$1 = {
+const _hoisted_23$1 = ["title"];
+const _hoisted_24$1 = {
   key: 0,
   class: "avh-scrape__hint"
 };
-const _hoisted_24$1 = { class: "avh-table__right" };
-const _hoisted_25$1 = { class: "avh-rowbtns" };
-const _hoisted_26$1 = { class: "avh-scrape__actions" };
-const _hoisted_27$1 = { class: "avh-scrape__secttl" };
-const _hoisted_28$1 = {
+const _hoisted_25$1 = { class: "avh-table__right" };
+const _hoisted_26$1 = { class: "avh-rowbtns" };
+const _hoisted_27$1 = { class: "avh-scrape__actions" };
+const _hoisted_28$1 = { class: "avh-scrape__secttl" };
+const _hoisted_29$1 = {
   key: 1,
   class: "avh-tablewrap"
 };
-const _hoisted_29$1 = { class: "avh-table" };
-const _hoisted_30$1 = ["title"];
-const _hoisted_31$1 = { class: "avh-scrape__secttl" };
-const _hoisted_32$1 = {
+const _hoisted_30$1 = { class: "avh-table" };
+const _hoisted_31$1 = ["title"];
+const _hoisted_32$1 = { class: "avh-scrape__secttl" };
+const _hoisted_33$1 = {
   key: 0,
   class: "avh-scrape__hint"
 };
-const _hoisted_33$1 = {
+const _hoisted_34$1 = {
   key: 4,
   class: "avh-tablewrap"
 };
-const _hoisted_34$1 = { class: "avh-table" };
-const _hoisted_35$1 = ["title"];
-const _hoisted_36$1 = {
+const _hoisted_35$1 = { class: "avh-table" };
+const _hoisted_36$1 = ["title"];
+const _hoisted_37$1 = {
   key: 5,
   class: "avh-scrape__hint"
 };
-const _hoisted_37$1 = {
+const _hoisted_38$1 = {
   key: 6,
   class: "avh-scrape__secttl"
 };
-const _hoisted_38$1 = {
+const _hoisted_39$1 = {
   key: 7,
   class: "avh-tablewrap"
 };
-const _hoisted_39$1 = { class: "avh-table" };
+const _hoisted_40$1 = { class: "avh-table" };
 const {computed: computed$5,ref: ref$6} = await importShared('vue');
 const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
   __name: "ScrapeView",
@@ -8384,19 +8182,45 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
       if (key === "sources" && !sourcesLoaded.value) void loadLog();
     }
     const STATUS_META = {
-      full: { label: "已完整", color: "success", hint: "核心字段与简介都齐了" },
-      missing_plot: { label: "缺简介", color: "warning", hint: "标题/封面/演员有，简介还没拿到（Tier 1 退避重刮）" },
-      missing_core: { label: "缺核心", color: "error", hint: "核心字段（标题/封面/演员/发行日）还没补齐" },
-      unscraped: { label: "未刮削", color: "info", hint: "还没跑过自建刮削层" }
+      full: {
+        label: "已完整",
+        color: "success",
+        hint: "标题、简介、演员、封面都齐了",
+        legend: "已完整＝标题/简介/演员/封面都齐了"
+      },
+      missing_plot: {
+        label: "缺简介",
+        color: "warning",
+        hint: "标题/封面/演员都有，只差简介（定时任务会隔一段时间重试）",
+        legend: "缺简介＝别的都有，只差简介"
+      },
+      missing_core: {
+        label: "缺核心信息",
+        color: "error",
+        hint: "刮过了，但标题/封面/演员/发行日这些核心信息一个都没拿到",
+        legend: "缺核心信息＝刮过了，但标题/封面/演员/发行日都没拿到"
+      },
+      unscraped: {
+        label: "未刮削",
+        color: "info",
+        hint: "还没刮过，Emby 里什么都没有（点行内「刮削」手动补）",
+        legend: "未刮削＝还没刮过"
+      }
     };
     const STATUS_ORDER = ["full", "missing_plot", "missing_core", "unscraped"];
-    function statusKeyOf(raw) {
-      const value = text(raw).trim();
-      const lower = value.toLowerCase();
-      if (lower === "full" || lower === "scraped_full" || lower === "complete") return { key: "full", raw: value };
-      if (lower === "missing_plot" || lower === "scraped_partial" || lower === "partial") return { key: "missing_plot", raw: value };
-      if (lower === "missing_core") return { key: "missing_core", raw: value };
-      return { key: "unscraped", raw: value };
+    function statusOf(row) {
+      const direct = text(row.status).trim().toLowerCase();
+      if (direct === "full" || direct === "missing_plot" || direct === "missing_core" || direct === "unscraped") {
+        return { key: direct, raw: text(row.status) };
+      }
+      const state = text(row.states?.scrape ?? row.scrape_state).trim().toLowerCase();
+      if (state === "scraped_full") return { key: "full", raw: state };
+      if (state === "scraped_partial") return { key: "missing_plot", raw: state };
+      const completeness = text(row.completeness).trim().toLowerCase();
+      if (completeness === "full") return { key: "full", raw: completeness };
+      if (completeness === "missing_plot") return { key: "missing_plot", raw: completeness };
+      if (completeness === "missing_core") return { key: "missing_core", raw: completeness };
+      return { key: "unscraped", raw: state || completeness };
     }
     function itemKeyOf(row) {
       const direct = text(row.item_key || row.itemKey);
@@ -8407,7 +8231,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
     function normalizeRow(row) {
       const number = text(row.number || row.display_number || row.key);
       const key = text(row.key || number);
-      const status = statusKeyOf(row.completeness ?? row.scrape_state ?? row.status ?? row.states?.scrape);
+      const status = statusOf(row);
       return {
         key,
         number: number || key,
@@ -8426,7 +8250,6 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
     const statusError = ref$6("");
     const statusData = ref$6(null);
     const rows = ref$6([]);
-    const listSource = ref$6("");
     const stats = computed$5(() => {
       const raw = (statusData.value && typeof statusData.value === "object" ? statusData.value.stats : null) || {};
       const out = {};
@@ -8492,8 +8315,8 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
         number: item.number,
         title: item.title,
         emby_id: item.emby_id || item.id,
-        // `/library` 没有 completeness：用 `states.scrape` 认档（`film_view` 的口径）
-        completeness: item.states?.scrape,
+        // `/library` 没有 `status`：把 `states.scrape` 原样带过来（`statusOf()` 认它）
+        states: item.states,
         version_tags: item.version_tags,
         updated_at: item.updated_at
       }));
@@ -8508,14 +8331,11 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
         const inline = firstArray(statusData.value, ["items", "list", "films"]);
         if (inline) {
           rows.value = inline.filter((item) => item && typeof item === "object").map((item) => normalizeRow(item));
-          listSource.value = "status";
         } else {
           try {
             rows.value = await loadLibraryRows();
-            listSource.value = rows.value.length ? "library" : "";
           } catch (err) {
             rows.value = [];
-            listSource.value = "";
             error.value = statusError.value || errorText(err);
           }
         }
@@ -8529,9 +8349,9 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
       }
     }
     void load(false);
-    const pickRef = ref$6(null);
-    function openPreview(row) {
-      void pickRef.value?.openPreview({ key: row.key, number: row.number });
+    const scrapeDialog = ref$6(null);
+    function openScrape(row) {
+      scrapeDialog.value?.openFor({ key: row.key, number: row.number, title: row.title });
     }
     const busy = ref$6("");
     const runResult = ref$6(null);
@@ -8555,30 +8375,6 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
         text: `成功 ${okCount} 条${errors.length ? ` · 失败 ${errors.length} 条` : ""}`,
         errors
       };
-    }
-    async function runOne(row) {
-      if (busy.value) return;
-      const id = rowId(row);
-      busy.value = `run:${id}`;
-      runResult.value = null;
-      t.info(`正在刮削 ${row.number || row.key} …`);
-      try {
-        const payload = await postJson("plugin/scrape/run", {
-          keys: [row.key || row.number],
-          force: false
-        });
-        const summary = summarizeRun(payload);
-        runResult.value = summary;
-        if (summary.ok) t.success(`刮削完成：${summary.text}`);
-        else t.warning(`刮削未全部成功：${summary.text}`);
-        emit("refreshSide");
-        await load(false);
-      } catch (err) {
-        runResult.value = { ok: false, text: "刮削请求失败", errors: [errorText(err)] };
-        t.warning(`刮削失败：${errorText(err)}`);
-      } finally {
-        busy.value = "";
-      }
     }
     async function runSelected() {
       if (busy.value) return;
@@ -8645,7 +8441,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
     }
     function avatarNotes(counts) {
       const notes = [
-        `缺 gender 的旧数据保守跳过 ${counts.genderUnknown} 位（不算失败；那条影片重刮一遍后自然补齐）`
+        `其中 ${counts.genderUnknown} 位是旧数据、没有性别字段（按"保守保留"放行，不算失败；重刮一遍后性别会补齐）`
       ];
       if (counts.missing > 0) {
         notes.push(`跳过里 ${counts.missing} 位还没在 Emby 建过 Person 实体（影片 People 写对后自会收敛）`);
@@ -8665,12 +8461,12 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
         errors: headErrors(counts.errors)
       };
     }
-    async function syncAvatars() {
+    async function syncAvatars(force = false) {
       if (busy.value) return;
       const proceed = await confirm({
         type: "warn",
-        title: "同步演员头像",
-        content: "这一步只读：先跑一次 dry_run 计划，零写请求，不会向 Emby 写任何东西。\n\n真正的上传在你看到计划条数、再确认一次之后才发生：届时会把头像写进 Emby 的 Person 实体（Person 的 Primary 图，必要时合并写 ProviderIds.JavDB）。已经写过头像的 Person 会跳过。",
+        title: force ? "重新同步全部演员头像（覆盖已有）" : "同步演员头像",
+        content: "这一步只读：先跑一次 dry_run 计划，零写请求，不会向 Emby 写任何东西。\n\n真正的上传在你看到计划条数、再确认一次之后才发生：届时会把头像写进 Emby 的 Person 实体（Person 的 Primary 图，必要时合并写 ProviderIds.JavDB）。" + (force ? "\n\n★ 这次带 force：**已经写过头像的 Person 也会被重新上传覆盖**（用来把旧的糊头像换成高清图）。" : "已经写过头像的 Person 会跳过。"),
         confirmText: "先看计划",
         cancelText: "取消"
       });
@@ -8681,7 +8477,10 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
         t.info("正在读取头像同步计划（dry_run，零写请求）…");
         let plan;
         try {
-          const planPayload = await postJson("plugin/scrape/avatars", { dry_run: true });
+          const planPayload = await postJson(
+            "plugin/scrape/avatars",
+            { dry_run: true, force }
+          );
           plan = countAvatarActions(planPayload);
         } catch (err) {
           runResult.value = { ok: false, text: "头像同步计划读取失败", errors: [errorText(err)] };
@@ -8707,7 +8506,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
           return;
         }
         t.info(`正在上传 ${plan.up} 张头像…`);
-        const payload = await postJson("plugin/scrape/avatars", { dry_run: false });
+        const payload = await postJson("plugin/scrape/avatars", { dry_run: false, force });
         const done = countAvatarActions(payload);
         runResult.value = avatarResult(done, false);
         if (runResult.value.ok) t.success(`头像同步完成：${avatarText(done, false)}`);
@@ -8804,8 +8603,12 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
     }
     return (_ctx, _cache) => {
       const _component_v_btn = _resolveComponent$6("v-btn");
+      const _component_v_icon = _resolveComponent$6("v-icon");
       const _component_v_alert = _resolveComponent$6("v-alert");
       const _component_v_checkbox = _resolveComponent$6("v-checkbox");
+      const _component_v_list_item = _resolveComponent$6("v-list-item");
+      const _component_v_list = _resolveComponent$6("v-list");
+      const _component_v_menu = _resolveComponent$6("v-menu");
       const _component_v_chip = _resolveComponent$6("v-chip");
       return _openBlock$6(), _createElementBlock$6("div", _hoisted_1$6, [
         _createElementVNode$6("div", _hoisted_2$6, [
@@ -8818,30 +8621,21 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
               }, _toDisplayString$6(item.name), 11, _hoisted_4$4);
             }), 64))
           ]),
-          tab.value === "workbench" ? (_openBlock$6(), _createElementBlock$6("span", _hoisted_5$4, " 搜索刮削走 GET /search · 行内「刮削」与「确认导入」同一条写入链路 · 列表来源：" + _toDisplayString$6(listSource.value === "library" ? "GET /library（/scrape/status 没有 items）" : listSource.value === "status" ? "GET /scrape/status" : "暂无（两个端点都没读到）"), 1)) : (_openBlock$6(), _createElementBlock$6("span", _hoisted_6$4, "各源最近状态取自 GET /scrape/status · 流水取自 GET /scrape/log")),
-          _cache[6] || (_cache[6] = _createElementVNode$6("div", { class: "avh-scrape__spacer" }, null, -1)),
+          tab.value === "workbench" ? (_openBlock$6(), _createElementBlock$6("span", _hoisted_5$4, " 点行内「刮削」可以自己挑这次写哪些信息；批量刮削会把抓到的全部信息写一遍 ")) : (_openBlock$6(), _createElementBlock$6("span", _hoisted_6$4, "各源最近状态取自 GET /scrape/status · 流水取自 GET /scrape/log")),
+          _cache[7] || (_cache[7] = _createElementVNode$6("div", { class: "avh-scrape__spacer" }, null, -1)),
           _createVNode$5(_component_v_btn, {
             variant: "outlined",
             size: "small",
             loading: loading.value,
             onClick: _cache[0] || (_cache[0] = ($event) => load(true))
           }, {
-            default: _withCtx$6(() => _cache[5] || (_cache[5] = [
+            default: _withCtx$6(() => _cache[6] || (_cache[6] = [
               _createTextVNode$4("↻ 刷新")
             ])),
             _: 1
           }, 8, ["loading"])
         ]),
         tab.value === "workbench" ? (_openBlock$6(), _createElementBlock$6(_Fragment$5, { key: 0 }, [
-          _createVNode$5(SearchScrapePanel, {
-            ref_key: "pickRef",
-            ref: pickRef,
-            api: _ctx.api,
-            "plugin-id": _ctx.pluginId,
-            toast: _ctx.toast,
-            onRefreshSide: _cache[1] || (_cache[1] = ($event) => emit("refreshSide")),
-            onDone: _cache[2] || (_cache[2] = ($event) => load(false))
-          }, null, 8, ["api", "plugin-id", "toast"]),
           _createElementVNode$6("div", _hoisted_7$4, [
             (_openBlock$6(), _createElementBlock$6(_Fragment$5, null, _renderList$5(STATUS_ORDER, (key) => {
               return _createElementVNode$6("div", {
@@ -8857,21 +8651,37 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
             _createElementVNode$6("div", {
               class: _normalizeClass$3(["avh-stat", { "avh-stat--on": filter.value === "" }]),
               title: "全部（点一下清掉筛选）",
-              onClick: _cache[3] || (_cache[3] = ($event) => filter.value = "")
+              onClick: _cache[1] || (_cache[1] = ($event) => filter.value = "")
             }, [
               _createElementVNode$6("div", _hoisted_11$3, _toDisplayString$6(stats.value.total), 1),
-              _cache[7] || (_cache[7] = _createElementVNode$6("div", { class: "avh-stat__label" }, "全部", -1))
+              _cache[8] || (_cache[8] = _createElementVNode$6("div", { class: "avh-stat__label" }, "全部", -1))
             ], 2)
           ]),
           _createElementVNode$6("div", _hoisted_12$3, [
-            _createElementVNode$6("span", _hoisted_13$3, " 定时重刮队列：Tier 1 " + _toDisplayString$6(queueInfo.value.tier1 === null ? "—" : queueInfo.value.tier1) + " · Tier 2 " + _toDisplayString$6(queueInfo.value.tier2 === null ? "—" : queueInfo.value.tier2) + " · 上次运行 " + _toDisplayString$6(lastRun.value || "—"), 1),
-            filter.value ? (_openBlock$6(), _createElementBlock$6("span", _hoisted_14$3, "· 正在筛选「" + _toDisplayString$6(filterLabel.value) + "」（" + _toDisplayString$6(visibleRows.value.length) + " 条）", 1)) : _createCommentVNode$5("", true)
+            (_openBlock$6(), _createElementBlock$6(_Fragment$5, null, _renderList$5(STATUS_ORDER, (key) => {
+              return _createElementVNode$6("span", {
+                key: `legend#${key}`,
+                class: "avh-scrape__legenditem"
+              }, [
+                _createVNode$5(_component_v_icon, {
+                  icon: "mdi-circle",
+                  color: STATUS_META[key].color,
+                  size: "8",
+                  class: "me-1"
+                }, null, 8, ["color"]),
+                _createTextVNode$4(" " + _toDisplayString$6(STATUS_META[key].legend), 1)
+              ]);
+            }), 64))
+          ]),
+          _createElementVNode$6("div", _hoisted_13$3, [
+            _createElementVNode$6("span", _hoisted_14$3, " 定时重刮队列：等重试 " + _toDisplayString$6(queueInfo.value.tier1 === null ? "—" : queueInfo.value.tier1) + " · 排队补刮 " + _toDisplayString$6(queueInfo.value.tier2 === null ? "—" : queueInfo.value.tier2) + " · 上次运行 " + _toDisplayString$6(lastRun.value || "—"), 1),
+            filter.value ? (_openBlock$6(), _createElementBlock$6("span", _hoisted_15$2, "· 正在筛选「" + _toDisplayString$6(filterLabel.value) + "」（" + _toDisplayString$6(visibleRows.value.length) + " 条）", 1)) : _createCommentVNode$5("", true)
           ]),
           error.value && !rows.value.length ? (_openBlock$6(), _createBlock$6(ErrorState, {
             key: 0,
             message: `刮削状态读取失败：${error.value}`,
             retrying: loading.value,
-            onRetry: _cache[4] || (_cache[4] = ($event) => load(false))
+            onRetry: _cache[2] || (_cache[2] = ($event) => load(false))
           }, null, 8, ["message", "retrying"])) : error.value && rows.value.length ? (_openBlock$6(), _createBlock$6(_component_v_alert, {
             key: 1,
             type: "warning",
@@ -8884,7 +8694,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
             ]),
             _: 1
           })) : _createCommentVNode$5("", true),
-          runResult.value ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_15$2, [
+          runResult.value ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_16$2, [
             _createVNode$5(_component_v_alert, {
               type: runResult.value.ok ? "success" : "warning",
               variant: "tonal",
@@ -8905,7 +8715,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
               _: 1
             }, 8, ["type"])
           ])) : _createCommentVNode$5("", true),
-          rows.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_16$2, [
+          rows.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_17$2, [
             _createVNode$5(_component_v_checkbox, {
               "model-value": allVisibleSelected.value,
               density: "compact",
@@ -8928,23 +8738,46 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
               ]),
               _: 1
             }, 8, ["disabled", "loading"]),
-            _cache[9] || (_cache[9] = _createElementVNode$6("span", { class: "avh-scrape__hint" }, "批量会先弹一次确认，文案里写明「将写入 Emby」", -1)),
+            _cache[10] || (_cache[10] = _createElementVNode$6("span", { class: "avh-scrape__hint" }, "批量会先弹一次确认，把抓到的全部信息写一遍", -1)),
             _createVNode$5(_component_v_btn, {
               variant: "outlined",
               size: "small",
               "prepend-icon": "mdi-account-box-outline",
               disabled: !!busy.value,
               loading: busy.value === "avatars",
-              onClick: syncAvatars
+              onClick: _cache[3] || (_cache[3] = ($event) => syncAvatars(false))
             }, {
-              default: _withCtx$6(() => _cache[8] || (_cache[8] = [
+              default: _withCtx$6(() => _cache[9] || (_cache[9] = [
                 _createTextVNode$4("同步演员头像")
               ])),
               _: 1
             }, 8, ["disabled", "loading"]),
-            _cache[10] || (_cache[10] = _createElementVNode$6("span", { class: "avh-scrape__hint" }, "全库同步、与勾选无关 · 先 dry_run 出计划（零写请求），确认后才写 Person 实体", -1))
+            _createVNode$5(_component_v_menu, { location: "bottom" }, {
+              activator: _withCtx$6(({ props: menuProps }) => [
+                _createVNode$5(_component_v_btn, _mergeProps({
+                  variant: "text",
+                  size: "small",
+                  icon: "mdi-dots-vertical",
+                  disabled: !!busy.value
+                }, menuProps), null, 16, ["disabled"])
+              ]),
+              default: _withCtx$6(() => [
+                _createVNode$5(_component_v_list, { density: "compact" }, {
+                  default: _withCtx$6(() => [
+                    _createVNode$5(_component_v_list_item, {
+                      title: "重新同步全部头像（覆盖已有）",
+                      subtitle: "把旧的糊头像换成高清图",
+                      onClick: _cache[4] || (_cache[4] = ($event) => syncAvatars(true))
+                    })
+                  ]),
+                  _: 1
+                })
+              ]),
+              _: 1
+            }),
+            _cache[11] || (_cache[11] = _createElementVNode$6("span", { class: "avh-scrape__hint" }, " 全库同步、与勾选无关 · 先出计划（零写请求），确认后才写 Person 实体 · 头像优先取高清源（Gfriends），换不掉旧图时用右边菜单里的「重新同步全部」 ", -1))
           ])) : _createCommentVNode$5("", true),
-          loading.value && !rows.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_17$2, "正在读取刮削状态…")) : !rows.value.length && !error.value ? (_openBlock$6(), _createBlock$6(EmptyState, {
+          loading.value && !rows.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_18$2, "正在读取刮削状态…")) : !rows.value.length && !error.value ? (_openBlock$6(), _createBlock$6(EmptyState, {
             key: 5,
             text: "还没有可刮削的条目<br>后端把 meta 表建起来、或 Emby 库里已有影片后，这里会按状态列出全部番号",
             hint: "本页数据来自 GET /scrape/status（items）与 GET /library；接口没上线时只会看到这句空态"
@@ -8952,8 +8785,8 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
             key: 6,
             text: "该状态下没有条目",
             hint: "点顶部「全部」清掉筛选"
-          })) : visibleRows.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_18$2, [
-            _createElementVNode$6("table", _hoisted_19$2, [
+          })) : visibleRows.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_19$2, [
+            _createElementVNode$6("table", _hoisted_20$2, [
               _cache[13] || (_cache[13] = _createElementVNode$6("colgroup", null, [
                 _createElementVNode$6("col", { style: { "width": "36px" } }),
                 _createElementVNode$6("col", { style: { "width": "152px" } }),
@@ -8983,13 +8816,13 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
                         "onUpdate:modelValue": ($event) => toggleRow(row)
                       }, null, 8, ["model-value", "onUpdate:modelValue"])
                     ]),
-                    _createElementVNode$6("td", _hoisted_20$2, [
+                    _createElementVNode$6("td", _hoisted_21$1, [
                       _createTextVNode$4(_toDisplayString$6(row.number) + " ", 1),
-                      badgeOf(row) ? (_openBlock$6(), _createElementBlock$6("span", _hoisted_21$1, _toDisplayString$6(badgeOf(row)), 1)) : _createCommentVNode$5("", true)
+                      badgeOf(row) ? (_openBlock$6(), _createElementBlock$6("span", _hoisted_22$1, _toDisplayString$6(badgeOf(row)), 1)) : _createCommentVNode$5("", true)
                     ]),
                     _createElementVNode$6("td", {
                       title: row.title
-                    }, _toDisplayString$6(row.title || "—"), 9, _hoisted_22$1),
+                    }, _toDisplayString$6(row.title || "—"), 9, _hoisted_23$1),
                     _createElementVNode$6("td", null, [
                       _createVNode$5(_component_v_chip, {
                         size: "x-small",
@@ -9001,33 +8834,22 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
                         ]),
                         _: 2
                       }, 1032, ["color"]),
-                      row.statusRaw && row.statusRaw !== row.status ? (_openBlock$6(), _createElementBlock$6("span", _hoisted_23$1, _toDisplayString$6(row.statusRaw), 1)) : _createCommentVNode$5("", true)
+                      row.statusRaw && row.statusRaw !== row.status ? (_openBlock$6(), _createElementBlock$6("span", _hoisted_24$1, _toDisplayString$6(row.statusRaw), 1)) : _createCommentVNode$5("", true)
                     ]),
-                    _createElementVNode$6("td", _hoisted_24$1, [
-                      _createElementVNode$6("div", _hoisted_25$1, [
-                        _createVNode$5(_component_v_btn, {
-                          size: "x-small",
-                          variant: "outlined",
-                          onClick: ($event) => openPreview(row)
-                        }, {
-                          default: _withCtx$6(() => _cache[11] || (_cache[11] = [
-                            _createTextVNode$4("预览")
-                          ])),
-                          _: 2
-                        }, 1032, ["onClick"]),
+                    _createElementVNode$6("td", _hoisted_25$1, [
+                      _createElementVNode$6("div", _hoisted_26$1, [
                         _createVNode$5(_component_v_btn, {
                           size: "x-small",
                           variant: "outlined",
                           color: "primary",
-                          loading: busy.value === `run:${rowId(row)}`,
                           disabled: !!busy.value,
-                          onClick: ($event) => runOne(row)
+                          onClick: ($event) => openScrape(row)
                         }, {
                           default: _withCtx$6(() => _cache[12] || (_cache[12] = [
                             _createTextVNode$4("刮削")
                           ])),
                           _: 2
-                        }, 1032, ["loading", "disabled", "onClick"])
+                        }, 1032, ["disabled", "onClick"])
                       ])
                     ])
                   ]);
@@ -9036,7 +8858,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
             ])
           ])) : _createCommentVNode$5("", true)
         ], 64)) : (_openBlock$6(), _createElementBlock$6(_Fragment$5, { key: 1 }, [
-          _createElementVNode$6("div", _hoisted_26$1, [
+          _createElementVNode$6("div", _hoisted_27$1, [
             _createVNode$5(_component_v_btn, {
               color: "primary",
               variant: "flat",
@@ -9071,9 +8893,9 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
             ]),
             _: 1
           })) : _createCommentVNode$5("", true),
-          _createElementVNode$6("div", _hoisted_27$1, "数据源（" + _toDisplayString$6(sources.value.length) + "）", 1),
-          sources.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_28$1, [
-            _createElementVNode$6("table", _hoisted_29$1, [
+          _createElementVNode$6("div", _hoisted_28$1, "数据源（" + _toDisplayString$6(sources.value.length) + "）", 1),
+          sources.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_29$1, [
+            _createElementVNode$6("table", _hoisted_30$1, [
               _cache[17] || (_cache[17] = _createElementVNode$6("colgroup", null, [
                 _createElementVNode$6("col", { style: { "width": "150px" } }),
                 _createElementVNode$6("col", { style: { "width": "96px" } }),
@@ -9112,7 +8934,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
                     _createElementVNode$6("td", {
                       class: "avh-table__ellipsis",
                       title: sourceError(row)
-                    }, _toDisplayString$6(sourceError(row)), 9, _hoisted_30$1),
+                    }, _toDisplayString$6(sourceError(row)), 9, _hoisted_31$1),
                     _createElementVNode$6("td", null, _toDisplayString$6(sourceCheckedAt(row)), 1)
                   ]);
                 }), 128))
@@ -9123,9 +8945,9 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
             text: "还没有数据源状态",
             hint: "GET /scrape/status 的 sources 为空（接口没上线，或后端还没跑过自检）"
           })),
-          _createElementVNode$6("div", _hoisted_31$1, [
+          _createElementVNode$6("div", _hoisted_32$1, [
             _createElementVNode$6("span", null, "最近流水（" + _toDisplayString$6(logItems.value.length) + "）", 1),
-            logSummary.value.length ? (_openBlock$6(), _createElementBlock$6("span", _hoisted_32$1, "summary " + _toDisplayString$6(logSummary.value.length) + " 组", 1)) : _createCommentVNode$5("", true),
+            logSummary.value.length ? (_openBlock$6(), _createElementBlock$6("span", _hoisted_33$1, "summary " + _toDisplayString$6(logSummary.value.length) + " 组", 1)) : _createCommentVNode$5("", true),
             _createVNode$5(_component_v_btn, {
               variant: "text",
               size: "x-small",
@@ -9151,8 +8973,8 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
             ]),
             _: 1
           })) : _createCommentVNode$5("", true),
-          logItems.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_33$1, [
-            _createElementVNode$6("table", _hoisted_34$1, [
+          logItems.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_34$1, [
+            _createElementVNode$6("table", _hoisted_35$1, [
               _cache[20] || (_cache[20] = _createElementVNode$6("colgroup", null, [
                 _createElementVNode$6("col", { style: { "width": "120px" } }),
                 _createElementVNode$6("col", { style: { "width": "88px" } }),
@@ -9194,16 +9016,16 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
                     _createElementVNode$6("td", {
                       class: "avh-table__ellipsis",
                       title: text(row?.error)
-                    }, _toDisplayString$6(text(row?.error) || "—"), 9, _hoisted_35$1),
+                    }, _toDisplayString$6(text(row?.error) || "—"), 9, _hoisted_36$1),
                     _createElementVNode$6("td", null, _toDisplayString$6(_unref$2(shortTime)(row?.created_at)), 1)
                   ]);
                 }), 128))
               ])
             ])
-          ])) : !logLoading.value && !logError.value ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_36$1, "还没有流水记录。")) : _createCommentVNode$5("", true),
-          logSummary.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_37$1, "summary")) : _createCommentVNode$5("", true),
-          logSummary.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_38$1, [
-            _createElementVNode$6("table", _hoisted_39$1, [
+          ])) : !logLoading.value && !logError.value ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_37$1, "还没有流水记录。")) : _createCommentVNode$5("", true),
+          logSummary.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_38$1, "summary")) : _createCommentVNode$5("", true),
+          logSummary.value.length ? (_openBlock$6(), _createElementBlock$6("div", _hoisted_39$1, [
+            _createElementVNode$6("table", _hoisted_40$1, [
               _cache[22] || (_cache[22] = _createElementVNode$6("thead", null, [
                 _createElementVNode$6("tr", null, [
                   _createElementVNode$6("th", null, "源"),
@@ -9224,13 +9046,21 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
               ])
             ])
           ])) : _createCommentVNode$5("", true)
-        ], 64))
+        ], 64)),
+        _createVNode$5(ScrapeDialog, {
+          ref_key: "scrapeDialog",
+          ref: scrapeDialog,
+          api: _ctx.api,
+          "plugin-id": _ctx.pluginId,
+          toast: _ctx.toast,
+          onDone: _cache[5] || (_cache[5] = ($event) => load(false))
+        }, null, 8, ["api", "plugin-id", "toast"])
       ]);
     };
   }
 });
 
-const ScrapeView = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-35b4009d"]]);
+const ScrapeView = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-243ea78f"]]);
 
 const {defineComponent:_defineComponent$5} = await importShared('vue');
 

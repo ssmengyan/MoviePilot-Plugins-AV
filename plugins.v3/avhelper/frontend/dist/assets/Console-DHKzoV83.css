@@ -1762,305 +1762,131 @@
   grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
 }
 
-/* 工具条：与站点搜索页同款几何（`.toolbar` + `.spacer` + `.hint`） */
-.avh-pick__bar[data-v-1fd1a1e3] {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
+.avh-sd__subtitle[data-v-928a7adf] {
+  margin-left: 8px;
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.55);
 }
-.avh-pick__input[data-v-1fd1a1e3] {
-  min-width: 280px;
-  flex: 0 1 380px;
-}
-.avh-pick__hint[data-v-1fd1a1e3] {
+.avh-sd__hint[data-v-928a7adf] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-pick__secttl[data-v-1fd1a1e3] {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin: 12px 0 8px;
-  font-size: 12px;
-  letter-spacing: 0.4px;
-  color: rgba(var(--v-theme-on-surface), 0.5);
-}
-.avh-pick__loading[data-v-1fd1a1e3] {
-  padding: 44px 20px;
+.avh-sd__loading[data-v-928a7adf] {
+  padding: 40px 20px;
   text-align: center;
   font-size: 13px;
-  color: rgba(var(--v-theme-on-surface), 0.5);
+  color: rgba(var(--v-theme-on-surface), 0.6);
 }
-.avh-pick__list[data-v-1fd1a1e3] {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-/*
- * 候选行：照抄 `SearchDialog.vue` 的 `.searchrow`（番号 + 74×100 小图 + 标题 + 演员一行 + 右侧提示），
- * 只多一条"选中"高亮（用户点过的那条要看得见是哪条）。
- */
-.avh-pickrow[data-v-1fd1a1e3] {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 9px 12px;
-  cursor: pointer;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
-  border-radius: 8px;
-  background: rgba(var(--v-theme-on-surface), 0.04);
-  transition: 0.15s;
-}
-.avh-pickrow[data-v-1fd1a1e3]:hover {
-  border-color: rgb(var(--v-theme-primary));
-}
-.avh-pickrow--on[data-v-1fd1a1e3] {
-  border-color: rgb(var(--v-theme-primary));
-  background: rgba(var(--v-theme-primary), 0.14);
-}
-.avh-pickrow__mini[data-v-1fd1a1e3] {
-  width: 54px;
-  height: 74px;
-  flex: none;
-  overflow: hidden;
-  border-radius: 6px;
-}
-.avh-pickrow__mini[data-v-1fd1a1e3] .avh-thumb {
-  height: 100%;
-}
-
-/*
- * 缺图占位的番号**只画一行**：`Thumb` 的占位是居中 + 允许换行（详情页那种大方块要这样），
- * 而候选行是固定高的窄条，`SNOS-297` 这种长番号会折成两行、把"长番号"和"短番号"的
- * 卡片高度画成不一样（实测 74px vs 86px）。这里收成单行 + 省略号，行高就齐了。
- */
-.avh-pickrow__mini[data-v-1fd1a1e3] .avh-thumb__noimg {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 4px;
-  font-size: 11px;
-}
-.avh-pickrow__main[data-v-1fd1a1e3] {
-  flex: 1;
-  min-width: 0;
-}
-.avh-pickrow__num[data-v-1fd1a1e3] {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-weight: 700;
-}
-.avh-pickrow__actor[data-v-1fd1a1e3] {
-  margin-top: 2px;
-  font-size: 12px;
-  color: rgba(var(--v-theme-on-surface), 0.72);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.avh-pickrow__ttl[data-v-1fd1a1e3] {
-  margin-top: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* `.tag` 系列：与 `SearchDialog.vue` / `CandTable.vue` 同一套观感 */
-.avh-pick__tag[data-v-1fd1a1e3] {
-  display: inline-block;
-  padding: 1px 6px;
-  font-size: 10.5px;
-  font-weight: 400;
-  border-radius: 4px;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.16);
-  color: rgba(var(--v-theme-on-surface), 0.5);
-}
-.avh-pick__tag--cn[data-v-1fd1a1e3] {
-  border-color: rgba(var(--v-theme-success), 0.45);
-  background: rgba(var(--v-theme-success), 0.18);
-  color: rgb(var(--v-theme-on-surface));
-}
-.avh-pick__tag--uc[data-v-1fd1a1e3] {
-  border-color: rgba(var(--v-theme-secondary), 0.5);
-  background: rgba(var(--v-theme-secondary), 0.3);
-  color: rgb(var(--v-theme-on-surface));
-}
-.avh-pick__tag--lib[data-v-1fd1a1e3] {
-  border-color: rgba(var(--v-theme-primary), 0.5);
-  background: rgba(var(--v-theme-primary), 0.22);
-  color: rgb(var(--v-theme-on-surface));
-}
-
-/*
- * 「不在库」用 warning：它提示的是"这次导入很可能找不到 Emby 条目"，
- * 是这条候选上最值得先看见的一件事（`/scrape/run` 会回「找不到该番号对应的 Emby 条目」）。
- */
-.avh-pick__tag--warn[data-v-1fd1a1e3] {
-  border-color: rgba(var(--v-theme-warning), 0.5);
-  background: rgba(var(--v-theme-warning), 0.2);
-  color: rgb(var(--v-theme-on-surface));
-}
-
-/* 高级折叠：默认收起，行首一颗箭头按钮 */
-.avh-pick__adv[data-v-1fd1a1e3] {
-  margin-top: 14px;
-  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  padding-top: 8px;
-}
-.avh-pick__advhead[data-v-1fd1a1e3] {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 0;
-  font-size: 12px;
-  color: rgba(var(--v-theme-on-surface), 0.5);
-  background: none;
-  border: 0;
-  cursor: pointer;
-}
-.avh-pick__advhead[data-v-1fd1a1e3]:hover {
-  color: rgb(var(--v-theme-primary));
-}
-.avh-pick__advbody[data-v-1fd1a1e3] {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 6px 0 2px;
-}
-
-/* 确认卡：左缩略图 + 右五行「字段 / 值」（只画关键字段） */
-.avh-confirm[data-v-1fd1a1e3] {
+.avh-sd__media[data-v-928a7adf] {
   display: flex;
   gap: 14px;
   align-items: flex-start;
+  margin-bottom: 10px;
 }
-.avh-confirm__mini[data-v-1fd1a1e3] {
-  width: 84px;
-  height: 116px;
-  flex: none;
-  overflow: hidden;
+.avh-sd__cover img[data-v-928a7adf] {
+  width: 118px;
   border-radius: 6px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.16);
+  display: block;
 }
-.avh-confirm__mini[data-v-1fd1a1e3] .avh-thumb {
-  height: 100%;
-}
-.avh-confirm__main[data-v-1fd1a1e3] {
+.avh-sd__mediainfo[data-v-928a7adf] {
   flex: 1;
   min-width: 0;
 }
-.avh-confirm__row[data-v-1fd1a1e3] {
+.avh-sd__checkline[data-v-928a7adf] {
   display: flex;
+  align-items: center;
   gap: 10px;
-  align-items: baseline;
-  padding: 4px 0;
-  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.06);
+  flex-wrap: wrap;
 }
-.avh-confirm__k[data-v-1fd1a1e3] {
-  flex: none;
-  width: 64px;
+.avh-sd__sources[data-v-928a7adf] {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.avh-sd__head[data-v-928a7adf] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 6px;
   font-size: 12px;
-  color: rgba(var(--v-theme-on-surface), 0.5);
+  letter-spacing: 0.4px;
+  color: rgba(var(--v-theme-on-surface), 0.55);
 }
-.avh-confirm__v[data-v-1fd1a1e3] {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  word-break: break-word;
-}
-
-/* 表格 / diff / 来源网格：与 `ScrapeView.vue` 同一套（本组件原样搬过来，全页只有这一份 diff 表） */
-.avh-tablewrap[data-v-1fd1a1e3] {
+.avh-sd__tablewrap[data-v-928a7adf] {
   overflow-x: auto;
 }
-.avh-table[data-v-1fd1a1e3] {
+.avh-sd__table[data-v-928a7adf] {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
   font-size: 12.5px;
 }
-.avh-table th[data-v-1fd1a1e3],
-.avh-table td[data-v-1fd1a1e3] {
-  padding: 6px 8px;
+.avh-sd__table th[data-v-928a7adf],
+.avh-sd__table td[data-v-928a7adf] {
+  padding: 4px 8px;
   text-align: left;
-  vertical-align: middle;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  vertical-align: top;
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
 }
-.avh-table th[data-v-1fd1a1e3] {
+.avh-sd__table th[data-v-928a7adf] {
   font-weight: 600;
   color: rgba(var(--v-theme-on-surface), 0.6);
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.16);
 }
-.avh-table--diff td[data-v-1fd1a1e3] {
+.avh-sd__cell[data-v-928a7adf] {
   white-space: normal;
   word-break: break-word;
-  vertical-align: top;
+  line-height: 1.5;
 }
-.avh-diff__changed[data-v-1fd1a1e3] {
-  background: rgba(var(--v-theme-warning), 0.16);
+.avh-sd__row--off[data-v-928a7adf] {
+  opacity: 0.55;
 }
-.avh-diff__cell[data-v-1fd1a1e3] {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.6;
+.avh-sd__more[data-v-928a7adf] {
+  margin-top: 4px;
 }
-.avh-srcgrid[data-v-1fd1a1e3] {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 6px 16px;
-}
-.avh-srcgrid__item[data-v-1fd1a1e3] {
+.avh-sd__people[data-v-928a7adf] {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 12px;
-}
-.avh-srcgrid__k[data-v-1fd1a1e3] {
-  color: rgba(var(--v-theme-on-surface), 0.6);
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 /* 与下载页/订阅页同一套工具条几何 */
-.avh-scrape__toolbar[data-v-35b4009d] {
+.avh-scrape__toolbar[data-v-243ea78f] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 12px;
 }
-.avh-scrape__hint[data-v-35b4009d] {
+.avh-scrape__hint[data-v-243ea78f] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-scrape__spacer[data-v-35b4009d] {
+.avh-scrape__spacer[data-v-243ea78f] {
   flex: 1;
 }
-.avh-scrape__meta[data-v-35b4009d] {
+.avh-scrape__meta[data-v-243ea78f] {
   display: flex;
   align-items: baseline;
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 10px;
 }
-.avh-scrape__actions[data-v-35b4009d] {
+.avh-scrape__actions[data-v-243ea78f] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 10px;
 }
-.avh-scrape__checkall[data-v-35b4009d] {
+.avh-scrape__checkall[data-v-243ea78f] {
   flex: none;
   max-width: 190px;
 }
-.avh-scrape__loading[data-v-35b4009d] {
+.avh-scrape__loading[data-v-243ea78f] {
   padding: 44px 20px;
   text-align: center;
   font-size: 13px;
@@ -2068,13 +1894,13 @@
 }
 
 /* 状态卡片（照发现榜单那组 tabs 的胶囊观感，改成可点的方块） */
-.avh-stats[data-v-35b4009d] {
+.avh-stats[data-v-243ea78f] {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
   gap: 10px;
   margin-bottom: 10px;
 }
-.avh-stat[data-v-35b4009d] {
+.avh-stat[data-v-243ea78f] {
   padding: 10px 12px;
   cursor: pointer;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
@@ -2082,35 +1908,49 @@
   background: rgba(var(--v-theme-on-surface), 0.04);
   transition: 0.15s;
 }
-.avh-stat[data-v-35b4009d]:hover {
+.avh-stat[data-v-243ea78f]:hover {
   border-color: rgb(var(--v-theme-primary));
 }
-.avh-stat--on[data-v-35b4009d] {
+.avh-stat--on[data-v-243ea78f] {
   border-color: rgb(var(--v-theme-primary));
   background: rgba(var(--v-theme-primary), 0.16);
 }
-.avh-stat__num[data-v-35b4009d] {
+.avh-stat__num[data-v-243ea78f] {
   font-size: 20px;
   font-weight: 700;
   line-height: 1.2;
 }
-.avh-stat__label[data-v-35b4009d] {
+.avh-stat__label[data-v-243ea78f] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.6);
 }
 
+/* 四档的常驻图例（用户问过「缺核心是什么意思」，答案必须看得见，不能只藏在悬浮提示里） */
+.avh-scrape__legend[data-v-243ea78f] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: -2px 0 10px;
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.55);
+}
+.avh-scrape__legenditem[data-v-243ea78f] {
+  display: inline-flex;
+  align-items: center;
+}
+
 /* 表格（`table-layout: fixed` + 显式列宽：宽屏不把「操作」列挤出去，照 S6 候选表的教训） */
-.avh-tablewrap[data-v-35b4009d] {
+.avh-tablewrap[data-v-243ea78f] {
   overflow-x: auto;
 }
-.avh-table[data-v-35b4009d] {
+.avh-table[data-v-243ea78f] {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
   font-size: 12.5px;
 }
-.avh-table th[data-v-35b4009d],
-.avh-table td[data-v-35b4009d] {
+.avh-table th[data-v-243ea78f],
+.avh-table td[data-v-243ea78f] {
   padding: 6px 8px;
   text-align: left;
   vertical-align: middle;
@@ -2119,26 +1959,26 @@
   white-space: nowrap;
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
 }
-.avh-table th[data-v-35b4009d] {
+.avh-table th[data-v-243ea78f] {
   font-weight: 600;
   color: rgba(var(--v-theme-on-surface), 0.6);
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.16);
 }
-.avh-table__right[data-v-35b4009d] {
+.avh-table__right[data-v-243ea78f] {
   text-align: right;
 }
-.avh-table__num[data-v-35b4009d] {
+.avh-table__num[data-v-243ea78f] {
   font-weight: 600;
 }
-.avh-table__ellipsis[data-v-35b4009d] {
+.avh-table__ellipsis[data-v-243ea78f] {
   max-width: 0;
 }
-.avh-rowbtns[data-v-35b4009d] {
+.avh-rowbtns[data-v-243ea78f] {
   display: flex;
   gap: 4px;
   justify-content: flex-end;
 }
-.avh-scrape__secttl[data-v-35b4009d] {
+.avh-scrape__secttl[data-v-243ea78f] {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -2149,7 +1989,7 @@
 }
 
 /* 版本角标（与 `LibraryView` / `DownloadsView` 同一套观感） */
-.avh-vbadge[data-v-35b4009d] {
+.avh-vbadge[data-v-243ea78f] {
   display: inline-block;
   padding: 1px 6px;
   font-size: 10px;
@@ -2159,18 +1999,19 @@
   background: rgba(var(--v-theme-secondary), 0.9);
   border: 1px solid rgba(255, 255, 255, 0.14);
 }
-.avh-vbadge--inline[data-v-35b4009d] {
+.avh-vbadge--inline[data-v-243ea78f] {
   margin-left: 4px;
 }
 
 /*
  * `.avh-table--diff` / `.avh-diff__changed` / `.avh-diff__cell` / `.avh-srcgrid*` 五条规则
- * 随 diff 表一起搬去了 `SearchScrapePanel.vue`（0.7.2）：scoped CSS 不会跨组件生效，
- * 留在这里就是五条永远选不中任何元素（本文件模板里已经没有 `--diff` / `srcgrid` 的类名了）。
+ * 曾随 diff 表搬去 `SearchScrapePanel.vue`（0.7.2）；**那个组件与那张全字段 diff 表已按用户
+ * 要求删除**（0.7.4），字段对照表现在住在 `common/ScrapeDialog.vue` 里、有自己的 scoped CSS。
+ * 这几条规则在这里**已经没有对应元素**，所以一并删掉（留着就是永远选不中的死规则）。
  */
 
 /* 页签胶囊：与「下载」栏那组同一套（两份 scoped CSS 各有作用域，本项目既有做法） */
-.avh-tabs[data-v-35b4009d] {
+.avh-tabs[data-v-243ea78f] {
   display: flex;
   gap: 4px;
   padding: 3px;
@@ -2178,7 +2019,7 @@
   border-radius: 8px;
   background: rgba(var(--v-theme-on-surface), 0.04);
 }
-.avh-tabs button[data-v-35b4009d] {
+.avh-tabs button[data-v-243ea78f] {
   padding: 4px 12px;
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
@@ -2187,7 +2028,7 @@
   border-radius: 6px;
   cursor: pointer;
 }
-.avh-tabs__on[data-v-35b4009d] {
+.avh-tabs__on[data-v-243ea78f] {
   color: rgb(var(--v-theme-on-primary)) !important;
   background: rgb(var(--v-theme-primary)) !important;
 }

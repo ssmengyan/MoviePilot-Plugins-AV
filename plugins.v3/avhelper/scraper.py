@@ -62,7 +62,7 @@ import threading
 import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 from urllib.parse import quote, urlencode
 
 from app.sdk.logging import logger
@@ -2255,6 +2255,37 @@ def _release_stamp(value: Any) -> str:
     return f"{match.group(0)}T00:00:00.0000000Z"
 
 
+def _write_field_set(opts: Dict[str, Any]) -> Optional[Set[str]]:
+    """`opts['write_fields']` → 「这次允许写的字段名」集合；没给这个键时回 `None` = 不过滤。
+
+    ⚠️ **空表与"没给"必须分开**：`[]`（用户一个字段都没勾）要回**空集合** —— 那意味着
+    "一项都不写"；回 `None` 会退化成"整份写"，正好把用户的意思做反。
+    `None`（键不存在）才是不过滤，批量刮削与定时刮削走的都是这条路。
+
+    图片槽位用两个伪字段名：`Primary`（封面）/ `Backdrop`（剧照），与 `_upload_images()`
+    共用同一份闸门。
+    """
+    src = opts or {}
+    if "write_fields" not in src or src.get("write_fields") is None:
+        return None
+    only = src.get("write_fields")
+    if not isinstance(only, (list, tuple, set)):
+        return None
+    return {str(item).strip() for item in only if str(item).strip()}
+
+
+def _pick_fields(overrides: Dict[str, Any], opts: Dict[str, Any]) -> Dict[str, Any]:
+    """按 `opts['write_fields']` 裁覆盖表（手动刮削的"只写勾中的那几项"）。
+
+    只裁**字段**；图片走 `_upload_images()` 里同一份闸门（`Primary` / `Backdrop` 这两个
+    伪字段名），两边共用 `_write_field_set()`，不会一边写一边不写。
+    """
+    allowed = _write_field_set(opts)
+    if allowed is None:
+        return overrides
+    return {key: value for key, value in overrides.items() if str(key) in allowed}
+
+
 def effective_overrides(overrides: Any) -> Dict[str, Any]:
     """覆盖表里**最终真的会写进去**的那部分（与 S2 `writable_overrides()` 对齐）。
 
@@ -2453,10 +2484,15 @@ def _upload_images(emby_client: Any, store: Any, emby_id: str, target: Dict[str,
     if not bool(_opt(opts, "write_images", True)) or not _emby_write_ok(emby_client):
         report["cover"] = "skipped"
         return report
+    # 手动刮削可以在界面上取消勾选「封面 / 剧照」：与字段走同一份闸门（`Primary` / `Backdrop`
+    # 是这两个图片槽位的伪字段名）。`None` = 不过滤（批量与自动刮削照旧全写）。
+    only = _write_field_set(opts)
+    cover_wanted = only is None or "Primary" in only
+    samples_wanted = only is None or "Backdrop" in only
     picked = pick_assets(assets, cover_url=str(target.get("cover_url") or ""))
-    cover = picked.get("cover")
+    cover = picked.get("cover") if cover_wanted else None
     samples = list(picked.get("samples") or [])
-    if not bool(_opt(opts, "write_samples", True)):
+    if not bool(_opt(opts, "write_samples", True)) or not samples_wanted:
         samples = []
 
     cli = cli if cli is not None else _cli_of(target)
@@ -2471,7 +2507,10 @@ def _upload_images(emby_client: Any, store: Any, emby_id: str, target: Dict[str,
         raw = blobs.get(str(cover.get("url")))
         source = "javdb_assets"
     fallback_url = str(target.get("cover_url") or "")
-    if not raw and fallback_url:
+    # ⚠️ 兜底分支**必须也受 `cover_wanted` 管**（真机实测抓到过）：用户取消勾选「封面」时
+    # `cover` 被置空 → `raw` 为空 → 老写法会顺着 `cover_url` 兜底把封面照样传上去，
+    # 于是"我只勾了一个字段"变成"封面也被换了"。字段闸门要覆盖**所有**上传出口。
+    if not raw and fallback_url and cover_wanted:
         raw, why = _fetch_cover_bytes(fallback_url, opts)
         if raw:
             source = "cover_url"
@@ -2493,14 +2532,18 @@ def _upload_images(emby_client: Any, store: Any, emby_id: str, target: Dict[str,
             report["errors"].append(f"封面上传失败：{detail}")
     else:
         # 两级都拿不到：**不报错**，只留说明（javdb 图集空 + 没有 cover_url / 取不到）
-        report["cover"] = "no_cover"
-        if not cover and not fallback_url:
-            report["notes"].append("javdb 图集与 cover_url 都没有封面，跳过 Primary")
-        elif cover and not fallback_url:
-            report["notes"].append(f"javdb 图集的封面下载失败且没有 cover_url 可兜底："
-                                   f"{cover.get('url')}")
-        _log_source(store, SRC_IMAGE, "miss", key, 0,
-                    "封面两级兜底都没拿到字节（javdb 图集 + cover_url），跳过 Primary")
+        if not cover_wanted:
+            # 用户手动取消了「封面」勾选：这不是取数失败，不许留"没拿到封面"的说明
+            report["cover"] = "skipped_manual"
+        else:
+            report["cover"] = "no_cover"
+            if not cover and not fallback_url:
+                report["notes"].append("javdb 图集与 cover_url 都没有封面，跳过 Primary")
+            elif cover and not fallback_url:
+                report["notes"].append(f"javdb 图集的封面下载失败且没有 cover_url 可兜底："
+                                       f"{cover.get('url')}")
+            _log_source(store, SRC_IMAGE, "miss", key, 0,
+                        "封面两级兜底都没拿到字节（javdb 图集 + cover_url），跳过 Primary")
     for index, asset in enumerate(samples[:SAMPLE_COUNT]):
         raw_sample = blobs.get(str(asset.get("url")))
         if not raw_sample:
@@ -2624,7 +2667,7 @@ def write_item(store: Any, emby_client: Any, target: Dict[str, Any], *, item_key
     local["version_tags"] = item_version_tags(dto, target.get("version_tags"))
     result["version_tags"] = version_labels(local["version_tags"])
     result["version_tags_raw"] = dict(local["version_tags"])
-    overrides = build_overrides(local, dto)
+    overrides = _pick_fields(build_overrides(local, dto), options)
     result["fields"] = field_diff(dto, overrides)
     result["changed"] = [f["name"] for f in result["fields"] if f["changed"]]
     if dry:
@@ -3035,6 +3078,10 @@ def preview_one(key: Any, *, store: Any, cli: Any, emby_client: Any = None,
                        "version_tags": version_labels(entry.get("version_tags"))}
                       for entry in found],
         "fields": field_diff(dto, overrides),
+        # 0.7.4：手动刮削对话框要**如实列出将写入的演员**（0.7.1 起只写女演员，导演不写），
+        # 用户能一眼看出"这次会写这几个人"，而不是只看到一个 People 字段名。
+        "people": [str(entry.get("Name") or "") for entry in (overrides.get("People") or [])
+                   if str(entry.get("Name") or "")],
         "sources": target.get("sources") or {},
         "warnings": warnings,
         "images": images,
@@ -3587,13 +3634,20 @@ def _image_bytes(url: str, opts: Dict[str, Any]) -> Tuple[bytes, str]:
     if not url:
         return b"", "没有头像地址"
     if imgproxy is not None and hasattr(imgproxy, "fetch"):
-        try:
-            blob = imgproxy.fetch(url, proxy=str(_opt(opts, "proxy") or ""))
-        except Exception as error:                              # noqa: BLE001 - 故意的
-            return b"", f"imgproxy.fetch 异常：{type(error).__name__}: {error}"
-        if blob:
-            return bytes(blob), ""
-        return b"", "imgproxy.fetch 返回空"
+        # ★ 重试一次（0.7.4，真机实测）：Gfriends 的大图（1~2 MB）偶尔**传到一半就断**
+        # （urllib 抛 `IncompleteRead`）→ `imgproxy.fetch()` 回 None。本库批跑 113 张里
+        # 有 2 张这样，其中 `藤咲舞` 重试即成功、`白岩冬萌` 那张 2.1 MB 每次都断
+        # （属图床/代理的传输问题，不是插件逻辑）—— 所以重试一次、仍失败才如实报错。
+        last = "imgproxy.fetch 返回空"
+        for _ in range(2):
+            try:
+                blob = imgproxy.fetch(url, proxy=str(_opt(opts, "proxy") or ""))
+            except Exception as error:                          # noqa: BLE001 - 故意的
+                last = f"imgproxy.fetch 异常：{type(error).__name__}: {error}"
+                continue
+            if blob:
+                return bytes(blob), ""
+        return b"", last
     body, error, _status = http_get(url, proxy=str(_opt(opts, "proxy") or ""),
                                      timeout=_to_int(_opt(opts, "http_timeout")) or 30)
     if body is None:
@@ -3621,15 +3675,38 @@ def is_image_bytes(blob: Any) -> bool:
 GFRIENDS_PROVIDER = "Gfriends"
 
 
+def _same_actor_name(left: Any, right: Any) -> bool:
+    """两个演员名是不是同一个人（Gfriends 命中校验用，见 `_gfriends_avatar()`）。
+
+    宽松口径：`_nfkc()` + 去掉空白与各类中点/括号/标点 + 小写之后，**完全相等**或
+    **互相包含**（短的那个长度 ≥2 且是长的那个的子串）都算对得上 —— 容忍
+    `七ツ森りり` vs `七森莉莉（七ツ森りり）`、全角括号、简繁与标点差异；
+    两个毫不相干的名字一定对不上（那就宁可不要头像，也不挂错人）。
+    """
+    def norm(value: Any) -> str:
+        text = _nfkc(value).strip().lower()
+        return re.sub(r"[\s\u3000·・,，.。/／()（）\[\]【】「」]+", "", text)
+
+    a, b = norm(left), norm(right)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
+    return len(shorter) >= 2 and shorter in longer
+
+
 def _gfriends_avatar(opts: Dict[str, Any], jp: Any,
                      timeout: int = 0) -> Tuple[str, str, str]:
     """Gfriends 兜底：javdb 没头像时，按**日文原名**去 MetaTube 的 `/v1/actors/search` 找一张。
 
     返回 `(url, error, reason)`：
 
-    - 命中 → `("https://raw.githubusercontent.com/…", "", "")`（取 `data[].images[0]`）；
+    - 命中 → `("https://raw.githubusercontent.com/…", "", "")`（取 `data[].images[0]`，
+      且**必须先过 `_same_actor_name(item['name'], 查询名)`**：挂错人的头像比没有头像糟得多）；
     - **HTTP 404 / 没有 Gfriends 条目 = "该演员不在 Gfriends" = 没有头像**（`reason='not_found'`），
       **绝不是错误**，调用方不许把它记进 `errors`；
+    - 有 Gfriends 条目但**名字对不上** → `reason='name_mismatch'`（同样是"没有头像"，不是错误）；
     - 未配置 `metatube_base` → `reason='unconfigured'`；演员行没有 `jp` → `reason='no_jp_name'`；
     - 只有真异常（连不上 / 非 JSON）才把文案放进 `error`。
 
@@ -3656,10 +3733,18 @@ def _gfriends_avatar(opts: Dict[str, Any], jp: Any,
     items = payload.get("data") if isinstance(payload, dict) else payload
     if not isinstance(items, list):
         return "", "", "not_found"
+    mismatch = False
     for item in items:
         if not isinstance(item, dict):
             continue
         if str(item.get("provider") or "").lower() != GFRIENDS_PROVIDER.lower():
+            continue
+        # ★ 认人之后再取自拍：MetaTube 这个端点会**按名字返回条目**，但谁也不能保证上游
+        # 永远只回同名那一条（番号查询那条 `movies/search` 就会回随机结果）。头像挂错人比
+        # 没有头像糟得多 —— 名字对不上就跳过这一条（宽松：包含关系也算对得上，
+        # 容忍 `七ツ森りり` / `七森莉莉（七ツ森りり）` 这类写法差异）。
+        if not _same_actor_name(item.get("name"), query):
+            mismatch = True
             continue
         images = item.get("images")
         if not isinstance(images, list):
@@ -3668,7 +3753,7 @@ def _gfriends_avatar(opts: Dict[str, Any], jp: Any,
             text = str(image or "").strip()
             if text:
                 return text, "", ""
-    return "", "", "not_found"
+    return "", "", "name_mismatch" if mismatch else "not_found"
 
 
 def sync_actor_avatars(store: Any, emby_client: Any, *, limit: int = 0, dry_run: bool = True,
@@ -3695,11 +3780,15 @@ def sync_actor_avatars(store: Any, emby_client: Any, *, limit: int = 0, dry_run:
     7. 找不到 Person（该演员的影片还没刮过 / 名字还没统一）→ `reason='person_missing'`，
        **不算错误**（这正是"先把影片 People 写对，Emby 自己收敛实体"的必然过渡态）。
     8. **只写女演员**（R3，`_avatar_index()` 的行里已有 `gender`）：`1`（男）直接跳过；
-       `None`（旧数据缺字段）**保守跳过**并单独计入 `gender_unknown`（**不混进 `missing_person`**）；
-       只有 `0`（女）进上传流程。
-    9. **javdb 没有头像（行里 `avatar` 为空）时走 Gfriends 兜底**（R5）：按演员行的 `jp`
-       （**日文原名**）打 `{metatube_base}/v1/actors/search?q=`，命中取 `data[].images[0]`；
-       **404 = 该演员不在 Gfriends = 没有头像，不是错误**；两源都没有 → `action='skip'` +
+       `None`（本库还有 12 位缺字段）**保守保留**并单独计入 `gender_unknown`（**不混进
+       `missing_person`**，也不静默丢掉 —— 0.7.4 改：老代码在这里 `continue`，那 12 位
+       ——看名字多数是女演员——一个头像都同步不到）。只有 `gender == 1` 是硬性排除。
+    9. **头像源：Gfriends 优先、javdb 兜底**（0.7.4 换序）：按演员行的 `jp`（**日文原名**）
+       打 `{metatube_base}/v1/actors/search?q=`，命中取 `data[].images[0]`；查不到就用 javdb
+       的 `avatars/**.jpg`。实测 javdb 那张是 100×100 ~ 400×400 的**列表缩略图**，Gfriends
+       命中时是 564×720 ~ 1235×1851 的整图（对照 9 例全胜）—— 老口径「javdb 优先」正是
+       「女优头像很低清」的根因。**404 = 该演员不在 Gfriends = 没有头像，不是错误**；
+       Gfriends 查询报错也**不算失败**（javdb 有图就照用）；两源都没有 → `action='skip'` +
        `reason='no_avatar'`（另带 `gfriends` 原因码）。
     10. `names` 给了就**只处理这些名字**（单片刮完只同步本片演员；自动路径绝不走全表）：
         规范名 / 展示名 / 中英日任一写法相等即算点名（`_wanted_slot()`；**只影响挑哪几行**，
@@ -3733,7 +3822,8 @@ def sync_actor_avatars(store: Any, emby_client: Any, *, limit: int = 0, dry_run:
     if not rows:
         errors.append("meta 里还没有演员（先刮削几条再来同步头像）")
         return out
-    # gender 过滤（R3，保守口径）：1=男 直接跳过；None=旧数据 保守跳过并单独计数；只有 0=女 进流程
+    # gender 过滤（R3 + 0.7.4）：1=男 直接跳过；None=旧数据缺字段 **保守保留**并单独计数；
+    # 只有 0=女 与 None 进流程 —— 详见上面第 8 条。
     female: List[Dict[str, Any]] = []
     for row in rows:
         gender = row.get("gender")
@@ -3747,8 +3837,13 @@ def sync_actor_avatars(store: Any, emby_client: Any, *, limit: int = 0, dry_run:
         if gender == 1:
             continue
         if gender is None:
+            # ⚠️ **缺失 ≠ 男**（0.7.4）：本库 201 位去重演员里还有 **12 位没有 `gender`**
+            # （109 女 / 80 男 / 12 缺），老代码在这里直接 `continue`，于是这 12 位
+            # ——看名字多数是女演员——**一个头像都同步不到**（只在计数里报 gender_unknown），
+            # 用户看到的就是「女优头像设置还是不行」。
+            # 口径按方案 §2.6 的原文：**缺失时保守保留** —— 宁可给某位男演员多传一张头像，
+            # 也不要漏掉女优；重刮一遍把 gender 补齐后，这批名字自然收敛到正确分支。
             out["gender_unknown"] += 1
-            continue
         female.append(row)
     rows = female
     size = _to_int(limit)
@@ -3784,19 +3879,25 @@ def sync_actor_avatars(store: Any, emby_client: Any, *, limit: int = 0, dry_run:
             entry["reason"] = "has_image"
             planned.append(entry)
             continue
-        # 取图：javdb 头像是第一顺位；它没有时才按**日文原名**去 Gfriends 兜底（R5）
-        avatar_url = str(row.get("avatar") or "")
-        source = "javdb" if avatar_url else ""
-        if not avatar_url:
-            avatar_url, gfriends_error, gfriends_reason = _gfriends_avatar(options, row.get("jp"))
-            if gfriends_error:
-                entry["action"] = "failed"
-                entry["reason"] = f"Gfriends 兜底失败：{gfriends_error}"
-                errors.append(f"{name}：Gfriends 兜底失败 {gfriends_error}")
-                planned.append(entry)
-                continue
-            if avatar_url:
-                source = "gfriends"
+        # 取图：**Gfriends 优先、javdb 兜底**（0.7.4 换序，修「头像很低清」）。
+        # 实测（2026-10-15，同一批演员两源对照）：javdb 的 `tp.spfcas.com/…/avatars/xx/*.jpg`
+        # 是**列表缩略图** —— 100×100 / 125×125 / 200×200 / 250×250 最常见，最大 400×400；
+        # 而 Gfriends 命中时是 564×720 ~ 1235×1851 的整图，对照 9 例**全部更大，javdb 无一例胜出**。
+        # 老口径「javdb 第一顺位、没有才 Gfriends」正是用户报「很多女优头像非常不清晰、很低清」
+        # 的直接原因：先把 100×100 的缩略图传进 Emby，之后 `has_image` 一挡就再也换不掉。
+        # javdb 无头像或 Gfriends 查不到时按老口径回落，不丢任何一位；Gfriends 报错**不算失败**
+        # （javdb 有图就照用；两个都没有才如实跳过），失败明细照旧只收真正的取图/上传错误。
+        avatar_url = ""
+        source = ""
+        gfriends_url, gfriends_error, gfriends_reason = _gfriends_avatar(options, row.get("jp"))
+        if gfriends_url:
+            avatar_url, source = gfriends_url, "gfriends"
+        javdb_url = str(row.get("avatar") or "")
+        if not avatar_url and javdb_url:
+            avatar_url, source = javdb_url, "javdb"
+        if gfriends_error:
+            entry["gfriends"] = f"Gfriends 查询失败（{gfriends_error}）" + \
+                                ("，已回落 javdb 头像" if avatar_url else "")
         if not avatar_url:
             entry["reason"] = "no_avatar"        # 两源都没有：如实跳过（javdb 空 + Gfriends 无）
             entry["gfriends"] = gfriends_reason
