@@ -3652,8 +3652,10 @@ def item_number(dto: Any) -> Dict[str, Any]:
             paths.append(str(source["Path"]))
     out: Dict[str, Any] = {"number": "", "version_tags": {}, "path": "", "matched": False}
     for path in paths:
-        base = str(path).replace("\\", "/").rsplit("/", 1)[-1]
-        parsed = emby.parse_av_number(base)
+        parts = str(path).replace("\\", "/").rsplit("/", 2)
+        base = parts[-1]
+        parent = parts[-2] if len(parts) >= 2 else ""       # P1-6：分集兜底看直接父目录
+        parsed = emby.parse_av_number(base, parent=parent)
         if parsed.matched and parsed.display_number:
             return {
                 "number": str(parsed.display_number),

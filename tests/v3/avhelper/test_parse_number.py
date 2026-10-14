@@ -58,6 +58,28 @@ class TestParseExtras:
         assert (display, key) == ("MIDV-946", "MIDV946")
         assert int(tags.get("part_no") or 0) == 2
 
+    def test_part_from_parent_dir(self, emby_mod):
+        """P1-6：文件名没写分集时看**直接父目录**（`CD2/MIDV-946.mkv` → 第 2 碟）。"""
+        parsed = emby_mod.parse_av_number("MIDV-946.mkv", parent="CD2")
+        assert parsed.matched and int((parsed.version_tags or {}).get("part_no") or 0) == 2
+        assert int(emby_mod.parse_av_number("MIDV-946.mkv", parent="part1")
+                   .version_tags.get("part_no") or 0) == 1
+        # 文件名里的标记优先于目录
+        assert int(emby_mod.parse_av_number("MIDV-946-CD2.mkv", parent="CD1")
+                   .version_tags.get("part_no") or 0) == 2
+        # 整段相等才认：`CD备份` / `CD2 合集` 不是分集目录
+        assert not emby_mod.parse_av_number("MIDV-946.mkv", parent="CD备份").version_tags
+        assert not emby_mod.parse_av_number("MIDV-946.mkv", parent="CD2 合集").version_tags
+        assert not emby_mod.parse_av_number("MIDV-946.mkv", parent="CD0").version_tags
+
+    def test_item_number_reads_parent_dir(self, emby_mod):
+        """`item_number()`（写侧派生角标的入口）也要把父目录带上。"""
+        from conftest import _load
+        scraper = _load("scraper")
+        rows = scraper.item_number({"Path": "/Media/9kg/avi/CD3/MIDV-946.mkv"})
+        assert rows["matched"] and rows["number"] == "MIDV-946"
+        assert int(rows["version_tags"].get("part_no") or 0) == 3
+
     def test_lowercase(self, emby_mod):
         assert _p(emby_mod, "ipzz-912")[:2] == ("IPZZ-912", "IPZZ912")
 

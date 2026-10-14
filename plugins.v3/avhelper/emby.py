@@ -348,7 +348,22 @@ def _has_tags(tags: Dict[str, Any]) -> bool:
     return any(bool(value) for value in (tags or {}).values())
 
 
-def parse_av_number(raw_text: Any) -> ParsedNumber:
+def _part_from_parent(parent: Any) -> str:
+    """父目录里的分集号：整段必须是 `CDn` / `PARTn` / `DISCn`（去括号后）才算，回字符串。
+
+    整段相等是硬要求：`CD备份`、`CD2 合集` 这类目录名不许被当成"第 2 碟"。
+    """
+    segment = str(parent or "").strip().strip("[]【】()（）").strip()
+    if not segment:
+        return ""
+    whole = re.fullmatch(r"(?:CD|PART|DISC)\s*(\d{1,2})", segment, re.I)
+    if not whole:
+        return ""
+    value = int(whole.group(1))
+    return str(value) if value >= 1 else ""
+
+
+def parse_av_number(raw_text: Any, *, parent: Any = "") -> ParsedNumber:
     """从文件名 / 路径 / 标题 / 台账番号里解析出规范番号与版本角标（契约 §3.1 + v4.1 §5.1）。
 
     三步走（每一步都为了消化真实世界里的一种写法）：
@@ -361,6 +376,10 @@ def parse_av_number(raw_text: Any) -> ParsedNumber:
     3. **生成两个键**：`display_number`（前缀 + `-` + 数字段，不足 3 位补零、超过保持原样）与
        `norm_key`（前缀 + 去前导零的整数）。
 
+    `parent`（0.8.0 / P1-6）是**直接父目录名**：文件名里没有分集标记时看它（`.../CD2/MIDV-946.mkv`
+    → `part_no=2`）。下载工具常把多碟归进 `CD1/`、`CD2/`，文件本身不带标记 —— 不认这一步，
+    同一部片的两个碟会被当成同一集（`part_no` 恒 0）。**文件名里的标记优先**。
+
     FC2 按其规范形态单独处理（D12）：`FC2-PPV-1234567` / `FC2PPV1234567` 两种写法都归到
     **`FC2PPV{int}`**（保留 `PPV` 段 —— 线上台账与 MetaTube 的 ProviderIds 都是这个口径）。
 
@@ -369,6 +388,7 @@ def parse_av_number(raw_text: Any) -> ParsedNumber:
     """
     raw = "" if raw_text is None else str(raw_text)
     parsed = ParsedNumber(raw=raw)
+    parent_part = _part_from_parent(parent)
     text = raw.strip().replace("\\", "/")
     if not text:
         return parsed
@@ -402,6 +422,8 @@ def parse_av_number(raw_text: Any) -> ParsedNumber:
         parsed.matched = True
         for word in _VERSION_WORD_SCAN.findall(text):
             _apply_word(tags, word)
+        if parent_part and not tags.get("part_no"):
+            _set_tag(tags, "part_no", parent_part)      # 文件名没写分集 → 看直接父目录
         parsed.version_tags = _normalize_tags(tags) if _has_tags(tags) else {}
         return parsed
 
@@ -440,6 +462,8 @@ def parse_av_number(raw_text: Any) -> ParsedNumber:
         _apply_word(tags, word)
     if "中字" in text or _ZH_SUB_ONLY.search(text):
         tags["is_zh_sub"] = True
+    if parent_part and not tags.get("part_no"):
+        _set_tag(tags, "part_no", parent_part)          # 文件名没写分集 → 看直接父目录
     parsed.matched = True
     parsed.version_tags = _normalize_tags(tags) if _has_tags(tags) else {}
     return parsed
