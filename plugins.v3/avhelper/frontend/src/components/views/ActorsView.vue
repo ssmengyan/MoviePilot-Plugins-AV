@@ -33,6 +33,7 @@
  * | 作品史接口 `apiGet('/actor', {name, page, limit:30})`（服务端分页；后端 `ACTOR_PAGE=30`、单页硬上限 50） | `api.get('plugin/actor', { params: { name, page, limit: FILM_PAGE } })`（契约 `GET /actor?name=&page=&limit=`，回 `page/limit/total/hasMore`） |
  * | ——（老实现**没有**，2026-10-13 加）「加载全部」 | `loadAllFilms()`：50/页（站点单页上限）、最多连拉 20 页 = 1000 部（对齐 javdb-cli `--all` 的口径）；每拉完一页就写回缓存、列表**当场**变长；在飞时同一颗按钮变「⏸ 停止」。翻页口径与偏移实测见 `ALL_LIMIT` / `ALL_MAX_PAGES` 的注释 |
  * | ——（老实现**没有**，2026-10-13 加）「回到顶部」 | 作品史里挂 `common/BackToTop.vue`：往下滑过 260px 才浮出（不默认显示），点一下平滑回顶；榜单栏挂同一颗 |
+ * | ——（老实现**没有**，2026-10-15 加）**收藏演员列表滚动翻页** | 只渲染**前 60 位**，滚到底自动追加下一批（`composables/usePagedList.ts`：纯前端分段渲染，数据仍是 `store.favs` 全量）。与已入库列表同一套接入方式；作品史那份**服务端**分页（`loadMoreFilms` / `loadAllFilms`）一字未动 |
  * | 演员榜接口 `apiGet('/actors')` → `r.data.actors` | `api.get('plugin/actors')`，同样认 `{success, actors}` 与 `{success,data:{actors}}` 两种信封 |
  * | 页内缓存 `CACHE['page:actor:'+name]` / `CACHE['actors']`（跨栏目切换仍在，来回看演员不重抓） | 同名的模块级缓存（`Map` + `reactive`），组件卸载/重挂不掉 |
  *
@@ -71,6 +72,7 @@ import Thumb from '../common/Thumb.vue'
 import { errorText, hostToast, type PluginApi } from '../../composables/usePluginApi'
 import { cssUrl } from '../../composables/cssUrl'
 import { PREFETCH_N, createDetailPrefetcher, warmImage } from '../../composables/prefetchDetail'
+import { usePagedList } from '../../composables/usePagedList'
 import type { PluginStore } from '../../composables/usePluginStore'
 import type { FavActor } from '../../composables/storeTypes'
 
@@ -227,6 +229,41 @@ const favs = computed<FavActor[]>(() =>
 
 /** 空数组也不画工具条（老实现 `.length ? 列表 : 空态`，两者互斥）。 */
 const hasFavs = computed(() => favs.value.length > 0)
+
+/**
+ * 每批渲染多少位（用户口径 **60**，与 `usePagedList` 的默认值同数；这里显式写出来，
+ * 以后这一栏想调批次只改这一处，别去动通用件的默认值 —— 与已入库列表同一个写法）。
+ */
+const FAVS_PAGE_SIZE = 60
+
+/**
+ * 收藏演员列表**分段渲染**（2026-10-15 加）：源数组仍是 `favs`（`store.favs` 原样全量），
+ * 这一层只决定"画多少" —— 首屏 60 位，滚到底自动追加下一批（见 `usePagedList.ts`）。
+ *
+ * 三条边界（与已入库列表同一套）：
+ * 1. **不给后端加 `page`/`limit`**：收藏表本来就随 `/bootstrap` 一次取回，服务端分页留给"到几千条"那一版；
+ * 2. **不改筛选/排序/搜索/计数/预热语义**：`favs`（工具条那句「共 n 位」、`findFav`、头像预热都用它）
+ *    一字未动，这里只拿它的前缀；`ActorRow` 的 key 仍是 `item.name`，卡片字段与样式也没动；
+ * 3. **收藏表换身份 = 源数组换身份** → `usePagedList` 自动回到第一批（`shown` 重置为 60），
+ *    不会出现"刷新回来一口气全画"。
+ *
+ * `hasMore` 在这里必须换名（本视图的作品史已有一个服务端分页的 `hasMore`，
+ * 同名会把作品史的「加载更多 / 年份 + 号」一起改掉语义）。
+ */
+const {
+  rows: pagedRows,
+  shown: shownRows,
+  total: pagedTotal,
+  hasMore: hasMoreRows,
+  sentinel,
+} = usePagedList(favs, { pageSize: FAVS_PAGE_SIZE })
+
+/** 末尾哨兵那行文案：还有下一批就报进度，到底了就说加载完了（单位跟工具条那句「位」一致）。 */
+const pagedHint = computed(() => (
+  hasMoreRows.value
+    ? `已显示 ${shownRows.value} / ${pagedTotal.value} 位 · 继续下滑自动加载`
+    : `已全部加载（${pagedTotal.value} 位）`
+))
 
 /** 老 `findFav(name)`：`S.favs.filter(f => f.name === name)[0] || null`。 */
 function findFav(name: string): FavActor | null {
@@ -1111,9 +1148,13 @@ watch(
           <div class="avh-actors__spacer" />
           <v-btn variant="outlined" size="small" @click="openPicker">➕ 添加演员</v-btn>
         </div>
+        <!--
+          列表源是 `pagedRows`（`usePagedList` 的已渲染段，首屏 60 位），**不是**全量的 `favs`；
+          工具条那句「共 n 位」仍按全量算（分段渲染不改计数口径）。
+        -->
         <div class="avh-actors">
           <ActorRow
-            v-for="item in favs"
+            v-for="item in pagedRows"
             :key="item.name"
             favorited
             :name="String(item.name || '')"
@@ -1123,6 +1164,15 @@ watch(
             :alias="aliasOf(String(item.name || ''))"
             @select="openActor"
           />
+        </div>
+
+        <!--
+          末尾哨兵（`usePagedList` 的 `sentinel`，2026-10-15 加）：
+          滚到底自动追加下一批就靠它往上找**真正在滚的那一层**（判定照抄 `common/BackToTop.vue`），
+          所以它**必须待在滚动层内部**，不能挪到视图外面去。顺带兼作进度提示。
+        -->
+        <div ref="sentinel" class="avh-actors__more">
+          <span class="avh-hint">{{ pagedHint }}</span>
         </div>
       </template>
 
@@ -1251,6 +1301,12 @@ watch(
 
 .avh-actors--pick {
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+}
+
+/* 末尾哨兵（`usePagedList` 的 `sentinel`）：只画一行进度提示；滚动到底自动追加靠它定位滚动层 */
+.avh-actors__more {
+  padding: 14px 4px 2px;
+  text-align: center;
 }
 
 /* 老实现的内联 `margin-bottom:12px` */

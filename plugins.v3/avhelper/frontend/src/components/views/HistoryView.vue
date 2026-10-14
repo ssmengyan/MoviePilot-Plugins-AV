@@ -16,6 +16,13 @@
  * 2. 颜色全走 `rgb(var(--v-theme-…))`，不写死深色值（老宿主主题浅色时也能看）。
  * 3. 破坏性操作先过宿主确认弹窗（`moviepilot:confirm`，拿不到时 `useHostConfirm`
  *    自动降级 `window.confirm`），与订阅页「取消」、设置台「清空通知」同一道闸。
+ *
+ * 列表**翻页**（2026-10-15 加，与「已入库的番号」栏同一套）：数据仍然一次取回
+ * （`GET /downloads` 不动），但**只渲染前 60 条**，滚到底自动追加下一批
+ * （`composables/usePagedList.ts`，纯前端分段渲染；末尾哨兵那行同时兼作进度提示）。
+ * 先不上虚拟滚动 / 服务端分页的理由见 `usePagedList.ts` 的文件头。**筛选（搜索 / 只看不在库）、
+ * 计数、行 key、移除记录等语义不受影响**：这一层只做"前缀切片"，源头数组仍是下面那份
+ * **全量过滤结果** `rows`。
  */
 import { computed, onMounted, ref } from 'vue'
 // 台账这张表只在**本页**用，所以类型与纯函数收在自己的 composable 里
@@ -25,6 +32,7 @@ import ErrorState from '../common/ErrorState.vue'
 import Thumb from '../common/Thumb.vue'
 import { errorText, hostToast, unwrap, type PluginApi } from '../../composables/usePluginApi'
 import { useHostConfirm } from '../../composables/useHostDialogs'
+import { usePagedList } from '../../composables/usePagedList'
 import {
   completedText,
   displayNumber,
@@ -88,6 +96,38 @@ const rows = computed<DownloadRecord[]>(() =>
 
 /** 是否有过滤条件（搜索词或开关）——决定空态说"还没记录"还是"没匹配到"。 */
 const filtered = computed(() => !!String(query.value || '').trim() || onlyMissing.value)
+
+/**
+ * 每批渲染多少条（用户口径 **60**，与 `usePagedList` 的默认值同数；这里显式写出来，
+ * 以后这一页想调批次只改这一处，别去动通用件的默认值 —— 与已入库列表同一个写法）。
+ */
+const HISTORY_PAGE_SIZE = 60
+
+/**
+ * 台账表格**分段渲染**（2026-10-15 加）：源数组仍是上面那份**全量过滤结果**（`rows`），
+ * 这一层只决定"画多少" —— 首屏 60 行，滚到底自动追加下一批（见 `usePagedList.ts`）。
+ *
+ * 三条边界（与已入库列表同一套）：
+ * 1. **不给后端加 `page`/`limit`**：台账本来就一次取回，服务端分页留给"到几千条"那一版；
+ * 2. **不改筛选/计数/行 key 语义**：`rows`（空态判定、`v-for` 的 `rowKey`、`isDeleting` 都还用它）
+ *    一字未动，这里只拿它的前缀；「移除记录」删的仍是台账里的那一行；
+ * 3. **换搜索词/开关 = 源数组换身份** → `usePagedList` 自动回到第一批（`shown` 重置为 60），
+ *    不会出现"筛出 300 行一口气全画"。
+ */
+const {
+  rows: pagedRows,
+  shown: shownRows,
+  total: pagedTotal,
+  hasMore,
+  sentinel,
+} = usePagedList(rows, { pageSize: HISTORY_PAGE_SIZE })
+
+/** 末尾哨兵那行文案：还有下一批就报进度，到底了就说加载完了（单位跟表格的「条」一致）。 */
+const pagedHint = computed(() => (
+  hasMore.value
+    ? `已显示 ${shownRows.value} / ${pagedTotal.value} 条 · 继续下滑自动加载`
+    : `已全部加载（${pagedTotal.value} 条）`
+))
 
 /** 显示用计数：后端给了就用后端的，否则本地数一遍（口径与设计文档 §4 一致）。 */
 const counts = computed<Required<DownloadCounts>>(() => {
@@ -323,7 +363,7 @@ onMounted(() => {
       @retry="load(false)"
     />
 
-    <div v-else-if="rows.length" class="avh-history__tablewrap">
+    <div v-else-if="pagedRows.length" class="avh-history__tablewrap">
       <table class="avh-history__table">
         <colgroup>
           <col class="avh-history__col-pic" />
@@ -348,7 +388,11 @@ onMounted(() => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(item, index) in rows" :key="rowKey(item, index)">
+          <!--
+            行源是 `pagedRows`（`usePagedList` 的已渲染段，首屏 60 行），**不是**全量的 `rows`；
+            `rowKey` / `isDeleting` 原样用（分段渲染不动行的身份与移除记录的口径）。
+          -->
+          <tr v-for="(item, index) in pagedRows" :key="rowKey(item, index)">
             <!-- 封面：48×64 竖版小图（`Thumb` 自带"直连失败回落插件代理、再失败显示占位"） -->
             <td class="avh-history__pic">
               <Thumb
@@ -388,6 +432,16 @@ onMounted(() => {
           </tr>
         </tbody>
       </table>
+
+      <!--
+        末尾哨兵（`usePagedList` 的 `sentinel`，2026-10-15 加）：
+        滚到底自动追加下一批就靠它往上找**真正在滚的那一层**（判定照抄 `common/BackToTop.vue`），
+        所以它**必须待在滚动层内部**（这里就待在表格后面），不能挪到视图外面去。顺带兼作进度提示。
+        放表格容器里面而不是外面：外面夹在 `v-else-if` 与空态的 `v-else-if` 之间会把那条链断开。
+      -->
+      <div v-if="pagedRows.length" ref="sentinel" class="avh-history__more">
+        <span class="avh-history__hint">{{ pagedHint }}</span>
+      </div>
     </div>
 
     <!-- 空态：有过滤条件时说"没匹配到"，否则说"还没有记录" -->
@@ -574,5 +628,11 @@ onMounted(() => {
   width: 48px;
   height: 64px;
   border-radius: 6px;
+}
+
+/* 末尾哨兵（`usePagedList` 的 `sentinel`）：只画一行进度提示；滚动到底自动追加靠它定位滚动层 */
+.avh-history__more {
+  padding: 14px 4px 2px;
+  text-align: center;
 }
 </style>
