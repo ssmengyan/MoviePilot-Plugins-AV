@@ -717,6 +717,9 @@ class AVHelper(_PluginBase):
              "auth": "bear", "summary": "翻译模型自检",
              "description": "POST {model?} → translator.selfcheck()：「模型自检」按钮；"
                             "另有 POST {sources:true} → scraper.sources_selfcheck()（真探针，3~5 秒）"},
+            {"path": "/scrape/avatars", "endpoint": self.api_scrape_avatars, "methods": ["POST"],
+             "auth": "bear", "summary": "同步演员头像",
+             "description": "POST 支持 dry_run / limit / names → scraper.sync_actor_avatars()"},
             {"path": "/namemap/actors", "endpoint": self.api_namemap_actors, "methods": ["GET"],
              "auth": "bear", "summary": "演员映射表",
              "description": "?q=&limit= 查 name_map 的 actor 行（三语 + 别名 + 来源）"},
@@ -2931,6 +2934,33 @@ class AVHelper(_PluginBase):
                 "model": str(data.get("model") or model),
                 "latency_ms": to_int(data.get("latency_ms")),
                 "error": str(data.get("error") or "")}
+
+    async def api_scrape_avatars(self, request: Request) -> Dict[str, Any]:
+        """`/scrape/avatars`：手动把演员头像同步进 Emby 的 Person 实体（P0-②）。
+
+        三个入参全可选：`dry_run`（默认 true：只 `find_person` + 出动作清单，零写请求）、
+        `limit`（只处理前 N 位）、`names`（只处理这几个规范名，单片用）。
+        `emby_client` 为 None **不在这里特判** —— 干活的 `sync_actor_avatars()` 自己会回
+        `errors:["未配置 Emby…"]`；返回体原样透传
+        （`{ok, dry_run, actors, planned, applied, errors, missing_person, gender_unknown}`）。
+        """
+        payload = await self._json_body(request)
+        mod = self.scrape_module()
+        if mod is None or not callable(getattr(mod, "sync_actor_avatars", None)):
+            return self.scrape_not_ready({"ok": False, "planned": [], "applied": [], "errors": []})
+        names_raw = payload.get("names")
+        names = [str(item).strip() for item in names_raw
+                 if str(item).strip()] if isinstance(names_raw, list) else None
+        try:
+            result = await asyncio.to_thread(
+                mod.sync_actor_avatars, self.store, self.emby_client(),
+                limit=to_int(payload.get("limit")), dry_run=pick_bool(payload.get("dry_run"), True),
+                namemap_mod=self.namemap_module(), opts=self.scrape_opts(), names=names)
+        except Exception as error:
+            logger.error(f"AVHelper 同步演员头像失败：{error}")
+            return {"success": False, "ok": False, "planned": [], "applied": [],
+                    "errors": [str(error)]}
+        return dict(result) if isinstance(result, dict) else {}
 
     def _namemap_rows(self, entity_type: str, q: str, limit: int) -> List[Dict[str, Any]]:
         """查 `name_map`（`?q=` 走 `namemap_list(like=…)` 的模糊匹配，一 SQL 搞定）。
