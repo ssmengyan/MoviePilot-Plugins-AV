@@ -169,3 +169,13 @@ def paths_mod():
 def tasks_mod():
     """tasks 模块（下载队列的进度合并与台账收尾）。"""
     return _load("tasks")
+
+
+@pytest.fixture(scope="session")
+def scraper_mod():
+    """scraper 模块（取数链：番号归一 → 站点解析 → 聚合）。
+
+    单独给一个名字，是为了让**不叫 `test_scraper.py` 的**用例（如 `test_fixtures.py` 的真实响应
+    夹具）也能拿到模块 —— `test_scraper.py` 里那个同名 `scraper` 夹具是它自己的，别依赖它。
+    """
+    return _load("scraper")
