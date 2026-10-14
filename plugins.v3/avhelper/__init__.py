@@ -310,7 +310,7 @@ class AVHelper(_PluginBase):
     plugin_icon = ("https://raw.githubusercontent.com/ssmengyan/"
                    "MoviePilot-Plugins-AV/main/icons/avhelper.png")
     # 版本：0.7.0 = 自建刮削层（番号解析/中文简介/翻译/封面裁切/Emby 安全写入与回滚）
-    plugin_version = "0.7.0"
+    plugin_version = "0.7.1"
     plugin_label = "发现"
     plugin_author = "ssmengyan"
     plugin_config_prefix = "avhelper_"
