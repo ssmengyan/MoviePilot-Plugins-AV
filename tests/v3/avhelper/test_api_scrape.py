@@ -842,20 +842,70 @@ class TestScrapeStatus:
 class TestCacheCleanPrunesSnapshots:
     """P0-3 的淘汰必须真的挂在清理任务上（快照会按"刮过的片 × 源"一直涨）。"""
 
-    def test_old_snapshots_are_pruned(self, plugin, store):
+    def test_old_snapshots_are_pruned(self, plugin, store, sandbox_paths):
         store.snapshot_put("OLD", "javtxt", {"ok": True}, fetched_at="2020-01-01 00:00:00")
         store.snapshot_put("NEW", "javtxt", {"ok": True})
         plugin.job_cacheclean()
         assert store.snapshot_get("OLD", "javtxt") is None
         assert store.snapshot_get("NEW", "javtxt") is not None
 
-    def test_prune_failure_does_not_break_cleanup(self, plugin, store, monkeypatch):
+    def test_prune_failure_does_not_break_cleanup(self, plugin, store, sandbox_paths,
+                                                  monkeypatch):
         """清理任务不许因为快照淘汰失败而整条挂掉（它还要删过期文件与孤儿文件）。"""
         def boom(*args, **kwargs):
             raise RuntimeError("库锁住了")
 
         monkeypatch.setattr(store, "snapshot_prune", boom)
         plugin.job_cacheclean()                     # 不抛异常就是通过
+
+    def test_migration_backup_survives_the_orphan_sweep(self, plugin, store, sandbox_paths):
+        """★ P1-8：迁移前备份（`*.pre-migrate-*.bak`）**不许被孤儿扫描当缓存删掉**。
+
+        备份就落在 meta 目录里、也不在 `cache_idx` 里 —— 不特判就会在用户最需要它的那个
+        早晨（刚出过迁移问题）被每晚 4 点的清理删掉。
+        """
+        backup = sandbox_paths / "meta" / "avhelper.db.pre-migrate-v0-20261015-0400.bak"
+        backup.write_bytes(b"SQLite format 3\x00 fake backup")
+        junk = sandbox_paths / "meta" / "old-cache.json"
+        junk.write_text("{}", encoding="utf-8")
+        plugin.job_cacheclean()
+        assert backup.exists(), "迁移备份被当孤儿删掉了"
+        assert not junk.exists(), "普通缓存反而没被清掉（说明扫描根本没跑）"
+
+
+class TestCacheSizeAccounting:
+    """P1-8：占用按 `(dev, ino)` 去重（硬链接只算一次）。"""
+
+    def test_hardlinks_counted_once(self, api_mod, tmp_path):
+        import os
+        payload = tmp_path / "cover.jpg"
+        payload.write_bytes(b"x" * 1000)
+        link = tmp_path / "cover-link.jpg"
+        try:
+            os.link(payload, link)
+        except (OSError, NotImplementedError, AttributeError):
+            pytest.skip("这个文件系统不支持硬链接")
+        files = [payload, link]
+        assert sum(p.stat().st_size for p in files) == 2000          # 朴素求和会算两遍
+        assert api_mod._unique_size(files) == 1000                   # 按 inode 去重
+
+    def test_distinct_files_still_add_up(self, api_mod, tmp_path):
+        first = tmp_path / "a.bin"
+        second = tmp_path / "b.bin"
+        first.write_bytes(b"a" * 300)
+        second.write_bytes(b"b" * 700)
+        assert api_mod._unique_size([first, second]) == 1000
+
+    def test_missing_file_is_skipped(self, api_mod, tmp_path):
+        """扫描期间文件没了（别人正在清缓存）不许把整次统计打挂。"""
+        ghost = tmp_path / "gone.bin"
+        assert api_mod._unique_size([ghost]) == 0
+
+    def test_migration_backup_is_kept(self, api_mod, tmp_path):
+        """`is_keep_file()` 必须认迁移备份（P1-8 唯一"必须同步改两处"的点）。"""
+        assert api_mod.is_keep_file(tmp_path / "avhelper.db") is True
+        assert api_mod.is_keep_file(tmp_path / "avhelper.db.pre-migrate-v0-20261015-0400.bak") is True
+        assert api_mod.is_keep_file(tmp_path / "old-cache.json") is False
 
 
 class TestScrapeLog:

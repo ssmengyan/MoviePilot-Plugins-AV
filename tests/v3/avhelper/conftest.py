@@ -146,6 +146,25 @@ def store_mod():
     return _load("store")
 
 
+@pytest.fixture
+def sandbox_paths(paths_mod, tmp_path):
+    """把数据根钉到临时目录，用完还原。
+
+    ⚠️ **凡是会调 `job_cacheclean()` 的用例必须用它**：那个方法会按缓存目录真的删文件，
+    而测试里没人 `configure()` 过数据根 → `paths.data_root()` 落到历史坐标 `/avhelper/cache`
+    （Windows 上会解析成盘符根下的 `avhelper\\cache`）。本机恰好不存在所以"看起来没事"，
+    换一台机器上真有这个目录就会删掉用户的东西。
+    """
+    before = (paths_mod._DATA_ROOT, paths_mod._JAVDB_BIN)
+    root = tmp_path / "root"
+    (root / "meta").mkdir(parents=True, exist_ok=True)
+    paths_mod.configure(data_root=str(root))
+    try:
+        yield root
+    finally:
+        paths_mod._DATA_ROOT, paths_mod._JAVDB_BIN = before
+
+
 @pytest.fixture(scope="session")
 def scoring_mod():
     """scoring 模块。"""

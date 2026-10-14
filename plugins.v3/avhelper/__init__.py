@@ -328,12 +328,39 @@ def size_text(size: Any) -> str:
 
 
 def is_keep_file(path: Path) -> bool:
-    """缓存清理必须保留的文件：插件自管的 SQLite 库与它的事务副产物。
+    """缓存清理必须保留的文件：插件自管的 SQLite 库、它的事务副产物、以及**迁移前备份**。
 
     数据库就落在元数据目录（`<数据根>/meta/avhelper.db`），与 JSON 缓存同目录；
     而孤儿扫描按「不在 cache_idx 里就删」判定，不排除它会把订阅/收藏/任务一起删掉。
+
+    P1-8：`*.pre-migrate-*.bak`（`store._backup_before_migrate()` 写的在线备份）也必须留 ——
+    它同样"不在 cache_idx 里"，不排除就会**被每晚 4 点的清理当孤儿删掉**，
+    而且是在用户最需要它的时候（刚出过迁移问题）。这是 P1-8 唯一"必须同时改两个文件"的点。
     """
-    return path.name.startswith("avhelper.db")
+    if path.name.startswith("avhelper.db"):
+        return True
+    return ".pre-migrate-" in path.name and path.name.endswith(".bak")
+
+
+def _unique_size(files: Iterable[Path]) -> int:
+    """按 `(st_dev, st_ino)` 去重的总占用（P1-8）。
+
+    硬链接 / 重复索引指向同一个 inode 时，`sum(st_size)` 会把它算两遍 —— 上限判断因此偏大、
+    该淘汰的没淘汰。amane `library/delete.py` 同一条教训：按 `(dev, ino)` 去重。
+    """
+    seen: Set[Tuple[int, int]] = set()
+    total = 0
+    for path in files:
+        try:
+            info = path.stat()
+        except OSError:
+            continue
+        key = (int(getattr(info, "st_dev", 0)), int(getattr(info, "st_ino", 0)))
+        if key != (0, 0) and key in seen:
+            continue
+        seen.add(key)
+        total += int(info.st_size)
+    return total
 
 
 def _rate_value(value: Any, default: Any = None) -> str:
@@ -2003,13 +2030,7 @@ class AVHelper(_PluginBase):
             return int(cached)
         total = 0
         try:
-            for path in paths.data_root().rglob("*"):
-                if not path.is_file():
-                    continue
-                try:
-                    total += path.stat().st_size
-                except OSError:
-                    continue
+            total = _unique_size([p for p in paths.data_root().rglob("*") if p.is_file()])
         except OSError as error:      # 目录不存在/权限异常都不要把 /bootstrap 打挂
             logger.error(f"AVHelper 统计缓存体积失败：{error}")
         self._cache_size_cache = (now, total)
@@ -3431,13 +3452,17 @@ class AVHelper(_PluginBase):
         #    上限来自配置 `cache_max_gb`（默认 1G），不再写死 60G —— 见 paths.cache_limit_gb()
         limit = int(self._cache_max_gb * 1024 ** 3)
         files = [p for p in paths.data_root().rglob("*") if p.is_file() and not is_keep_file(p)]
-        total = sum(p.stat().st_size for p in files)
+        total = _unique_size(files)                 # P1-8：按 (dev, ino) 去重，硬链接只算一次
         if total > limit:
+            counted: Set[Tuple[int, int]] = set()
             for path in sorted(files, key=lambda p: p.stat().st_mtime):
                 if total <= limit:
                     break
                 try:
-                    size = path.stat().st_size
+                    info = path.stat()
+                    inode = (int(getattr(info, "st_dev", 0)), int(getattr(info, "st_ino", 0)))
+                    size = 0 if (inode in counted and inode != (0, 0)) else int(info.st_size)
+                    counted.add(inode)
                     path.unlink()
                     total -= size
                     removed_bytes += size

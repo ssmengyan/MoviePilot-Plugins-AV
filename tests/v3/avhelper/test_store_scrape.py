@@ -166,6 +166,81 @@ class TestConnectionUpgrade:
         assert store.kv_get("k") == "v"                      # 数据一条不少
 
 
+class TestMigrationBackup:
+    """P1-8：迁移三件套 —— **在线备份**、`schema_meta` 版本表、幂等。
+
+    老库（0.7.x 及更早）没有 `schema_meta`，读出来版本是 0；`init()` 必须在动手之前
+    用 SQLite 的 online backup API 备一份 —— 直接 `cp` 会丢掉 WAL 里还没 checkpoint 的数据。
+    """
+
+    def test_legacy_db_is_backed_up_and_stamped(self, store_mod, tmp_path):
+        db = tmp_path / "old.db"
+        first = store_mod.Store(db_path=db)
+        first.init()
+        first.known_add("IPZZ-961")
+        with sqlite3.connect(db) as conn:            # 伪装成"0.7.x 老库"：没有版本戳
+            conn.execute("DROP TABLE schema_meta")
+        again = store_mod.Store(db_path=db)
+        again.init()
+        backups = sorted(tmp_path.glob("old.db.pre-migrate-v0-*.bak"))
+        assert len(backups) == 1, "老库迁移前必须留一份在线备份"
+        with sqlite3.connect(backups[0]) as conn:    # 备份是**真库**且带着数据
+            assert conn.execute("SELECT COUNT(*) FROM known").fetchone()[0] == 1
+            assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        info = again.schema_info()
+        assert info["version"] == 1 and info["target"] == 1
+        assert info["migrated_at"] and info["backup"].endswith(".bak")
+        assert "补列" in info["note"]
+
+    def test_fresh_db_needs_no_backup(self, store_mod, tmp_path):
+        """全新空库没有可丢的数据 → 不写 .bak（否则每次新装都留一个空壳备份）。"""
+        store = store_mod.Store(db_path=tmp_path / "new.db")
+        store.init()
+        assert list(tmp_path.glob("*.bak")) == []
+        assert store.schema_version() == 1
+
+    def test_second_init_does_not_back_up_again(self, store_mod, tmp_path):
+        """已是最新版的库反复 init() 不再备份（插件每次加载都跑 init）。"""
+        db = tmp_path / "x.db"
+        store_mod.Store(db_path=db).init()
+        for _ in range(3):
+            store_mod.Store(db_path=db).init()
+        assert list(tmp_path.glob("*.bak")) == []
+
+    def test_backups_are_pruned_to_three(self, store_mod, tmp_path):
+        """备份被清理任务保护着，所以数量得自己管（每份都是一个完整库）。"""
+        store = store_mod.Store(db_path=tmp_path / "x.db")
+        store.init()
+        for index in range(5):                        # 假的 5 份旧备份
+            old = tmp_path / f"x.db.pre-migrate-v0-2026100{index}-0000.bak"
+            old.write_bytes(b"SQLite format 3\x00")
+            os.utime(old, (1000 + index, 1000 + index))
+        assert store._prune_backups(keep=3) == 2
+        assert len(list(tmp_path.glob("*.bak"))) == 3
+        newest = sorted(p.name for p in tmp_path.glob("*.bak"))[-1]
+        assert "20261004" in newest                   # 留的是最新的三份
+
+    def test_backup_failure_does_not_block_migration(self, store_mod, tmp_path, monkeypatch):
+        """备份失败（磁盘满等）只记日志：它是保险，不是迁移的前置条件。"""
+        db = tmp_path / "old.db"
+        store = store_mod.Store(db_path=db)
+        store.init()
+        with sqlite3.connect(db) as conn:
+            conn.execute("DROP TABLE schema_meta")
+        real_connect = store_mod.sqlite3.connect
+
+        def fake_connect(target, *args, **kwargs):
+            if str(target).endswith(".bak"):            # 只让"写备份"这一步失败
+                raise sqlite3.OperationalError("disk full")
+            return real_connect(target, *args, **kwargs)
+
+        monkeypatch.setattr(store_mod.sqlite3, "connect", fake_connect)
+        again = store_mod.Store(db_path=db)
+        again.init()                                  # 不抛异常
+        assert again.schema_version() == 1            # 版本照记
+        assert list(tmp_path.glob("*.bak")) == []     # 备份确实没写成
+
+
 class TestSchemaUpgrade:
     """五张新表 + `downloads` 动态补列（幂等）。"""
 

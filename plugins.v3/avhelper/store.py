@@ -24,6 +24,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import paths
 
+try:                                        # store.py 必须能被**独立加载**（单测就是这么用的）：
+    from app.sdk.logging import logger      # 拿不到宿主 logger 就退回标准库，绝不因此 ImportError
+except Exception:                           # pragma: no cover - 独立加载分支
+    import logging
+
+    logger = logging.getLogger("AVHelper")
+
 
 def _norm_key(text: Any) -> str:
     """番号归一化：借用 `emby.norm_key()`，延迟导入以便本模块在无宿主环境下被单测直接加载。
@@ -73,6 +80,8 @@ CREATE TABLE IF NOT EXISTS cache_idx(
   key TEXT PRIMARY KEY, path TEXT, expires_at TEXT);
 CREATE TABLE IF NOT EXISTS kv(
   key TEXT PRIMARY KEY, val TEXT, expires_at TEXT);
+CREATE TABLE IF NOT EXISTS schema_meta(
+  key TEXT PRIMARY KEY, val TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS downloads(
   key          TEXT PRIMARY KEY,   -- emby.norm_key(番号)：IPZZ-961 / ipzz00961 / IPZZ961 归一到同一个
   number       TEXT DEFAULT '',    -- 展示用番号（javdb 口径 IPZZ-961）
@@ -94,6 +103,15 @@ CREATE TABLE IF NOT EXISTS downloads(
   failed_reason TEXT DEFAULT ''    -- v4：下载失败原因（v4.1 §9.2-1，state='failed' 时才有值）
 );
 CREATE INDEX IF NOT EXISTS idx_downloads_completed ON downloads(completed_at DESC, created_at DESC);
+"""
+
+# `schema_meta`（P1-8）：**这个库走在哪一版**的唯一真值。
+# 与业务表分开一段、且在 `_bootstrap()` 里单独先跑一次 —— 老库连这张表都没有，
+# 而"读版本 → 决定要不要备份"这一步必须发生在任何结构改动之前。
+# 与 `_SCHEMA` 里那份是同一张表（都带 `IF NOT EXISTS`，重复执行无害）。
+_SCHEMA_SCHEMA_META = """
+CREATE TABLE IF NOT EXISTS schema_meta(
+  key TEXT PRIMARY KEY, val TEXT DEFAULT '');
 """
 
 # v4 刮削层五张表：**DDL 照 v4.1 §4.2 原样**（字段名与默认值一个都不许改）。
@@ -388,6 +406,67 @@ def _shift_days(days: int) -> str:
 
 #: 单条快照的体积上限（64KB）：快照是加速器，超了就不写 —— 别把库撑爆
 _SNAPSHOT_LIMIT = 65536
+
+
+def _repair_columns(conn: sqlite3.Connection) -> None:
+    """补列（v1 基线 + **结构自愈**）：`task` / `downloads` / `scrape_log` / `meta`。
+
+    全部"先看列在不在再 ALTER"，幂等；**绝不 DROP 重建** —— 用户的台账、日志、任务不能丢。
+    单独抽成一个函数是为了两处都用它：版本门控里的 v1 迁移，以及"版本表说已迁过、但列真的缺了"
+    （人工 DROP / 半截迁移）时的自愈 —— 后者**只补列、不改版本**。
+    """
+    # 兼容旧库：rule/source 是后加的列，缺失时补上（SQLite 无 IF NOT EXISTS 语法）
+    for name, decl in (("rule", "TEXT"), ("source", "TEXT DEFAULT 'manual'")):
+        try:
+            conn.execute(f"ALTER TABLE task ADD COLUMN {name} {decl}")
+        except sqlite3.OperationalError:
+            pass
+    # pending 是 0.6.0 后加的列（任务卡上的「PT/BT 待确认」/「所有源均未找到」标记）。
+    # updated_at 是 0.8.0（P1-7）加的列 —— 条件写要能看出"这条什么时候动过"。
+    # 两列在老行上读出来都是空串（不是 NULL）：界面按空串显示"—"。
+    task_cols = {r[1] for r in conn.execute("PRAGMA table_info(task)").fetchall()}
+    for name, decl in (("pending", "TEXT DEFAULT ''"), ("updated_at", "TEXT DEFAULT ''")):
+        if name in task_cols:
+            continue
+        try:
+            conn.execute(f"ALTER TABLE task ADD COLUMN {name} {decl}")
+        except sqlite3.OperationalError:
+            pass
+    # downloads：hidden 是 0.3.4 的墓碑列，v4 又加三条（见 `_DL_ADD_COLUMNS`）
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(downloads)").fetchall()}
+    for name, decl in _DL_ADD_COLUMNS:
+        if name in cols:
+            continue
+        try:
+            conn.execute(f"ALTER TABLE downloads ADD COLUMN {name} {decl}")
+        except sqlite3.OperationalError:
+            pass
+    # scrape_log：0.8.0 的 reason / http_status / run_id（日志是排障凭据）
+    log_cols = {r[1] for r in conn.execute("PRAGMA table_info(scrape_log)").fetchall()}
+    for name, decl in _SL_ADD_COLUMNS:
+        if name in log_cols:
+            continue
+        try:
+            conn.execute(f"ALTER TABLE scrape_log ADD COLUMN {name} {decl}")
+        except sqlite3.OperationalError:
+            pass
+    # meta：0.8.0 的 field_sources_json
+    meta_cols = {r[1] for r in conn.execute("PRAGMA table_info(meta)").fetchall()}
+    for name, decl in _META_ADD_COLUMNS:
+        if name in meta_cols:
+            continue
+        try:
+            conn.execute(f"ALTER TABLE meta ADD COLUMN {name} {decl}")
+        except sqlite3.OperationalError:
+            pass
+
+
+#: schema 版本 + **有序**迁移表（P1-8）。加迁移 = 往后面追加一条，**不改已有条目**。
+#: 版本号只增不减；`schema_meta.schema_version` 是"这个库走在哪一版"的唯一真值。
+_SCHEMA_VERSION = 1
+_MIGRATIONS: "List[Tuple[int, str, Callable[[sqlite3.Connection], None]]]" = [
+    (1, "task/downloads/scrape_log/meta 补列", _repair_columns),
+]
 
 #: 任务状态清单（0.8.0 / P1-7）：**只加不改**，改一个旧值就等于让历史行"状态未知"。
 #:
@@ -734,63 +813,130 @@ class Store:
             conn.commit()
 
     def _bootstrap(self, conn: sqlite3.Connection) -> None:
-        """建表 + 老库补列（幂等）。`init()` 与「库文件被换成空库」两条路径都走这里。"""
+        """建表 + 按 `_MIGRATIONS` 顺序补迁移（幂等）。`init()` 与「库文件被换成空库」两条路都走这里。
+
+        0.8.0 / P1-8 的三条纪律（照 amane `sqlite_migrate.py`，不引入 Alembic）：
+        ① **迁移前在线备份**（`conn.backup()`，直接 `cp` 会丢 WAL 里没 checkpoint 的数据）；
+        ② `schema_meta` 记版本 + **有序** `_MIGRATIONS` 列表（不是散落的 try/except ALTER）；
+        ③ 迁移失败不吞：备份失败只记日志（保险不是前置条件），迁移本身失败照旧抛出。
+        """
+        current = self._schema_version(conn)
+        backup = ""
+        if not self._is_fresh_db(conn) and current < _SCHEMA_VERSION:
+            backup = self._backup_before_migrate(conn, current)
         conn.executescript(_SCHEMA)
+        conn.executescript(_SCHEMA_SCHEMA_META)
         conn.executescript(_SCHEMA_SCRAPE_V4)
-        # 兼容旧库：rule/source 是后加的列，缺失时补上（SQLite 无 IF NOT EXISTS 语法）
+        for version, name, apply in _MIGRATIONS:
+            if version <= current:
+                continue
+            apply(conn)
+            self._schema_record(conn, version, name, backup=backup)
+        # 结构自愈（P1-8）：版本表说"已迁过"，但某个列真的缺了（人工 DROP / 半截迁移）时只补列、
+        # **不改版本**。补列是幂等的（4 次 PRAGMA + 命中即跳过），代价可以忽略；
+        # 不这么做的话，一次中断的 init() 之后就得手工修库。
+        _repair_columns(conn)
+        conn.commit()
+
+    def schema_info(self) -> Dict[str, Any]:
+        """schema 版本与最近一次迁移记录（排障用）。
+
+        `version` 是 `schema_meta.schema_version`；老库（没有这张表）读出来是 0。
+        `backup` 是迁移前那份 `.bak` 的路径（没迁过 / 备份失败则为空串）。
+        """
+        conn = self._connect()
         try:
-            conn.execute("ALTER TABLE task ADD COLUMN rule TEXT")
+            rows = dict(conn.execute("SELECT key, val FROM schema_meta").fetchall())
         except sqlite3.OperationalError:
-            pass
+            rows = {}
+        return {
+            "version": _to_int(rows.get("schema_version")),
+            "target": _SCHEMA_VERSION,
+            "migrated_at": str(rows.get("schema_migrated_at") or ""),
+            "note": str(rows.get("schema_note") or ""),
+            "backup": str(rows.get("schema_backup") or ""),
+        }
+
+    def schema_version(self) -> int:
+        """当前库的 schema 版本（0 = 0.7.x 及更早的老库）。"""
+        return _to_int(self.schema_info().get("version"))
+
+    # ---------- schema 版本与迁移备份（P1-8） ----------
+
+    def _schema_version(self, conn: sqlite3.Connection) -> int:
+        """这个库走在哪一版：没有 `schema_meta` 表（≤0.7.x）就是 0。"""
         try:
-            conn.execute("ALTER TABLE task ADD COLUMN source TEXT DEFAULT 'manual'")
+            rows = conn.execute(
+                "SELECT val FROM schema_meta WHERE key='schema_version'").fetchall()
         except sqlite3.OperationalError:
-            pass
-        # 兼容旧库：pending 是 0.6.0 后加的列（任务卡上的
-        # 「PT/BT 待确认」/「所有源均未找到」标记，口径见 tasks.rule_verdict）。
-        # 老任务读出来是空串 = 普通待确认，界面不画标记。
-        task_cols = {r[1] for r in conn.execute("PRAGMA table_info(task)").fetchall()}
-        if "pending" not in task_cols:
+            return 0
+        return _to_int(rows[0][0]) if rows else 0
+
+    @staticmethod
+    def _is_fresh_db(conn: sqlite3.Connection) -> bool:
+        """全新空库（一个业务表都没有）→ 没什么可备份的，别为它写一个 .bak 出来。"""
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+            "('meta','media_item','task','downloads','actor_alias','kv')").fetchall()
+        return not rows
+
+    def _schema_record(self, conn: sqlite3.Connection, version: int, name: str = "",
+                       backup: str = "") -> None:
+        """把版本与说明写进 `schema_meta`（`schema_version` 一行就是唯一真值）。"""
+        conn.execute("INSERT OR REPLACE INTO schema_meta(key, val) VALUES('schema_version', ?)",
+                     (str(int(version)),))
+        conn.execute("INSERT OR REPLACE INTO schema_meta(key, val) VALUES('schema_migrated_at', ?)",
+                     (_now(),))
+        if name:
+            conn.execute("INSERT OR REPLACE INTO schema_meta(key, val) VALUES('schema_note', ?)",
+                         (str(name),))
+        if backup:
+            conn.execute("INSERT OR REPLACE INTO schema_meta(key, val) VALUES('schema_backup', ?)",
+                         (str(backup),))
+        conn.commit()
+
+    def _prune_backups(self, keep: int = 3) -> int:
+        """只留最近 `keep` 份迁移备份，返回删掉的份数。
+
+        备份被 `__init__.is_keep_file()` 保护（缓存清理不许碰它），所以数量得自己管 ——
+        否则每升一版都多留一个**完整库**大小的文件，永远不回收。
+        """
+        try:
+            files = sorted(self.db_path.parent.glob(f"{self.db_path.name}.pre-migrate-*.bak"),
+                           key=lambda p: p.stat().st_mtime, reverse=True)
+        except OSError:                                          # pragma: no cover - 防御
+            return 0
+        dropped = 0
+        for stale in files[max(1, int(keep)):]:
             try:
-                conn.execute("ALTER TABLE task ADD COLUMN pending TEXT DEFAULT ''")
-            except sqlite3.OperationalError:
-                pass
-        # 兼容旧库：updated_at 是 0.8.0（P1-7）加的列 —— 条件写要能看出"这条什么时候动过"。
-        # 老行读出来是空串（不是 NULL）：界面按空串显示"—"，不做「1970 年」那种假时间。
-        if "updated_at" not in task_cols:
-            try:
-                conn.execute("ALTER TABLE task ADD COLUMN updated_at TEXT DEFAULT ''")
-            except sqlite3.OperationalError:
-                pass
-        # 兼容旧库：downloads 的后加列（hidden 是 0.3.4 的墓碑列，v4 又加三条）。
-        # 先看列在不在再 ALTER，绝不 DROP 重建——用户的台账不能丢。
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(downloads)").fetchall()}
-        for name, decl in _DL_ADD_COLUMNS:
-            if name in cols:
+                stale.unlink()
+                dropped += 1
+            except OSError:
                 continue
+        return dropped
+
+    def _backup_before_migrate(self, conn: sqlite3.Connection, version: int) -> str:
+        """迁移前用 SQLite **online backup API** 备份到 `<库名>.pre-migrate-v<旧版本>-<时间>.bak`。
+
+        - 直接 `cp` 会丢掉 WAL 里还没 checkpoint 的数据（amane 同一条教训），所以用 `backup()`；
+        - 备份失败**不阻断**迁移（它是保险不是前置条件），但要如实记 error 日志；
+        - 备份文件名会被写进 `schema_meta.schema_backup`，且 `__init__.is_keep_file()` 认这个
+          后缀 —— **否则每晚 4 点 `job_cacheclean` 的孤儿扫描会把它当缓存删掉**（P1-8 必改两处）。
+        """
+        try:
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            target = Path(f"{self.db_path}.pre-migrate-v{int(version)}-{stamp}.bak")
+            dest = sqlite3.connect(str(target))
             try:
-                conn.execute(f"ALTER TABLE downloads ADD COLUMN {name} {decl}")
-            except sqlite3.OperationalError:
-                pass
-        # 兼容旧库：scrape_log 的后加列（0.8.0 的 reason / http_status / run_id，见 `_SL_ADD_COLUMNS`）。
-        # 同上：先看列在不在再 ALTER，绝不 DROP 重建 —— 日志是排障凭据。
-        log_cols = {r[1] for r in conn.execute("PRAGMA table_info(scrape_log)").fetchall()}
-        for name, decl in _SL_ADD_COLUMNS:
-            if name in log_cols:
-                continue
-            try:
-                conn.execute(f"ALTER TABLE scrape_log ADD COLUMN {name} {decl}")
-            except sqlite3.OperationalError:
-                pass
-        # 兼容旧库：meta 的后加列（0.8.0 的 field_sources_json，见 `_META_ADD_COLUMNS`）。
-        meta_cols = {r[1] for r in conn.execute("PRAGMA table_info(meta)").fetchall()}
-        for name, decl in _META_ADD_COLUMNS:
-            if name in meta_cols:
-                continue
-            try:
-                conn.execute(f"ALTER TABLE meta ADD COLUMN {name} {decl}")
-            except sqlite3.OperationalError:
-                pass
+                conn.backup(dest)
+            finally:
+                dest.close()
+            logger.info(f"AVHelper 迁移前已备份数据库：{target.name}")
+            self._prune_backups()
+            return str(target)
+        except Exception as error:                              # noqa: BLE001 - 备份失败不阻断
+            logger.error(f"AVHelper 迁移前备份失败（继续迁移）：{error}")
+            return ""
 
     def _sync_aliases(self, conn: sqlite3.Connection, only: str = "") -> int:
         """把用户备注（`actor_alias`）同步进 `name_map(source='user_custom')`，返回同步条数。
