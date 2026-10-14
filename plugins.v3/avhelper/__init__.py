@@ -317,9 +317,10 @@ class AVHelper(_PluginBase):
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
     plugin_icon = ("https://raw.githubusercontent.com/ssmengyan/"
                    "MoviePilot-Plugins-AV/main/icons/avhelper.png")
-    # 版本：0.7.2 = 自建刮削层（0.7.0 起：番号解析/中文简介/翻译/封面裁切/Emby 安全写入与回滚）
-    # + 界面减负：手动刮削改搜索式、演员三显示项、列表翻页、刮削台去裁切锚点与回滚入口、设置台去裁切锚点
-    plugin_version = "0.7.2"
+    # 版本：0.7.4 = 下载页三出口（取消下载 / 换资源 / 不要了）+ 读侧统一落地到下载页
+    # （队列行挂影片标题、速度与剩余时间；「下载中」徽标）+ 界面减负（删永远为空的「已完成」节、
+    #  去掉重复的小节标题与工具条说明句）
+    plugin_version = "0.7.4"
     plugin_label = "发现"
     plugin_author = "ssmengyan"
     plugin_config_prefix = "avhelper_"
