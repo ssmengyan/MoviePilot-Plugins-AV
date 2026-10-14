@@ -184,11 +184,19 @@ export interface QueueItem {
   canceled_at?: string
   /** 取消时那一步的说明（例如"已从下载器删除 1 个种子（含已下载的部分文件）"）。 */
   canceled_detail?: string
-  /** 影片标题（读侧统一投影追加；队列行目前可能拿不到）。 */
+  /** 影片标题（读侧统一投影追加；队列行拿不到时不画）。 */
   title?: string
   /** 影片封面/海报（投影口径；`thumb` 仍是小竖图）。 */
   poster?: string
   cover?: string
+  /** 演员数组（投影口径；队列行一般用不到，留给密度更高的用法）。 */
+  actors?: unknown
+  /** 三段状态（投影口径：`{download, library, scrape}`）。 */
+  states?: Record<string, string>
+  /** 下载速度（`12.3 MB` 这类可读串，后端从下载器读数里抄的 `dlspeed`）。 */
+  speed?: string
+  /** 剩余时间（`8m` 这类可读串，后端抄的 `left_time`）。 */
+  eta?: string
 }
 
 /** `GET plugin/bootstrap` 的返回（已实测可用，S6 的单一数据源）。 */

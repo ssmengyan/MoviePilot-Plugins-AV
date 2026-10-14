@@ -1259,6 +1259,21 @@ class TaskEngine:
                 continue
             entry["miss"] = 0
             name = str(getattr(torrent, "downloader", "") or entry.get("downloader") or "")
+            # 速度与剩余时间（2026-10-15 加）：宿主早就给了这两个字段
+            # （`app/schemas/transfer.py` 的 `DownloaderTorrent.dlspeed` / `left_time`，
+            # qB 模块已经排好成 "1.2 MB"/"8m" 这类可读串），插件以前白白丢掉，
+            # 界面上只有一根进度条 —— 用户看不出"还在动没有"。
+            # 拿不到就写空串（界面按"没有就不画"处理），**不编造**。
+            for attr, key in (("dlspeed", "speed"), ("left_time", "eta")):
+                try:
+                    value = str(getattr(torrent, attr, "") or "").strip()
+                except Exception:
+                    value = ""
+                if value:
+                    entry[key] = value
+                else:
+                    entry.pop(key, None)
+            entry["state_detail"] = str(getattr(torrent, "state", "") or "").strip().lower()
             try:
                 raw = float(getattr(torrent, "progress", 0) or 0)
             except (TypeError, ValueError):

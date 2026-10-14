@@ -21,13 +21,16 @@
 
 
 class _Torrent:
-    """宿主 `DownloaderTorrent` 的最小替身。"""
+    """宿主 `DownloaderTorrent` 的最小替身（含 v4.1 起用到的速度/剩余时间）。"""
 
-    def __init__(self, hash, progress=0.0, state="downloading", downloader="qb"):
+    def __init__(self, hash, progress=0.0, state="downloading", downloader="qb",
+                 dlspeed="", left_time=""):
         self.hash = hash
         self.progress = progress
         self.state = state
         self.downloader = downloader
+        self.dlspeed = dlspeed
+        self.left_time = left_time
 
 
 class _Chain:
@@ -389,4 +392,34 @@ class TestHelpers:
         for state in ("down", "done", "failed", "", None):
             assert tasks_mod._is_frozen({"state": state}) is False
         assert tasks_mod._is_frozen(None) is False
+
+
+# ---------- 速度 / 剩余时间（读侧统一的一部分，2026-10-15） ----------
+
+
+class TestSpeedAndEta:
+    """`_merge_queue()` 把下载器给的 `dlspeed` / `left_time` 抄进队列行。
+
+    以前这两个字段被白白丢掉，界面上只有一根进度条，用户看不出"还在动没有"。
+    口径：**拿不到就不写**（界面按"没有就不画"退化回「下载中…」），绝不编造 `0 B/s`。
+    """
+
+    def test_speed_and_eta_are_copied(self, tasks_mod, store_mod, tmp_path):
+        engine, store, chain, _ = make_engine(tasks_mod, store_mod, tmp_path)
+        seed(store, make_entry())
+        chain.torrents = [_Torrent("h" * 40, progress=42.0, dlspeed="12.3 MB", left_time="8m")]
+        fresh, _ = engine._query_torrents(["h" * 40])
+        rows = store.kv_update("queue", lambda cur: engine._merge_queue(cur, fresh, {}))
+        assert rows[0]["speed"] == "12.3 MB"
+        assert rows[0]["eta"] == "8m"
+
+    def test_empty_readings_are_not_written(self, tasks_mod, store_mod, tmp_path):
+        """下载器没给（或给了空串）→ 不写这个键，界面自己退回「下载中…」。"""
+        engine, store, chain, _ = make_engine(tasks_mod, store_mod, tmp_path)
+        seed(store, make_entry(speed="stale", eta="stale"))
+        chain.torrents = [_Torrent("h" * 40, progress=42.0)]
+        fresh, _ = engine._query_torrents(["h" * 40])
+        rows = store.kv_update("queue", lambda cur: engine._merge_queue(cur, fresh, {}))
+        assert "speed" not in rows[0]
+        assert "eta" not in rows[0]
 

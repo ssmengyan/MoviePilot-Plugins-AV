@@ -87,6 +87,9 @@ WARM_KV_KEY = "warmup_at"  # 上次预热完成时间（防抖用）
 # 台账「已下载番号」的内存缓存时长（秒）：`_movie()` **每条电影**都要问一次（榜单一次 60 条），
 # 直查库等于把一次请求放大成几十次 SQLite 读；台账只在下载完成时变，晚 30 秒打徽标没有影响
 DOWNLOAD_KEYS_TTL = 30
+# 「下载中番号」的内存缓存时长（秒，2026-10-15 加）：与上面同一套写法。为什么更短 ——
+# 用户点完「下载」马上切到榜单就是想看到那颗标记，30 秒嫌钝；而 5 秒也足够省掉每条电影的库读。
+DOWNLOADING_KEYS_TTL = 5
 # 刮削线 v4（契约 §3.7 / §4）：读侧统一投影 `film_view` 的进程内缓存时长（秒）。
 # 与 `DOWNLOAD_KEYS_TTL` 同一套写法：`/library` 一次上百行、界面又是 15 秒轮询，
 # 投影要么走 S7 的 `scraper.film_view()`、要么走本模块的**一次** meta/item/台账批量读，
@@ -344,6 +347,8 @@ class AVHelper(_PluginBase):
     _cache_size_cache: Tuple[float, int] = (0.0, 0)   # (取样时间, 字节数)：缓存体积的内存缓存
     # (取样时间, 已下载番号键)：台账「已下载」徽标的 30 秒内存缓存，见 _downloaded_keys()
     _download_keys: Tuple[float, Set[str]] = (0.0, set())
+    # (取样时间, 下载中番号键)：队列「下载中」徽标的 5 秒内存缓存，见 _downloading_keys()
+    _downloading_keys_cache: Tuple[float, Set[str]] = (0.0, set())
     _warm_thread: Optional[threading.Thread] = None   # 启动预热线程（守护线程，见 warm_up）
     _warm_stop: Optional[threading.Event] = None      # 当前这次预热的停机信号（每次新建一份）
     # 刮削线 v4 的 11 项配置**存在 kv 的 `global_rule` 里**（前端设置台 S9 已在用这套 camelCase
@@ -1233,9 +1238,46 @@ class AVHelper(_PluginBase):
         # 「已下载」徽标：走插件内存缓存（30 秒），本方法每条电影都跑一次也不碰库
         if emby.norm_key(number) in self._downloaded_keys():
             movie["downloaded"] = True
+        # 「下载中」徽标（2026-10-15 加）：队列里有这个番号的活跃条目 → 卡片上打一颗标记。
+        # 以前只有"下载完成之后"才有徽标，于是**正在下**的片子在榜单/详情上毫无标记，
+        # 用户很容易对同一个番号再点一次下载（重复下单）。
+        # 走 `_downloading_keys()` 的 5 秒内存缓存：`_movie()` 每条都要问一次，不能查库。
+        if emby.norm_key(number) in self._downloading_keys():
+            movie["downloading"] = True
         return movie
 
     # ---------- 下载台账（下载历史）：徽标缓存 / 补种 / API ----------
+
+    def _downloading_keys(self) -> Set[str]:
+        """队列里**还在下**的番号键集合（5 秒内存缓存）。
+
+        「还在下」= 队列条目的 `state` 不在 `done` / `failed` / `canceled` 里（与前端
+        `store.downloading` 的口径逐字一致，别在这里另立一套）：
+        - `done` 会被 `_flush_done` 立刻摘走并写进台账，那一刻起由「已下载」徽标接手；
+        - `failed` / `canceled` 都不该说成"下载中"（前者种子报错、后者用户自己取消的）。
+
+        TTL 比「已下载」那份（30 秒）短得多：用户点完下载马上切到榜单看就是想要这个标记，
+        5 秒足够省掉每条的库读，又不至于让刚下的片子迟迟不亮。
+        """
+        now = time.time()
+        stamp, keys = self._downloading_keys_cache
+        if stamp and now - stamp < DOWNLOADING_KEYS_TTL:
+            return keys
+        found: Set[str] = set()
+        try:
+            for entry in (self.store.kv_get("queue", []) or []):
+                if not isinstance(entry, dict):
+                    continue
+                if str(entry.get("state") or "") in ("done", "failed", "canceled"):
+                    continue
+                key = emby.norm_key(entry.get("number"))
+                if key:
+                    found.add(key)
+        except Exception as error:
+            logger.error(f"AVHelper 读取下载队列失败（下载中徽标跳过）：{error}")
+            return keys
+        self._downloading_keys_cache = (now, found)
+        return found
 
     def _downloaded_keys(self) -> Set[str]:
         """台账里 `state=='downloaded'` **且是本插件下载的**番号键集合（30 秒内存缓存，契约 §4）。
@@ -2215,12 +2257,21 @@ class AVHelper(_PluginBase):
         return {"success": True, "subs": self.store.sub_list()}
 
     def fill_posters(self, *groups: Any) -> bool:
-        """给任务 / 下载队列行补 `poster`（契约 §3.7：`/tasks` 行额外带它）。
+        """给任务 / 下载队列行补 `poster`，并**顺带把读侧统一投影的影片字段挂上去**。
 
         已入库的番号用 Emby 原图（`/img?emby={id}`），没入库的沿用行里那个 thumb 代理地址
         —— 与 `fill_thumbs()` 一样全程不发网络请求，只批量读一次投影。
 
-        :return: 是否有条目被改
+        2026-10-15 起这里多做一件事（用户诉求"四个界面同一个影片显示要一致"）：
+        把 `film_view()` 的 **`title` / `actors[]` / `cover` / `badge` / `version_tags[]` /
+        `states{}`** 追加到每一行上。原来这条路只补 `poster`，于是下载页那一行只有番号、
+        没有片名 —— 而同一部片在榜单/历史/库页各有各的写法，用户看到的正是"五花八门"。
+
+        两条纪律：
+        - **只追加、不改写**：行里已有的键一个不动（`number`/`thumb`/`size` 等保持原样），
+          前端拿不到这些新键时按"没有就不画"降级；
+        - **`title` 只在行里还没有的时候写**（`title` 是投影的中文标题；队列行本来没有这个键，
+          但历史/任务行可能有自己那一份更贴近上下文的值，别顶掉）。
         """
         items = [x for group in groups for x in (group or []) if isinstance(x, dict)]
         missing = [str(x.get("number") or "") for x in items if x.get("number")]
@@ -2237,6 +2288,28 @@ class AVHelper(_PluginBase):
             poster = str(view.get("cover") or "") or str(item.get("thumb") or "")
             if poster and item.get("poster") != poster:
                 item["poster"] = poster
+                changed = True
+            # 影片级字段：缺哪个补哪个，已有的不覆盖
+            title = str(view.get("title") or "")
+            if title and not str(item.get("title") or ""):
+                item["title"] = title
+                changed = True
+            for key in ("cover", "badge"):
+                value = view.get(key)
+                if value and item.get(key) != value:
+                    item[key] = value
+                    changed = True
+            actors = view.get("actors")
+            if isinstance(actors, list) and actors and not item.get("actors"):
+                item["actors"] = actors
+                changed = True
+            tags = view.get("version_tags")
+            if isinstance(tags, list) and tags and not item.get("version_tags"):
+                item["version_tags"] = tags
+                changed = True
+            states = view.get("states")
+            if isinstance(states, dict) and states and not item.get("states"):
+                item["states"] = states
                 changed = True
         return changed
 

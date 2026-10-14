@@ -179,8 +179,15 @@ const rows = computed<QueueItem[]>(() =>
  * 留着只是同一件事在两处说），所以这个类型现在只服务**失败行**。
  */
 type RowExtra = QueueItem & {
-  /** 片名（台账/投影口径；队列行目前拿不到，有才画）。 */
+  /** 片名（读侧统一投影给的 `title`；队列行拿不到时不画）。 */
   title?: string
+  /** 下载速度（`12.3 MB` 这类可读串，后端从下载器读数里抄的）。 */
+  speed?: string
+  /** 剩余时间（`8m` 这类可读串）。 */
+  eta?: string
+  /** 取消时间与那一步的说明（`state === 'canceled'` 时后端记的）。 */
+  canceled_at?: string
+  canceled_detail?: string
   /** 失败原因（`state === 'failed'` 时后端记的那个字段）。 */
   failed_reason?: string
   failedReason?: string
@@ -228,6 +235,23 @@ const failedRows = computed<RowExtra[]>(() => rows.value.filter(item => isFailed
 /** 失败原因（两种写法都认；都没有就写「原因未知」，不编造）。 */
 function failReasonOf(item: RowExtra): string {
   return String(item.failed_reason || item.failedReason || '').trim() || '原因未知'
+}
+
+/**
+ * 速度与剩余时间那一段：`12.3 MB/s · 剩余 8m`（两段各自可有可无；都没有返回空串）。
+ *
+ * 数据来自后端 `_merge_queue()` 从下载器读数里抄下来的 `speed` / `eta`
+ * （宿主的 `DownloaderTorrent.dlspeed` / `left_time`，已经是可读串）。
+ * **没有就不画** —— 宁可退回「下载中…」，也不编一个"0 B/s"出来。
+ */
+function speedOf(item: RowExtra): string {
+  const row = item as unknown as Record<string, any>
+  const speed = String(row.speed || '').trim()
+  const eta = String(row.eta || '').trim()
+  const parts: string[] = []
+  if (speed && speed !== '0 B') parts.push(/\/s$/i.test(speed) ? speed : `${speed}/s`)
+  if (eta) parts.push(`剩余 ${eta}`)
+  return parts.join(' · ')
 }
 
 /** 是否画版本角标（`badge` / `version_tags` 任一有值；老后端两个都没有 → false）。 */
@@ -519,12 +543,20 @@ onBeforeUnmount(() => {
               />
               <div class="avh-q__main">
                 <div class="avh-q__no">{{ item.number || '' }}</div>
+                <!--
+                  影片标题（读侧统一投影给的 `title`，2026-10-15 加）：同一部片在榜单/历史/
+                  库页显示的都是它，下载页以前只有番号 —— 那正是"四个界面五花八门"的一处。
+                  拿不到（投影里没这部片）就整行不画，不拿种子名顶上。
+                -->
+                <div v-if="item.title" class="avh-q__ttl">{{ item.title }}</div>
                 <div class="avh-q__hint avh-q__meta">{{ metaOf(item) }}</div>
                 <div class="avh-q__hint avh-q__path">{{ pathOf(item) }}</div>
               </div>
               <div class="avh-q__right">
                 <div class="avh-q__no">{{ progressOf(item) }}%</div>
-                <div class="avh-q__hint">下载中…</div>
+                <!-- 速度与剩余时间（后端从下载器读的 `dlspeed`/`left_time`；没有就退回状态文案） -->
+                <div v-if="speedOf(item)" class="avh-q__hint">{{ speedOf(item) }}</div>
+                <div v-else class="avh-q__hint">下载中…</div>
                 <!-- 行内「取消下载」（2026-10-15）：删种子（含已下载的部分文件）→ 行留在原位变灰 -->
                 <v-btn
                   class="avh-q__act"

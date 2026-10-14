@@ -66,6 +66,14 @@ export interface CardMovie {
    */
   downloaded?: boolean
   /**
+   * 这个番号**此刻正在下载**（后端 `_movie()` 的 `downloading`，2026-10-15 加）。
+   *
+   * 与 `downloaded` 的区别：`downloading` = 队列里有活跃条目（还没下完）；
+   * `downloaded` = 台账里已完成。两者互斥（下完那一刻队列条目就被摘走、台账接手），
+   * 所以徽标可以按 `downloading → downloaded` 的顺序各画一颗、不会同时出现。
+   */
+  downloading?: boolean
+  /**
    * 入库时间（Emby 的 `DateCreated`，本地时间写法；`/library` 的 `addedAt`）。
    * 只有库模式会画它，其它来源的卡片没有这个字段。
    */
@@ -153,6 +161,14 @@ const watchUrl = () => String(props.movie.lib?.url || '')
         <span v-if="movie.uncensored" class="avh-badge avh-badge--uc">破解</span>
         <span v-if="actorFavorited" class="avh-badge avh-badge--new">⭐已收藏演员</span>
         <span v-if="movie.lib" class="avh-badge avh-badge--lib">✔已入库</span>
+        <!--
+          「下载中」（2026-10-15 加，后端 `_movie().downloading`）：队列里有这个番号的活跃条目。
+          为什么必须有：以前只有"下载完成之后"才有徽标，**正在下**的片子在榜单/详情上毫无标记，
+          用户很容易对同一个番号再点一次下载（重复下单）。
+          顺序：排在「已下载」之前（"还在下"比"下过"更该被看见）。
+        -->
+        <span v-if="movie.downloading && !movie.lib && !movie.downloaded"
+              class="avh-badge avh-badge--dlg">⏬下载中</span>
         <!--
           「已下载」（契约 §5.2）：`downloaded && !lib` 才画 —— 在库的片子上面那颗已经说明白了，
           重复标记只会让用户以为自己漏看了什么。徽标顺序：前四颗保持老实现原样，这颗排最末。
@@ -307,6 +323,14 @@ const watchUrl = () => String(props.movie.lib?.url || '')
  */
 .avh-badge--dl {
   background: rgba(var(--v-theme-info), 0.85);
+}
+
+/*
+ * 「下载中」（2026-10-15）：取 `warning`（暖色）—— 与 `--lib`(primary) / `--dl`(info) 两颗冷色
+ * 一眼分开。"还在下"是个**进行时**状态，用暖色比冷色更符合直觉，也与下载页那根进度条的主色同族。
+ */
+.avh-badge--dlg {
+  background: rgba(var(--v-theme-warning), 0.9);
 }
 
 .avh-card__meta {
