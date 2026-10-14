@@ -985,8 +985,11 @@ defineExpose({ syncCursor, focusFresh, reloadDetail, retryDetail })
                 >
                   <Thumb class="avh-actorchip__av" variant="av" :src="actor.avatar" :alt="actor.name" :plugin-id="pluginId" />
                   <span class="avh-actorchip__body">
-                    <span class="avh-actorchip__nm">{{ actor.name }}{{ actor.zh ? ` / ${actor.zh}` : '' }}</span>
-                    <!-- 自定义备注（BRIEF §3）：只在非空时另起一行画，浅色小一号，不加图标不加前缀 -->
+                    <!-- 主位（大字）：有中文名就上中文名，没有才退回原名 —— 备注永远进不来 -->
+                    <span class="avh-actorchip__nm">{{ actor.zh || actor.name }}</span>
+                    <!-- 辅位（小字）：仅当主位已经是中文名时，才在下面另画一行原名；主位已是原名就不重复画 -->
+                    <span v-if="actor.zh" class="avh-actorchip__zh">{{ actor.name }}</span>
+                    <!-- 附加行：自定义备注（BRIEF §3）只在非空时另起一行画，浅色小一号，不加图标不加前缀 -->
                     <span v-if="actor.alias" class="avh-actorchip__alias">{{ actor.alias }}</span>
                   </span>
                   <span class="avh-hint">看全部作品 ›</span>
@@ -1315,7 +1318,9 @@ defineExpose({ syncCursor, focusFresh, reloadDetail, retryDetail })
   line-height: 1.35;
 }
 
-/* 备注：浅色 + 小一号，与 `ActorRow` 的 `.avh-actor__zh` 同一口径（BRIEF §3） */
+/* 辅位（原名）：仅当主位是中文名时才画，浅色 + 小一号，与 `ActorRow` 的 `.avh-actor__zh` 同一口径 */
+.avh-actorchip__zh,
+/* 备注：浅色 + 小一号，与 `ActorRow` 的 `.avh-actor__alias` 同一口径（BRIEF §3） */
 .avh-actorchip__alias {
   font-size: 11px;
   line-height: 1.3;
