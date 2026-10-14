@@ -1174,7 +1174,8 @@ def trim_javdb_raw(skeleton: Dict[str, Any], limit: int = JAVDB_RAW_LIMIT) -> Di
     if isinstance(inner, dict) and inner:
         src = inner
     actors = [{"id": str(a.get("id") or ""), "name": _clean_text(a.get("name") or ""),
-               "avatar_url": str(a.get("avatar_url") or "")}
+               "avatar_url": str(a.get("avatar_url") or ""),
+               "gender": a.get("gender")}
               for a in (src.get("actors") or []) if isinstance(a, dict)]
     tags = [{"id": str(t.get("id") or ""), "name": _clean_text(t.get("name") or "")}
             for t in (src.get("tags") or []) if isinstance(t, dict)]
@@ -1592,7 +1593,7 @@ def _canonical_id_of(mod: Any, name: Any) -> str:
 def actor_rows(actors: Any, mod: Any = None) -> List[Dict[str, Any]]:
     """javdb `actors[]` → `meta.actors_json` 的**规范形状**（S7 追加口径，为头像治理服务）。
 
-    每行固定给全这五个键，下游（`film_view()` / `sync_actor_avatars()`）不再各自兼容：
+    每行固定给全这七个键，下游（`film_view()` / `sync_actor_avatars()`）不再各自兼容：
 
     | 键 | 来源 | 用途 |
     | --- | --- | --- |
@@ -1601,6 +1602,7 @@ def actor_rows(actors: Any, mod: Any = None) -> List[Dict[str, Any]]:
     | `avatar` | javdb `actors[].avatar_url` | 头像同步（P0-②：javdb 头像是第一顺位） |
     | `javdb_actor_id` | javdb `actors[].id` | 之后可写进 Person 的 `ProviderIds.JavDB`（可选） |
     | `canonical_id` | `namemap.actor_lookup()` | 映射表主键，缺映射时是空串 |
+    | `gender` | javdb `actors[].gender`（**0=女 / 1=男**） | 女演员专属写入与头像过滤（P8/R3）；旧行缺失即 `None`，调用方须保守处理 |
 
     **兼容**：入参既可以是 javdb 原样的 `{id,name,avatar_url,gender}`，也可以是本函数已经
     产出过的行（含 `avatar`/`javdb_actor_id`），重复归一不会丢字段。
@@ -1609,10 +1611,12 @@ def actor_rows(actors: Any, mod: Any = None) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     seen: List[str] = []
     for item in (actors if isinstance(actors, list) else []):
+        gender: Any = None
         if isinstance(item, dict):
             raw = item.get("name")
             avatar = item.get("avatar") or item.get("avatar_url") or ""
             actor_id = item.get("javdb_actor_id") or item.get("id") or ""
+            gender = item.get("gender")
         else:
             raw, avatar, actor_id = item, "", ""
         display = _display_with(source, raw)
@@ -1627,6 +1631,7 @@ def actor_rows(actors: Any, mod: Any = None) -> List[Dict[str, Any]]:
             "avatar": str(avatar or ""),
             "javdb_actor_id": str(actor_id or ""),
             "canonical_id": _canonical_id_of(source, raw),
+            "gender": gender,
         })
     return out
 
@@ -3358,11 +3363,13 @@ def _avatar_index(store: Any, mod: Any) -> Dict[str, Dict[str, Any]]:
                 continue
             slot = index.setdefault(name, {"name": name, "zh": actor["zh"], "jp": actor["jp"],
                                            "avatar": "", "javdb_actor_id": "",
-                                           "numbers": []})
+                                           "gender": actor.get("gender"), "numbers": []})
             if not slot["avatar"] and actor["avatar"]:
                 slot["avatar"] = actor["avatar"]
             if not slot["javdb_actor_id"] and actor["javdb_actor_id"]:
                 slot["javdb_actor_id"] = actor["javdb_actor_id"]
+            if slot.get("gender") is None and actor.get("gender") is not None:
+                slot["gender"] = actor.get("gender")
             number = str(row.get("display_number") or row.get("key") or "")
             if number and number not in slot["numbers"]:
                 slot["numbers"].append(number)
