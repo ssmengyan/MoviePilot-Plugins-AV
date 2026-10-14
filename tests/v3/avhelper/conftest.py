@@ -179,3 +179,9 @@ def scraper_mod():
     夹具）也能拿到模块 —— `test_scraper.py` 里那个同名 `scraper` 夹具是它自己的，别依赖它。
     """
     return _load("scraper")
+
+
+@pytest.fixture(scope="session")
+def classify_mod():
+    """`number_classify` 模块（内容类型 / 马赛克 / 分集 / 分辨率，纯标准库）。"""
+    return _load("number_classify")

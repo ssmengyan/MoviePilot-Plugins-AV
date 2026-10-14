@@ -1966,6 +1966,9 @@ class TestFilmView:
         assert view["crop_anchor"] == "right"
         assert view["version_tags"] == ["中字", "4K"]
         assert view["badge"] == "中字/4K"
+        # P0-0：分类结论随读投影一起下发（路由的键；这里 SNOS-380 是普通目录号 → 有码链）
+        assert view["content_type"] == "censored"
+        assert view["mosaic"] == "censored"
         assert view["states"] == {"download": "downloaded", "library": "in_library",
                                   "scrape": "scraped_full"}
         assert view["emby_id"] == "12598" and view["item_key"] == "emby:12598"

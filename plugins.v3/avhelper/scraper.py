@@ -71,6 +71,7 @@ from urllib.parse import quote, urlencode
 from app.sdk.logging import logger
 
 from . import emby
+from . import number_classify
 
 # 延迟导入：S3 / S4 交付前本模块必须照常工作（降级见模块 docstring）。
 #
@@ -4441,6 +4442,16 @@ def _item_view(row: Optional[Dict[str, Any]], library: Any, key: str) -> Dict[st
     }
 
 
+def _dirs_of(path: Any, depth: int = 3) -> List[str]:
+    """文件路径里**最近 `depth` 层目录名**（给内容类型 / 马赛克判定用）。
+
+    只看最近几层：够认「欧美 / 里番 / CD2」这类用户自己建的目录，又不会被更外层的
+    库根（`/media/9kg/avi`）带偏。路径为空回空列表（判定退回番号形态）。
+    """
+    parts = [p for p in re.split(r"[\\/]+", str(path or "").strip()) if p and p not in (".", "/")]
+    return parts[:-1][-depth:] if len(parts) > 1 else []
+
+
 def film_view(key_or_number: Any, item_key: Any = None, store: Any = None,
               library: Any = None) -> Dict[str, Any]:
     """**唯一读投影**（契约 §4）：`meta` + `media_item` + 下载台账 + `name_map` → 界面形状。
@@ -4478,6 +4489,10 @@ def film_view(key_or_number: Any, item_key: Any = None, store: Any = None,
                 if isinstance(tags, dict):
                     version_tags = dict(tags)
     labels = version_labels(version_tags)
+    # 番号形态分类（0.8.0 / P0-0）：内容类型 + 马赛克标记。**只读、零网络**，
+    # 是 P0-1 的路由键，也让界面现在就能显示"这部片属于哪条链"。
+    shape = number_classify.classify(number, dirs=_dirs_of((picked or {}).get("file_path")),
+                                     version_tags=version_tags)
 
     actors: List[Dict[str, Any]] = []
     for actor in ((meta or {}).get("actors") or []):
@@ -4523,6 +4538,9 @@ def film_view(key_or_number: Any, item_key: Any = None, store: Any = None,
                            or "auto"),
         "version_tags": labels,
         "badge": "/".join(labels),
+        # P0-0 的分类结论（路由的键；`mosaic` 为空串表示判不出来，见 number_classify 的口径）
+        "content_type": shape["content_type"],
+        "mosaic": shape["mosaic"],
         "states": {
             "download": download_state,
             "library": picked_view.get("library_state") or "not_in_library",
