@@ -456,6 +456,111 @@ def site_number(raw_or_number: Any, parsed: Any = None, key: str = "") -> str:
     return emby.display_number(text) or text              # ③ 最后的原样退回
 
 
+def launch_number(resolved: Optional[Dict[str, Any]] = None, key: str = "",
+                  store: Any = None, library: Any = None,
+                  fallback: Any = "") -> str:
+    """**抓取侧拿去查站点的番号**（R10）：Emby 条目名派生的补零形态优先。
+
+    这条链的终点是 `cli.detail(number)` —— javdb 的番号**错一位就是整条片子查不到**
+    （去零形态 `CAWB-40` / `IPOK-25` 站点回「找不到番号」，补零形态 `CAWB-040` /
+    `IPOK-025` 返回完整详情，2026-10-14 真机实测）。
+
+    优先级（**从"库里的真相"往"从键反推"退**）：
+
+    1. `emby.shown_number(key, library.index()[key]['name'])` —— Emby 条目 `Name` 开头那段
+       原始番号（MetaTube 刮削写进去的，**最权威**，也是 `/library` 卡片上那个写法的来源）。
+       零网络：读的是 `EmbyLibrary.index()` 那份内存缓存（`locate_instances()` 定位实例时
+       本来就会建它）；
+    2. `store.meta_get(key)['display_number']` —— `tasks._seed_library_meta()` 播种时写的
+       就是 `emby.shown_number(键, Emby 条目 Name)`，**同一份真相的耐久副本**（Emby 索引
+       不可用时靠它）。排在 Name 之后：条目名是新鲜的，meta 行可能是旧口径留下的
+       （`CAWB-40` —— 正是 R10 要修掉的那个形态）；
+    3. 调用方给的 `fallback`（通常是 `resolve_key()['display_number']`，即
+       `site_number()` 的 parse 优先产物）；
+    4. `emby.display_number(key)` 旧口径兜底（例如 `MIRD277C` → `MIRD-277`）。
+
+    1/2 两级都只认**归一化后与 `key` 相等、且不等于键本身**的写法（与 `shown_number()`
+    同一条纪律：对不上宁可按老规则，否则会把 B 片的号写到 A 片上）。第 4 级是最后的
+    形态兜底 —— 键本来就推不出展示番号（`SNOS192C`）时，至少保持旧行为不变。
+
+    为什么需要它（R10 的分歧点）：`resolve_key()` 只能从**键**反推，
+    `site_number()` 认不出番号时会落到 `emby.display_number()` —— 那是旧口径
+    （`^([A-Z]{2,6})(\\d{2,7})$` 直接拼、**不补三位零**），于是 `CAWB040` → `CAWB-40`。
+    库里的展示番号（`/library` 的 `number`）一直是对的（`library_rows()` 走 `shown_number()`），
+    分歧只发生在"展示番号 → 查询番号"这一段。这里把库里的真相接回来。
+
+    `store` / `library` 不可用（未配置 Emby、索引还没建）时逐级回退，**绝不抛异常**：
+    取数链不能因为查不到展示番号就整条停摆。
+    """
+    resolved = resolved if isinstance(resolved, dict) else {}
+    key_text = str(key or resolved.get("key") or "").strip()
+
+    def usable(candidate: Any, allow_identity: bool = False) -> str:
+        """这一级能不能用：非空 + 归一化后与 `key` 相等（+ 默认**不等于键本身**）。
+
+        `allow_identity=False` 是为了识别"Name 没给出番号"：`emby.shown_number()` 在认不出
+        时会**原样回传键**（`MIRD277C`）——那不是 Emby 的权威写法，不能因为它挡住后面的
+        meta 行。第 3 级（parse 产物，旧行为就是拿它）允许原样回传，见下。
+        """
+        text = _clean_text(candidate)
+        if not text:
+            return ""
+        if key_text:
+            if emby.norm_key(text) != key_text:
+                return ""
+            if not allow_identity and text.upper() == key_text.upper():
+                return ""
+        return text
+
+    if key_text and library is not None:
+        index = None
+        getter = getattr(library, "index", None)
+        if callable(getter):
+            try:
+                index = getter() or {}
+            except Exception as error:                          # noqa: BLE001 - 读侧兜底
+                logger.warning(f"AVHelper 读 Emby 索引失败（展示番号按旧口径）：{error}")
+                index = {}
+        entry = index.get(key_text) if isinstance(index, dict) else None
+        if isinstance(entry, dict):
+            picked = usable(emby.shown_number(key_text, entry.get("name")))
+            if picked:
+                return picked
+    row = _meta_of(store, key_text)
+    if isinstance(row, dict):
+        picked = usable(row.get("display_number"))
+        if picked:
+            return picked
+    # 第 3 级 = `resolve_key()` 的产物（`site_number()` 的 parse 优先口径）。旧行为就是
+    # 拿它去查站点，所以这里允许"原样回传键"（`SNOS192C` 这种推不出展示番号的键）。
+    picked = usable(resolved.get("display_number"), True) or usable(resolved.get("number"), True)
+    if picked:
+        return picked
+    if fallback:
+        picked = usable(fallback) or _clean_text(fallback)
+        if picked:
+            return picked
+    return emby.display_number(key_text) or str(fallback or "")
+
+
+def _fallback_number(resolved: Dict[str, Any], options: Dict[str, Any],
+                     found: Sequence[Dict[str, Any]], dto: Any) -> str:
+    """`launch_number()` 的第三级兜底：键反推不出来时，从缓存行 / 盘上路径 / 输入原样取。
+
+    ★ `cache_only` 的那条路要用**缓存行的 `display`**（S11 的 `coverage.json` 是"当时站点
+    认得的写法"），所以它必须排在 `number_from_dto()` **之前**（旧行为如此，别调换）。
+    """
+    row = cache_row(options.get("fetch_cache"), resolved.get("key") or "")
+    if _clean_text(row.get("display")):
+        return _clean_text(row.get("display"))
+    number = number_from_dto(dto)
+    for entry in found:
+        if number:
+            break
+        number = str(entry.get("number") or "")
+    return number or str(resolved.get("input") or "")
+
+
 # ---------------------------------------------------------------------------
 # HTTP（javtxt / MetaTube）：一律走调用方给的代理，失败不抛异常
 # ---------------------------------------------------------------------------
@@ -2823,10 +2928,13 @@ def preview_one(key: Any, *, store: Any, cli: Any, emby_client: Any = None,
     item_key, emby_id = first["item_key"], first["emby_id"]
     # `emby:12598` 这种输入本身不带番号：先从条目 DTO 的**路径**反推（S11：绝不用 Name）。
     dto, dto_error = _read_dto(emby_client, emby_id)
-    number = (str(options.get("display_number") or "").strip()
-              or resolved.get("display_number") or resolved.get("number")
-              or number_from_dto(dto) or first.get("number")
-              or resolved.get("input") or "")
+    # ★ R10：查站点的番号 = `launch_number()`（Emby 条目名派生的补零形态优先）。
+    # 键反推只能给到 `site_number()` 的旧口径兜底（`CAWB040` → `CAWB-40`），
+    # 而库里真正的真相是 Emby Name / meta 行里的 `CAWB-040`（1/2/3/4 级依次回退）。
+    number = launch_number(resolved, key=resolved.get("key") or "", store=store,
+                           library=options.get("library"),
+                           fallback=(str(options.get("display_number") or "").strip()
+                                     or _fallback_number(resolved, options, found, dto)))
     key_text = resolved.get("key") or emby.canon_key(number) or number
     # ★ 缺陷 1：角标以**该实例自己的文件名**为准（DTO 优先 → 定位时用盘上路径派生的 → 请求键）
     instance_tags = item_version_tags(dto, first.get("version_tags")
@@ -2940,18 +3048,14 @@ def scrape_one(key: Any, *, store: Any, cli: Any, emby_client: Any,
         }
     first = found[0]
     item_key, emby_id = first["item_key"], first["emby_id"]
-    number = (str(options.get("display_number") or "").strip()
-              or resolved.get("display_number") or resolved.get("number") or "")
-    if not number:
-        # 输入是 `emby:<id>` 时番号只能从**路径**反推（S11：绝不用 Name）；缓存行里也有一份
-        row = cache_row(options.get("fetch_cache"), resolved.get("key") or "")
-        number = _clean_text(row.get("display"))
-        for entry in found:
-            if number:
-                break
-            dto, _err = _read_dto(emby_client, entry["emby_id"])
-            number = number_from_dto(dto)
-        number = number or resolved.get("input") or ""
+    # ★ R10：查站点的番号 = `launch_number()`（Emby 条目名派生的补零形态优先，见它的说明）。
+    # 输入是 `emby:<id>` 时键反推不出来，才由 `_fallback_number()` 从缓存行 / 盘上路径反推
+    # （S11：**绝不用 Name 当番号源**，Name 只经 `shown_number()` 取开头那一段原始写法）。
+    dto, _dto_error = _read_dto(emby_client, emby_id)
+    number = launch_number(resolved, key=resolved.get("key") or "", store=store,
+                           library=options.get("library"),
+                           fallback=(str(options.get("display_number") or "").strip()
+                                     or _fallback_number(resolved, options, found, dto)))
     key_text = resolved.get("key") or emby.canon_key(number) or number
     existing = _meta_of(store, key_text)
     # 取数**只做一次**（三源调用最贵）；角标由每个实例在 `write_item()` 里用自己的文件名定。

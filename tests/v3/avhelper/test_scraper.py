@@ -1419,7 +1419,147 @@ class TestScrapeOne:
 
 
 # ---------------------------------------------------------------------------
-# 11. rollback_item
+# 11. R10 抓取侧番号形态：查 javdb 的字符串必须是补零形态
+# ---------------------------------------------------------------------------
+
+class TestScrapeNumberForSite:
+    """★ R10 硬性验收：抓取侧**最终拿去查 javdb 的字符串**是补零形态。
+
+    真机缺陷（2026-10-14 12:39 线上日志）：库里的展示番号是 `CAWB-040` / `IPOK-025`，
+    抓取路径却拿 `CAWB-40` / `IPOK-25` 去查 javdb —— 站点直接回「找不到番号」，
+    用户看到的就是"有些影片没识别到"。实测 javdb 认补零形态（`detail CAWB-040`
+    返回完整详情），去零形态回「找不到番号」。
+
+    分歧点当时在 `site_number()` 的"旧口径优先"分支（`9e6a339`）：
+    `emby.display_number(emby.canon_key('CAWB40'))` = `CAWB-40` —— `display_number()`
+    是旧口径（`^([A-Z]{2,6})(\\d{2,7})$` 直接拼、**不补三位零**），所以抓取侧一路
+    把有意义的前导零抹掉了。`8cc101d` 改成 parse 优先后那条路已经给 `CAWB-040`。
+
+    这里锁的是**端到端那一步**：一个零补位番号走到 `scrape_one()`，`cli.detail()`
+    收到的必须是补零形态；同时 Emby 条目名（`emby.shown_number()` 的来源）**优先于**
+    键反推的旧口径 —— 那正是"库里的 `CAWB-040`"与"抓取侧的 `CAWB-40`"分叉的地方。
+    """
+
+    def _opts(self, library=None):
+        opts = {"now": "2026-10-14T00:00:00", "javtxt_interval": 0,
+                "javtxt_hosts": ("https://j.test",), "metatube_base": "http://mt:8080",
+                "write_images": False, "javdb_assets": False, "http_timeout": 5,
+                # 取数链只留 javdb：这三个源在 R10 里无关，去掉就不必顶掉 http_get
+                "plot_sources": ()}
+        if library is not None:
+            opts["library"] = library
+        return opts
+
+    @staticmethod
+    def _recording_cli(scraper, detail):
+        """包一层 `FakeCli.detail()`，把**真正传给 javdb 的番号**记下来。"""
+        cli = FakeCli(detail=detail)
+        seen = []
+        raw_detail = cli.detail
+
+        def spy(number, mid="", with_magnets=False):
+            seen.append(str(number))
+            return raw_detail(number, mid=mid, with_magnets=with_magnets)
+
+        cli.detail = spy
+        return cli, seen
+
+    def test_scrape_one_queries_javdb_with_padded_number(self, scraper, store_mod, tmp_path,
+                                                         monkeypatch):
+        store = make_store(store_mod, tmp_path)
+        store.item_upsert("emby:12598", "CAWB40", display_number="CAWB-040", emby_id="12598")
+        monkeypatch.setattr(scraper, "http_get", lambda url, **k: (b"", "", 200))
+        library = _NameLibrary({"CAWB40": {"id": "12598", "name": "CAWB-040 人妻の… 中文字幕",
+                                           "path": "/Media/9kg/avi/CAWB-040.mp4", "url": ""}})
+        cli, seen = self._recording_cli(scraper, dict(JAVDB_DETAIL, number="CAWB-040"))
+        report = scraper.scrape_one("CAWB40", store=store, cli=cli,
+                                    emby_client=FakeEmby(dto=EMPTY_DTO),
+                                    opts=self._opts(library))
+        assert seen == ["CAWB-040"], f"拿去查 javdb 的是 {seen!r}，不是补零形态"
+        assert report["number"] == "CAWB-040"
+
+    def test_ipok_form_is_padded_too(self, scraper, store_mod, tmp_path, monkeypatch):
+        """同一形态的另一条真机样本：`IPOK025` → `IPOK-025`（不是 `IPOK-25`）。"""
+        store = make_store(store_mod, tmp_path)
+        store.item_upsert("emby:12597", "IPOK25", display_number="IPOK-025", emby_id="12597")
+        monkeypatch.setattr(scraper, "http_get", lambda url, **k: (b"", "", 200))
+        cli, seen = self._recording_cli(scraper, dict(JAVDB_DETAIL, number="IPOK-025"))
+        scraper.scrape_one("IPOK025", store=store, cli=cli,
+                           emby_client=FakeEmby(dto=EMPTY_DTO), opts=self._opts())
+        assert seen == ["IPOK-025"]
+
+    def test_emby_name_beats_key_derived_old_rule(self, scraper, store_mod, tmp_path,
+                                                 monkeypatch):
+        """★ 分歧点本身：库里写着 `CAWB-040`（Emby Name），旧口径却给 `CAWB-40`。
+
+        用一条**去零形态的旧 meta 行**（`emby.display_number()` 的产物）当诱饵：
+        抓取侧必须优先用 Emby 条目名派生的 `emby.shown_number()`，拿 `CAWB-040` 去查。
+        """
+        store = make_store(store_mod, tmp_path)
+        store.item_upsert("emby:12598", "CAWB40", display_number="CAWB-40", emby_id="12598")
+        monkeypatch.setattr(scraper, "http_get", lambda url, **k: (b"", "", 200))
+        library = _NameLibrary({"CAWB40": {"id": "12598", "name": "CAWB-040 人妻の…",
+                                           "path": "/Media/9kg/avi/CAWB-040.mp4", "url": ""}})
+        cli, seen = self._recording_cli(scraper, dict(JAVDB_DETAIL, number="CAWB-040"))
+        scraper.scrape_one("CAWB40", store=store, cli=cli,
+                           emby_client=FakeEmby(dto=EMPTY_DTO), opts=self._opts(library))
+        assert seen == ["CAWB-040"]
+        assert library.calls["index"] == 1                  # 确实读了 Emby 索引取 Name
+
+    def test_meta_row_is_the_second_source(self, scraper, store_mod, tmp_path, monkeypatch):
+        """Emby 索引不可用（未接线 / 索引空）时，`meta.display_number` 顶上来。"""
+        store = make_store(store_mod, tmp_path)
+        store.item_upsert("emby:12598", "CAWB40", display_number="CAWB-40", emby_id="12598")
+        store.meta_upsert("CAWB40", display_number="CAWB-040")
+        monkeypatch.setattr(scraper, "http_get", lambda url, **k: (b"", "", 200))
+        cli, seen = self._recording_cli(scraper, dict(JAVDB_DETAIL, number="CAWB-040"))
+        scraper.scrape_one("CAWB40", store=store, cli=cli,
+                           emby_client=FakeEmby(dto=EMPTY_DTO), opts=self._opts())
+        assert seen == ["CAWB-040"]
+
+    def test_name_derived_number_is_not_guessed(self, scraper):
+        """键归不上时不许拿 Name 去猜（`MIRD277C` 宁可回它自己，也不回 `MIRD-277`）。
+
+        `emby.shown_number()` 只认「归一化后与键相等」的那一种 Name 写法：条目名
+        `MIRD-277 ファン感謝祭`（归一化 `MIRD277`）与中字版的键 `MIRD277C` **归不上**
+        → 回 `MIRD277C`；`launch_number()` 传的是**归一化后的键**（`MIRD277`），
+        所以那一次能取到 `MIRD-277` —— 与旧行为的 `site_number()` 一致。
+        """
+        assert scraper.emby.shown_number(
+            "MIRD277C", "MIRD-277 ファン感謝祭") == "MIRD277C"
+        assert scraper.emby.shown_number("MIRD277", "MIRD-277 ファン感謝祭") == "MIRD-277"
+        resolved = scraper.resolve_key("MIRD277C")
+        assert resolved["key"] == "MIRD277"
+        assert scraper.site_number("MIRD277C") == "MIRD-277"
+        assert scraper.launch_number(resolved, store=None, library=None) == "MIRD-277"
+        # 键本来就推不出展示番号（`C` 后缀被切掉）：第 3 级原样沿用 parse 的产物，
+        # 与旧行为一致（旧 `site_number('SNOS192C')` 也回 `SNOS-192`）
+        assert scraper.launch_number(scraper.resolve_key("SNOS192C"), store=None,
+                                     library=None) == "SNOS-192"
+
+
+class _NameLibrary:
+    """`EmbyLibrary` 的替身：只多实现 `index()`（R10 的 `shown_number()` 从这里取 Name）。"""
+
+    def __init__(self, index=None, hit=None):
+        self._index = dict(index or {})
+        self.hit = hit
+        self.calls = {"lookup": 0, "index": 0, "invalidate": 0}
+
+    def lookup(self, number):
+        self.calls["lookup"] += 1
+        return dict(self.hit) if self.hit else None
+
+    def index(self):
+        self.calls["index"] += 1
+        return dict(self._index)
+
+    def invalidate(self):
+        self.calls["invalidate"] += 1
+
+
+# ---------------------------------------------------------------------------
+# 12. rollback_item
 # ---------------------------------------------------------------------------
 
 class TestRollback:
