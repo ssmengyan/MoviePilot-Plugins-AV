@@ -5,6 +5,7 @@ import { DEFAULT_MAX_WIDTH, type ConfigProps } from './contract'
 import { CONSOLE_EMIT_NAMES } from './emitContract'
 import {
   bindPluginApi,
+  errorText,
   hostToast,
   type PluginApi,
   type PluginConfig,
@@ -12,10 +13,19 @@ import {
 import { useRuntimeInfo } from '../composables/useRuntimeInfo'
 import { useSettingsDraft, type RuleState } from '../composables/useSettingsDraft'
 import { useHostConfirm } from '../composables/useHostDialogs'
-import { SETTINGS_SECTIONS, type SectionItem } from './settings/panels'
+import {
+  SCRAPE_DEFAULTS,
+  SCRAPE_SECTIONS,
+  SETTINGS_SECTIONS,
+  toScrapeSettings,
+  type ScrapeSettings,
+  type SectionItem,
+} from './settings/panels'
 import GeneralPanel from './settings/GeneralPanel.vue'
 import SitesPanel from './settings/SitesPanel.vue'
 import RulePanel from './settings/RulePanel.vue'
+import ScrapePanel from './settings/ScrapePanel.vue'
+import ScrapeRulePanel from './settings/ScrapeRulePanel.vue'
 import NotifyPanel from './settings/NotifyPanel.vue'
 import LibraryPanel from './settings/LibraryPanel.vue'
 import RuntimePanel from './settings/RuntimePanel.vue'
@@ -27,6 +37,7 @@ import TasksView from './views/TasksView.vue'
 import SubsView from './views/SubsView.vue'
 import ActorsView from './views/ActorsView.vue'
 import DiscoverView from './views/DiscoverView.vue'
+import ScrapeView from './views/ScrapeView.vue'
 import DetailDrawer from './detail/DetailDrawer.vue'
 import NotifyDrawer from './detail/NotifyDrawer.vue'
 import SearchDialog from './detail/SearchDialog.vue'
@@ -79,6 +90,9 @@ const DATA_SECTIONS: SectionItem[] = [
   // 「已入库的番号」（2026-10-12 加）：Emby 库里**此刻**的片子，实时口径，删了就不在其中。
   // 与「下载历史」分工明确：这一栏答"库里有什么"，那一栏答"插件下过什么"。
   { key: 'library', title: '已入库的番号', icon: 'mdi-library-shelves' },
+  // 「刮削」（v4 刮削线 0.7.0 加）：全库刮削工作台 + 数据源自检两个页签（`ScrapeView.vue`）。
+  // 排在最后：它是"收拾已入库的片子"，读的顺序本来就在下载/入库之后。
+  { key: 'scrape', title: '刮削', icon: 'mdi-auto-fix' },
   { key: 'sitesearch', title: '站点搜索', icon: 'mdi-magnify' },
 ]
 
@@ -107,6 +121,8 @@ const NATIVE_VIEWS: Record<string, Component> = {
   tasks: TasksView,
   subs: SubsView,
   actors: ActorsView,
+  // 第八栏（v4 刮削线 0.7.0）：全库刮削工作台 + 数据源自检。
+  scrape: ScrapeView,
 }
 
 /** iframe 必须用实例 id（普通插件 = pluginId；分身共享同一份联邦产物）。 */
@@ -365,12 +381,89 @@ function patchRule(patch: Partial<RuleState>): void {
   ruleDraft.value = { ...current, ...patch }
 }
 
+/**
+ * 刮削两栏（「刮削」「刮削规则」）的设置草稿（v4 刮削线 0.7.0 加）。
+ *
+ * **为什么不挂进 `useSettingsDraft`**：那份草稿的字段集合是写死的（`RuleState` / `HostConfigDraft`），
+ * 脏标记（`sameRule` / `sameHost`）也只比那几个键 —— 新字段挂上去既不进 payload、
+ * 也不触发「● 未保存」，而 `save()` 在 `!dirty` 时**一个请求都不发**。
+ *
+ * **为什么走 `POST /rule`**：契约 §3.7 没有刮削配置端点，而 `/rule` 这本就是插件自管设置的通路
+ * —— 后端 `tasks.merge_rule()` 是 `merged.update(rule)`（未知键原样保留），`api_rule` 把整份
+ * dict 存进 kv，GET 原样回。主统筹 2026-10-14 已批准这条落点与 11 个键名（见 `SCRAPE_KEYS`）。
+ *
+ * 顺序：`saveAll()` 里**先**提交这一份补丁，再走草稿层原来的「先 /rule 后宿主配置」。
+ */
+const scrapeSettings = ref<ScrapeSettings>({ ...SCRAPE_DEFAULTS })
+const scrapePatches = ref<Partial<ScrapeSettings>>({})
+const scrapeDirty = computed(() => Object.keys(scrapePatches.value).length > 0)
+/** 面板显示值 = 已存值 + 未提交补丁（面板只读这一份，自己不存状态）。 */
+const scrapeView = computed<ScrapeSettings>(() => ({ ...scrapeSettings.value, ...scrapePatches.value }))
+/** 只在真正进这两栏时读一次 `GET /rule`。 */
+let scrapeLoaded = false
+
+function ensureScrapeLoaded(): void {
+  if (scrapeLoaded) return
+  scrapeLoaded = true
+  void loadScrapeSettings()
+}
+
+async function loadScrapeSettings(): Promise<void> {
+  try {
+    const res: any = await currentApi().get('plugin/rule')
+    const payload = res && typeof res === 'object' && 'data' in res ? res.data : res
+    const raw = payload && typeof payload === 'object' && 'rule' in payload ? payload.rule : payload
+    scrapeSettings.value = toScrapeSettings(raw)
+  } catch {
+    // 读不到（老后端 / 请求失败）：保持默认值即可，保存时后端 `merge_rule()` 还会兜一道。
+    scrapeSettings.value = { ...SCRAPE_DEFAULTS }
+  }
+}
+
+function patchScrape(patch: Partial<ScrapeSettings>): void {
+  scrapePatches.value = { ...scrapePatches.value, ...patch }
+}
+
+/**
+ * 提交刮削设置（只发补丁本身）。
+ *
+ * 后端是**以已存规则为基准合并**（`merge_rule({**self.global_rule(), **payload.rule})`），
+ * 所以只发 11 个刮削键不会冲掉「下载规则」那一批；失败时保持脏标记并报错，不静默。
+ */
+async function saveScrapeSettings(): Promise<boolean> {
+  if (!scrapeDirty.value) return true
+  try {
+    const res: any = await currentApi().post('plugin/rule', { rule: { ...scrapePatches.value } })
+    const payload = res && typeof res === 'object' && 'data' in res ? res.data : res
+    if (payload && typeof payload === 'object' && (payload as any).success === false) {
+      toast.error(String((payload as any).message || '刮削设置保存失败'))
+      return false
+    }
+    scrapeSettings.value = { ...scrapeSettings.value, ...scrapePatches.value }
+    scrapePatches.value = {}
+    return true
+  } catch (err) {
+    toast.error(`刮削设置保存失败：${errorText(err)}`)
+    return false
+  }
+}
+
+/**
+ * 左栏脏点：草稿层那两个组 + 刮削两栏自己的补丁。
+ * `panels.ts` 里把这两栏的 `DIRTY_GROUPS` 标成 `none`（草稿层认不出它们的字段），所以在这里或进来。
+ */
+function sectionDirtyEx(key: string): boolean {
+  return sectionDirty(key) || (scrapeDirty.value && SCRAPE_SECTIONS.includes(key))
+}
+
 function pick(item: SectionItem): void {
   section.value = item.key
 }
 
 function pickSetting(item: SectionItem): void {
   settingsSection.value = item.key
+  // 刮削两栏的字段不在草稿层里：真正点进这两栏时才读一次 `GET /rule` 拿它们的现值。
+  if (SCRAPE_SECTIONS.includes(item.key)) ensureScrapeLoaded()
 }
 
 /**
@@ -466,6 +559,10 @@ function messageOf(res: any): string {
  */
 async function saveAll(): Promise<void> {
   if (draftSaving.value) return
+  // 刮削两栏的字段不在草稿层的字段集合里（见 `scrapeSettings` 的说明）：先单独提交一发。
+  // 失败就**不**往下走 —— 与草稿层「第 1 步失败不提交第 2 步」同一条纪律。
+  const scrapeOk = await saveScrapeSettings()
+  if (!scrapeOk) return
   const ok = await saveDraft()
   if (!ok) return
   emit('action')
@@ -621,7 +718,10 @@ watch(
  */
 function applyPendingSection(): void {
   const pending = takePendingSettingsSection()
-  if (pending && SETTINGS_SECTIONS.some(item => item.key === pending)) settingsSection.value = pending
+  if (pending && SETTINGS_SECTIONS.some(item => item.key === pending)) {
+    settingsSection.value = pending
+    if (SCRAPE_SECTIONS.includes(pending)) ensureScrapeLoaded()
+  }
 }
 
 onMounted(() => {
@@ -890,15 +990,16 @@ onBeforeUnmount(() => {
 
           <v-spacer />
 
-          <!-- 保存按钮跟着设置窗口走：数据台没有可保存的东西 -->
+          <!-- 保存按钮跟着设置窗口走：数据台没有可保存的东西。
+               `scrapeDirty` 是刮削两栏的补丁（不在草稿层的字段集合里），两处合起来才是完整的未保存态。 -->
           <v-btn
-            :color="dirty ? 'warning' : 'primary'"
-            :variant="dirty ? 'flat' : 'tonal'"
+            :color="dirty || scrapeDirty ? 'warning' : 'primary'"
+            :variant="dirty || scrapeDirty ? 'flat' : 'tonal'"
             prepend-icon="mdi-content-save"
             :loading="draftSaving"
             class="me-2"
             @click="saveAll"
-          >{{ saveButtonLabel }}</v-btn>
+          >{{ scrapeDirty ? '保存修改 ● 未保存' : saveButtonLabel }}</v-btn>
 
           <v-btn
             variant="text"
@@ -912,7 +1013,7 @@ onBeforeUnmount(() => {
         <v-divider />
 
         <div class="avh-settings__body">
-          <!-- 左栏：设置七栏 -->
+          <!-- 左栏：设置九栏 -->
           <nav class="avh-settings__nav">
             <v-list density="compact" nav :selected="[settingsSection]" mandatory>
               <v-list-item
@@ -925,7 +1026,7 @@ onBeforeUnmount(() => {
               >
                 <template #append>
                   <v-icon
-                    v-if="sectionDirty(item.key)"
+                    v-if="sectionDirtyEx(item.key)"
                     icon="mdi-circle"
                     size="8"
                     color="warning"
@@ -975,6 +1076,23 @@ onBeforeUnmount(() => {
               :policy-min-interval="checkInfo?.minIntervalMin || 0"
               :site-scope-count="ruleView.sites.length"
               @patch="patchRule"
+            />
+
+            <ScrapePanel
+              v-else-if="settingsSection === 'scrape'"
+              :settings="scrapeView"
+              :api="currentApi()"
+              :toast="injectedToast"
+              @patch="patchScrape"
+            />
+
+            <ScrapeRulePanel
+              v-else-if="settingsSection === 'scrapeRule'"
+              :settings="scrapeView"
+              :plugin-id="pluginId"
+              :api="currentApi()"
+              :toast="injectedToast"
+              @patch="patchScrape"
             />
 
             <NotifyPanel
