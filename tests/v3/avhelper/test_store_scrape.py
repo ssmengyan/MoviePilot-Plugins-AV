@@ -166,6 +166,64 @@ class TestConnectionUpgrade:
         assert store.kv_get("k") == "v"                      # 数据一条不少
 
 
+class TestLegacyMissingColumns:
+    """★ P1-8 的**部署实测缺陷**（2026-10-15）：老库已有 `scrape_log` 表但**没有新列**时，
+    `IF NOT EXISTS` 不会重建它，而建表脚本里的 `CREATE INDEX … ON scrape_log(run_id)`
+    会引用一个不存在的列 → `init()` 直接 `no such column: run_id`、**插件起不来**。
+
+    本机测试原本抓不到：造"老库"时只造了缺列的 `downloads`，没造缺列的 `scrape_log`
+    （容器里 0.7.4 的 scrape_log 是存在的旧表）。这条用例照容器的真实形状造。
+    """
+
+    #: 0.7.4 的 scrape_log（没有 reason / http_status / run_id 三列）
+    LEGACY_LOG_DDL = """
+    CREATE TABLE scrape_log(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, source_name TEXT NOT NULL, key TEXT DEFAULT '',
+      status TEXT NOT NULL, latency_ms INTEGER DEFAULT 0, error_summary TEXT DEFAULT '',
+      created_at TEXT DEFAULT '');
+    CREATE INDEX idx_scrape_log_source ON scrape_log(source_name, id DESC);
+    """
+
+    def _legacy_db(self, store_mod, tmp_path):
+        """造一个"0.7.4 形状"的库：有 scrape_log 旧表 + 老 downloads + 有数据。"""
+        db = tmp_path / "legacy074.db"
+        with sqlite3.connect(db) as conn:
+            conn.executescript(self.LEGACY_LOG_DDL)
+            conn.execute("INSERT INTO scrape_log(source_name, key, status, created_at) "
+                         "VALUES('javtxt','SNOS380','ok','2026-10-14 10:00:00')")
+            conn.executescript(LEGACY_DOWNLOADS_DDL)
+            conn.execute("INSERT INTO downloads(key, number, title) "
+                         "VALUES('IPZZ961','IPZZ-961','老片')")
+        return db
+
+    def test_init_survives_legacy_scrape_log(self, store_mod, tmp_path):
+        """老库跑一次 init()：**不许抛异常**，补列 + 建索引都做完，老数据一条不丢。"""
+        db = self._legacy_db(store_mod, tmp_path)
+        store = store_mod.Store(db_path=db)
+        store.init()                                  # 修复前这里就是 no such column: run_id
+        assert {"reason", "http_status", "run_id"} <= columns_of(store, "scrape_log")
+        assert store.scrape_log_recent(limit=5)[0]["key"] == "SNOS380"
+        names = {row[0] for row in store._exec(
+            "SELECT name FROM sqlite_master WHERE type='index'", fetch=True)}
+        assert "idx_scrape_log_run" in names         # 索引在补列之后建成了
+
+    def test_indexes_exist_after_init(self, store_mod, tmp_path):
+        store = make_store(store_mod, tmp_path)
+        names = {row[0] for row in store._exec(
+            "SELECT name FROM sqlite_master WHERE type='index'", fetch=True)}
+        assert {"idx_scrape_log_run", "idx_meta_next_retry", "idx_meta_last_scraped",
+                "idx_site_snapshot_fetched", "idx_downloads_completed"} <= names
+
+    def test_broken_index_does_not_block_init(self, store_mod, tmp_path, monkeypatch):
+        """单条索引建不起来（列真丢了）只记日志：**索引是性能，不是完整性**。"""
+        db = self._legacy_db(store_mod, tmp_path)
+        store = store_mod.Store(db_path=db)
+        monkeypatch.setattr(store_mod, "_INDEXES",
+                            store_mod._INDEXES + (("idx_broken", "scrape_log(不存在的列)"),))
+        store.init()                                  # 不抛异常
+        assert "run_id" in columns_of(store, "scrape_log")
+
+
 class TestMigrationBackup:
     """P1-8：迁移三件套 —— **在线备份**、`schema_meta` 版本表、幂等。
 

@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS downloads(
   emby_id      TEXT DEFAULT '',    -- v4：入库后的 Emby ItemId（跨「已下载 ↔ 已入库」对号）
   failed_reason TEXT DEFAULT ''    -- v4：下载失败原因（v4.1 §9.2-1，state='failed' 时才有值）
 );
-CREATE INDEX IF NOT EXISTS idx_downloads_completed ON downloads(completed_at DESC, created_at DESC);
+-- 索引见 `_ensure_indexes()`（与补列分开：老库可能缺索引用到的列，见那里的说明）
 """
 
 # `schema_meta`（P1-8）：**这个库走在哪一版**的唯一真值。
@@ -145,11 +145,9 @@ CREATE TABLE IF NOT EXISTS meta(
     updated_at TEXT DEFAULT '',
     field_sources_json TEXT DEFAULT '{}'
 );
--- P1-9：重刮两档队列的索引，**与 `meta_due()` 的 ORDER BY 逐字对齐**
--- （tier1 用 `ORDER BY next_retry_at`、tier2 用 `ORDER BY last_scraped_at, updated_at`）。
--- 没有索引时每次取队列都要全表扫 + 排序，而 `/scrape/status` 每屏都会问一次队列长度。
-CREATE INDEX IF NOT EXISTS idx_meta_next_retry ON meta(next_retry_at, updated_at);
-CREATE INDEX IF NOT EXISTS idx_meta_last_scraped ON meta(last_scraped_at, updated_at);
+-- P1-9：重刮两档队列的索引在 `_ensure_indexes()` 里建（**必须在补列之后** ——
+-- 老库的 `meta` 可能还没有 `next_retry_at` 列，索引写在这里会直接让 init() 报错）。
+-- 索引列与 `meta_due()` 的 ORDER BY 逐字对齐。
 
 CREATE TABLE IF NOT EXISTS media_item(
     item_key TEXT PRIMARY KEY,
@@ -165,8 +163,7 @@ CREATE TABLE IF NOT EXISTS media_item(
     emby_backup_json TEXT DEFAULT '',
     last_synced_at TEXT DEFAULT ''
 );
-CREATE INDEX IF NOT EXISTS idx_media_item_key ON media_item(key);
-CREATE INDEX IF NOT EXISTS idx_media_item_emby ON media_item(emby_id);
+-- 索引见 `_ensure_indexes()`（必须在补列之后建）
 
 CREATE TABLE IF NOT EXISTS name_map(
     canonical_id TEXT PRIMARY KEY,
@@ -204,8 +201,8 @@ CREATE TABLE IF NOT EXISTS scrape_log(
     http_status INTEGER DEFAULT 0,
     run_id TEXT DEFAULT ''
 );
-CREATE INDEX IF NOT EXISTS idx_scrape_log_source ON scrape_log(source_name, id DESC);
-CREATE INDEX IF NOT EXISTS idx_scrape_log_run ON scrape_log(run_id);
+-- 索引见 `_ensure_indexes()`（**必须在补列之后**：老库的 scrape_log 没有 run_id，
+-- 索引写在这里会 `no such column: run_id` 直接把插件启动打挂 —— 2026-10-15 部署实测）
 
 -- 0.8.0 / P0-3：**逐站快照**（"只重算不重抓"的凭据）。
 -- 与 `meta.raw_json` 的分工：那边是给人看的**摘要**（URL/vid/长度，且受 5KB 上限），
@@ -220,7 +217,7 @@ CREATE TABLE IF NOT EXISTS site_snapshot(
     payload_json TEXT DEFAULT '{}',
     PRIMARY KEY(key, site)
 );
-CREATE INDEX IF NOT EXISTS idx_site_snapshot_fetched ON site_snapshot(fetched_at);
+-- 索引见 `_ensure_indexes()`
 """
 
 # 老库动态补列（SQLite 的 ALTER TABLE ADD COLUMN 没有 IF NOT EXISTS，先看 PRAGMA table_info 再补）。
@@ -491,6 +488,32 @@ def _repair_columns(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE meta ADD COLUMN {name} {decl}")
         except sqlite3.OperationalError:
             pass
+
+
+#: 全部索引（**统一在这里、且只在补列之后建**）。列与 `meta_due()` 的 ORDER BY 逐字对齐。
+_INDEXES: "Tuple[Tuple[str, str], ...]" = (
+    ("idx_downloads_completed", "downloads(completed_at DESC, created_at DESC)"),
+    ("idx_meta_next_retry", "meta(next_retry_at, updated_at)"),
+    ("idx_meta_last_scraped", "meta(last_scraped_at, updated_at)"),
+    ("idx_media_item_key", "media_item(key)"),
+    ("idx_media_item_emby", "media_item(emby_id)"),
+    ("idx_scrape_log_source", "scrape_log(source_name, id DESC)"),
+    ("idx_scrape_log_run", "scrape_log(run_id)"),
+    ("idx_site_snapshot_fetched", "site_snapshot(fetched_at)"),
+)
+
+
+def _ensure_indexes(conn: sqlite3.Connection) -> None:
+    """建全部索引。**必须在补列之后调用**（列还不存在时 `CREATE INDEX` 会直接报错）。
+
+    单条失败只记日志、继续建下一条：索引是**性能**优化，不是数据完整性的一部分 ——
+    某个老库的列真出问题时，宁可少一条索引也不该让插件起不来（2026-10-15 的教训）。
+    """
+    for name, target in _INDEXES:
+        try:
+            conn.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {target}")
+        except sqlite3.OperationalError as error:
+            logger.warning(f"AVHelper 建索引 {name} 失败（跳过，不影响功能）：{error}")
 
 
 #: schema 版本 + **有序**迁移表（P1-8）。加迁移 = 往后面追加一条，**不改已有条目**。
@@ -868,6 +891,12 @@ class Store:
         # **不改版本**。补列是幂等的（4 次 PRAGMA + 命中即跳过），代价可以忽略；
         # 不这么做的话，一次中断的 init() 之后就得手工修库。
         _repair_columns(conn)
+        # ★ 索引**必须**在补列之后建（2026-10-15 部署实测的真缺陷）：
+        #   建表脚本里写着 `CREATE INDEX ... ON scrape_log(run_id)`，而老库的 scrape_log
+        #   是**已存在的表**（`IF NOT EXISTS` 不会重建它），补列又排在后面 →
+        #   索引引用一个还不存在的列，init() 直接 `no such column: run_id`、插件起不来。
+        #   本机测试没抓到是因为造老库时只造了"缺列的 downloads"，没造"缺列的 scrape_log"。
+        _ensure_indexes(conn)
         conn.commit()
 
     def schema_info(self) -> Dict[str, Any]:
