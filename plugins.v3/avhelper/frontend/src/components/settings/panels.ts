@@ -93,6 +93,12 @@ export interface ScrapeSettings {
   autoScrapeTier1: boolean
   /** 定时重刮 Tier 2（全库冷数据滚动，v4.1 §5.3）。 */
   autoScrapeTier2: boolean
+  /**
+   * 下载完成后立即刮削（S6）：台账入账那一刻把这一部片刮一遍，不等定时重刮。
+   * 后端读法 `self.scrape_conf().get("scrapeOnDownload")`，缺键默认 **true**；刮在后台
+   * worker 线程里逐条做，与 `scrapeMode == 'off'` 联动（关了刮削模式就不排）。
+   */
+  scrapeOnDownload: boolean
   /** 后缀清洗词表（番号解析前逐个剥离，`ScrapeRulePanel` 可增删）。 */
   cleanSuffixes: string[]
   /** 命名模板（Emby `Name`，变量 `{number}` / `{badge}` / `{title}`）。 */
@@ -121,6 +127,7 @@ export const SCRAPE_DEFAULTS: ScrapeSettings = {
   trailerMode: 'off',
   autoScrapeTier1: false,
   autoScrapeTier2: false,
+  scrapeOnDownload: true,
   cleanSuffixes: ['-UC', '_4K', '-4K', '-C', '-L', '-VR', '-ISO', 'CD1', 'CD2', '中字', '流出'],
   nameTemplate: '{number}{badge} {title}',
   sources: ['javdb', 'javtxt'],
@@ -210,6 +217,7 @@ export function toScrapeSettings(raw: unknown): ScrapeSettings {
     trailerMode: pick(src.trailerMode, TRAILERS, SCRAPE_DEFAULTS.trailerMode),
     autoScrapeTier1: boolOf(src.autoScrapeTier1, SCRAPE_DEFAULTS.autoScrapeTier1),
     autoScrapeTier2: boolOf(src.autoScrapeTier2, SCRAPE_DEFAULTS.autoScrapeTier2),
+    scrapeOnDownload: boolOf(src.scrapeOnDownload, SCRAPE_DEFAULTS.scrapeOnDownload),
     cleanSuffixes: listOf(src.cleanSuffixes, SCRAPE_DEFAULTS.cleanSuffixes),
     nameTemplate: textOf(src.nameTemplate, SCRAPE_DEFAULTS.nameTemplate),
     // P1-5 / P1-2：启用源、字段级择优、限流参数
@@ -230,6 +238,7 @@ export const SCRAPE_KEYS: (keyof ScrapeSettings)[] = [
   'trailerMode',
   'autoScrapeTier1',
   'autoScrapeTier2',
+  'scrapeOnDownload',
   'cleanSuffixes',
   'nameTemplate',
   'sources',

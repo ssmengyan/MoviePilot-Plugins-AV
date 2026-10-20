@@ -21,8 +21,9 @@ import mimetypes
 import re
 import threading
 import time
+from collections import deque
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Deque, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from urllib.parse import quote, unquote
 
 from fastapi import Request, Response
@@ -492,6 +493,12 @@ class AVHelper(_PluginBase):
     _downloading_keys_cache: Tuple[float, Set[str]] = (0.0, set())
     _warm_thread: Optional[threading.Thread] = None   # 启动预热线程（守护线程，见 warm_up）
     _warm_stop: Optional[threading.Event] = None      # 当前这次预热的停机信号（每次新建一份）
+    # 下载完成即刮（S6）：待刮键队列 + 锁/唤醒/停止事件 + 唯一 worker（惰性启动，见 on_download_done）
+    _dl_scrape_queue: Optional[Deque[str]] = None
+    _dl_scrape_lock: Optional[threading.Lock] = None
+    _dl_scrape_wake: Optional[threading.Event] = None
+    _dl_scrape_stop: Optional[threading.Event] = None
+    _dl_scrape_thread: Optional[threading.Thread] = None
     # 刮削线 v4 的 11 项配置**存在 kv 的 `global_rule` 里**（前端设置台 S9 已在用这套 camelCase
     # 键名），不落宿主配置、也不进 `DEFAULT_RULE`：只由 `scrape_conf()` 读 + 回落默认值，见它。
     # film_view 投影的进程内缓存：(取样时间, {meta/media_item/台账 索引})，见 _film_index()
@@ -598,6 +605,19 @@ class AVHelper(_PluginBase):
         if self._warm_stop is not None:
             self._warm_stop.set()
         self._warm_thread = None
+        # 下载完成即刮的 worker：置停止位 + 唤醒（它阻塞在 Event 上等新任务），最多 join 2 秒 —
+        # 正在刮的那一条要等它自己收手，卸载路径不能为它挂住。
+        stop = getattr(self, "_dl_scrape_stop", None)
+        if stop is not None:
+            stop.set()
+        wake = getattr(self, "_dl_scrape_wake", None)
+        if wake is not None:
+            wake.set()
+        thread = getattr(self, "_dl_scrape_thread", None)
+        if thread is not None and thread.is_alive():
+            thread.join(2.0)
+        if thread is None or not thread.is_alive():
+            self._dl_scrape_thread = None
         try:
             remove_plugin_once_job(self.__class__.__name__, ONCE_JOB_ID)
         except Exception:
@@ -1137,7 +1157,7 @@ class AVHelper(_PluginBase):
         return merge_rule(rule)
 
     def scrape_conf(self) -> Dict[str, Any]:
-        """刮削设置的 13 项（**存放在 kv 的 `global_rule` 里**，不是宿主插件配置）。
+        """刮削设置的 15 项（**存放在 kv 的 `global_rule` 里**，不是宿主插件配置）。
 
         口径（主统筹 2026-10-14 更正，覆盖任务书 E 段）：前端设置台 S9 已经在用这套
         camelCase 键名读写 `global_rule`，所以这里**只读不写**、缺键逐项回落默认值 ——
@@ -1147,7 +1167,8 @@ class AVHelper(_PluginBase):
         键名一个字母都不许改（前端按这套读）：`scrapeMode` / `plotJavtxt` /
         `translateModel` / `translateModelFallback` / `trailerMode` /
         `autoScrapeTier1` / `autoScrapeTier2` / `cleanSuffixes` / `nameTemplate` /
-        `defaultRateLimit` + `rateLimits`（0.8.0 加，P1-2：每 host 请求间隔与逐 host/站点覆盖）。
+        `defaultRateLimit` + `rateLimits`（0.8.0 加，P1-2：每 host 请求间隔与逐 host/站点覆盖）/
+        `scrapeOnDownload`（S6：下载入账即刮这一部片，默认 **开**；读它的是 `on_download_done()`）。
 
         ⚠️ 0.8.1：`plotMetatube` / `metatubeBase` 两个键**已下线**（MetaTube 整体停用）；
         老规则里还留着它们也不报错，只是不再参与任何决策。
@@ -1170,6 +1191,8 @@ class AVHelper(_PluginBase):
             "trailerMode": pick_choice(rule.get("trailerMode"), TRAILER_MODES, "off"),
             "autoScrapeTier1": pick_bool(rule.get("autoScrapeTier1"), True),
             "autoScrapeTier2": pick_bool(rule.get("autoScrapeTier2"), True),
+            # S6：下载入账那一刻就把这一部片刮一遍（后台 worker，见 on_download_done）。默认开。
+            "scrapeOnDownload": pick_bool(rule.get("scrapeOnDownload"), True),
             "cleanSuffixes": [str(x).strip() for x in suffixes if str(x).strip()]
                              if isinstance(suffixes, list) else [],
             "nameTemplate": (str(rule.get("nameTemplate") or "").strip()
@@ -3040,6 +3063,149 @@ class AVHelper(_PluginBase):
         """刮削编排的依赖注入包（契约 §3.6 的四个关键字：`store`/`cli`/`emby_client`/`opts`）。"""
         return {"store": self.store, "cli": self.cli(),
                 "emby_client": self.emby_client(), "opts": self.scrape_opts()}
+
+    # ---------- 下载完成即刮（S6） ----------
+
+    def on_download_done(self, numbers: Any) -> int:
+        """下载完成钩子：把刚入账的番号排进后台刮削队列，**立即返回**（S6）。
+
+        谁调它：`tasks._flush_done()` —— 台账写成功、条目已从队列摘掉之后 duck-typing 探一下
+        （`tasks.py` 不 import 刮削）。所以这里**绝不能同步刮**：一条 `scrape_batch()` 在真机上
+        要等站点好几秒，同步做会把下载收尾路径拖住，进而卡住下载页轮询。
+
+        三道闸门依次短路（都不打日志、不排队）：`scrapeMode == 'off'` / `scrapeOnDownload` 关 /
+        `scraper.py` 还没就绪。番号归一化**复用 `scraper.resolve_key()`**（meta 表主键，与
+        `_scrape_tick()` 读的 `meta_list()` 键、`store.meta_upsert()` 的键同口径），空串丢弃、
+        重复键只留一条。返回本次真正入队的条数（生产路径不看返回值，单测用）。
+        """
+        conf: Dict[str, Any] = {}
+        try:
+            conf = dict(self.scrape_conf() or {})
+        except Exception as error:      # 配置读不出来就当"没打开"：宁可少刮一次，也不许抛回台账路径
+            logger.warning(f"AVHelper 下载完成即刮：读刮削配置失败，本次跳过：{error}")
+            return 0
+        if str(conf.get("scrapeMode") or "").strip().lower() == "off":
+            return 0
+        if not bool(conf.get("scrapeOnDownload", True)):
+            return 0
+        module = self.scrape_module()
+        if module is None or not callable(getattr(module, "scrape_batch", None)):
+            return 0
+        keys: List[str] = []
+        for raw in (numbers if isinstance(numbers, (list, tuple, set)) else [numbers]):
+            text = str(raw or "").strip()
+            if not text:
+                continue                # 没番号的脏条目直接丢：归一不出键，排进去也只有失败
+            key = ""
+            resolver = getattr(module, "resolve_key", None)
+            if callable(resolver):
+                try:
+                    key = str((resolver(text) or {}).get("key") or "")
+                except Exception as error:      # 归一化炸了只丢这一条，别把整批带停
+                    logger.warning(f"AVHelper 下载完成即刮：归一化 {text} 失败：{error}")
+                if not key:
+                    # `resolve_key()` 认不出是番号（裸数字会被当 Emby id、`emby:` 实例键同理）：
+                    # 这种条目排进去只会刮错片，直接不排
+                    continue
+            else:
+                key = canon_of(text)            # 老 scraper 没这个函数：退回同一套 canon 口径
+            if key and key not in keys:
+                keys.append(key)
+        if not keys:
+            return 0
+        self._dl_scrape_ready()
+        with self._dl_scrape_lock:
+            self._dl_scrape_queue.extend(keys)
+        self._dl_scrape_wake.set()
+        self._dl_scrape_start()
+        return len(keys)
+
+    def _dl_scrape_ready(self) -> None:
+        """惰性建「下载完成即刮」的运行态（队列 / 锁 / 唤醒 / 停止）。"""
+        if getattr(self, "_dl_scrape_queue", None) is None:
+            self._dl_scrape_queue = deque()
+        if getattr(self, "_dl_scrape_lock", None) is None:
+            self._dl_scrape_lock = threading.Lock()
+        if getattr(self, "_dl_scrape_wake", None) is None:
+            self._dl_scrape_wake = threading.Event()
+        if getattr(self, "_dl_scrape_stop", None) is None:
+            self._dl_scrape_stop = threading.Event()
+
+    def _dl_scrape_start(self) -> None:
+        """惰性启动唯一的 worker 线程（守护线程）；已经在跑就直接返回。"""
+        self._dl_scrape_ready()
+        thread = getattr(self, "_dl_scrape_thread", None)
+        if thread is not None and thread.is_alive():
+            return
+        self._dl_scrape_stop.clear()
+        thread = threading.Thread(target=self._dl_scrape_worker,
+                                  name="avhelper-download-scrape", daemon=True)
+        self._dl_scrape_thread = thread
+        thread.start()
+
+    def _dl_scrape_take(self) -> str:
+        """从队头取一个待刮键；队列空回空串。"""
+        with self._dl_scrape_lock:
+            if self._dl_scrape_queue:
+                return self._dl_scrape_queue.popleft()
+        return ""
+
+    def _dl_scrape_worker(self) -> None:
+        """后台刮削 worker：逐条 `scraper.scrape_batch([key], **self.scrape_deps())`。
+
+        两条纪律：① **线程不许死** —— 单条的任何异常（模块没就绪、站点超时、Emby 抽风）只
+        `logger.warning` + 记一行 `scrape_log`，接着处理下一条；② 队列空就阻塞在 `Event` 上
+        （不忙轮询），`stop_service()` 置停止位并唤醒后立刻退出。
+        """
+        while not self._dl_scrape_stop.is_set():
+            key = self._dl_scrape_take()
+            if not key:
+                self._dl_scrape_wake.wait()     # 无超时：入队方 set，stop_service() 也 set
+                self._dl_scrape_wake.clear()
+                continue
+            ok, error = True, ""
+            try:
+                ok, error = self._dl_scrape_one(key)
+            except Exception as exc:            # noqa: BLE001 - 线程不许死，记账后继续
+                ok, error = False, f"{type(exc).__name__}: {exc}"
+                logger.warning(f"AVHelper 下载完成即刮失败（{key}）：{error}")
+            self._dl_scrape_log(key, ok, error)
+            self._dl_scrape_sleep()
+
+    def _dl_scrape_one(self, key: str) -> Tuple[bool, str]:
+        """刮一条，返回 `(成功, 错误摘要)`；调用方式与 `_scrape_tick()` 逐字一致。"""
+        module = self.scrape_module()
+        if module is None or not callable(getattr(module, "scrape_batch", None)):
+            return False, "scraper.py 尚未就绪"
+        rows = module.scrape_batch([key], **self.scrape_deps()) or []
+        row = rows[0] if isinstance(rows, (list, tuple)) and rows and isinstance(rows[0], dict) else {}
+        if row.get("ok") is False or str(row.get("status") or "") == "error":
+            return False, str(row.get("error") or "刮削失败")
+        return True, ""
+
+    def _dl_scrape_log(self, key: str, ok: bool, error: str) -> None:
+        """记一行 `scrape_log`（`source_name="download_scrape"`）：成功失败都记，写失败只 warning。"""
+        try:
+            self.store.scrape_log_add("download_scrape", "ok" if ok else "error", key, 0,
+                                      str(error or "")[:200])
+        except Exception as exc:                # noqa: BLE001 - 记账失败不许打断 worker
+            logger.warning(f"AVHelper 下载完成即刮：写 scrape_log 失败（{key}）：{exc}")
+
+    def _dl_scrape_sleep(self) -> None:
+        """两条之间歇一下：走 `scraper._SLEEP`（单测里被换成空实现）。
+
+        默认 2 秒；kv 里有 `defaultRateLimit` 就用它，但**夹在 1–3 秒**——这个值本来是给
+        站点请求间隔用的（下限 0.2），直接拿来当刮削节奏会太密，下限 1 秒是硬保护。
+        """
+        try:
+            interval = float(str(self.scrape_conf().get("defaultRateLimit") or "").strip() or 2)
+        except Exception:                       # noqa: BLE001 - 配置脏了就按默认 2 秒
+            interval = 2.0
+        interval = min(3.0, max(1.0, interval))
+        module = self.scrape_module()
+        sleeper = getattr(module, "_SLEEP", None) if module is not None else None
+        if callable(sleeper):
+            sleeper(interval)
 
     def _clean_scrape_patch(self, patch: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
         """设置台写进来的刮削键做一次**写入校验**（P1-5）：非法值不落库、如实回报。

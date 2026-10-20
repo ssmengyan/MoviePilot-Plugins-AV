@@ -376,6 +376,7 @@ const SCRAPE_DEFAULTS = {
   trailerMode: "off",
   autoScrapeTier1: false,
   autoScrapeTier2: false,
+  scrapeOnDownload: true,
   cleanSuffixes: ["-UC", "_4K", "-4K", "-C", "-L", "-VR", "-ISO", "CD1", "CD2", "中字", "流出"],
   nameTemplate: "{number}{badge} {title}",
   sources: ["javdb", "javtxt"],
@@ -445,6 +446,7 @@ function toScrapeSettings(raw) {
     trailerMode: pick(src.trailerMode, TRAILERS, SCRAPE_DEFAULTS.trailerMode),
     autoScrapeTier1: boolOf(src.autoScrapeTier1, SCRAPE_DEFAULTS.autoScrapeTier1),
     autoScrapeTier2: boolOf(src.autoScrapeTier2, SCRAPE_DEFAULTS.autoScrapeTier2),
+    scrapeOnDownload: boolOf(src.scrapeOnDownload, SCRAPE_DEFAULTS.scrapeOnDownload),
     cleanSuffixes: listOf$1(src.cleanSuffixes, SCRAPE_DEFAULTS.cleanSuffixes),
     nameTemplate: textOf$1(src.nameTemplate, SCRAPE_DEFAULTS.nameTemplate),
     // P1-5 / P1-2：启用源、字段级择优、限流参数
@@ -1695,13 +1697,13 @@ const _sfc_main$u = /* @__PURE__ */ _defineComponent$u({
             ]),
             default: _withCtx$p(() => [
               _createVNode$q(_component_v_card_title, null, {
-                default: _withCtx$p(() => _cache[7] || (_cache[7] = [
+                default: _withCtx$p(() => _cache[8] || (_cache[8] = [
                   _createTextVNode$n("刮削")
                 ])),
                 _: 1
               }),
               _createVNode$q(_component_v_card_subtitle, null, {
-                default: _withCtx$p(() => _cache[8] || (_cache[8] = [
+                default: _withCtx$p(() => _cache[9] || (_cache[9] = [
                   _createTextVNode$n("自建刮削层 · 简介 / 翻译 / 裁切 / 预告片 · 与「下载规则」同一份插件设置（POST /rule）")
                 ])),
                 _: 1
@@ -1711,7 +1713,7 @@ const _sfc_main$u = /* @__PURE__ */ _defineComponent$u({
           }),
           _createVNode$q(_component_v_card_text, null, {
             default: _withCtx$p(() => [
-              _cache[11] || (_cache[11] = _createElementVNode$s("div", { class: "text-caption text-medium-emphasis mb-1" }, "刮削模式", -1)),
+              _cache[12] || (_cache[12] = _createElementVNode$s("div", { class: "text-caption text-medium-emphasis mb-1" }, "刮削模式", -1)),
               _createVNode$q(_component_v_btn_toggle, {
                 "model-value": props.settings.scrapeMode,
                 mandatory: "",
@@ -1737,7 +1739,7 @@ const _sfc_main$u = /* @__PURE__ */ _defineComponent$u({
                 _: 1
               }, 8, ["model-value"]),
               _createElementVNode$s("p", _hoisted_1$s, _toDisplayString$t(modeHint.value) + " 具体字段路由由后端按这一档执行；本栏只负责选择与保存。 ", 1),
-              _cache[12] || (_cache[12] = _createElementVNode$s("div", { class: "text-caption text-medium-emphasis mb-1" }, "简介来源", -1)),
+              _cache[13] || (_cache[13] = _createElementVNode$s("div", { class: "text-caption text-medium-emphasis mb-1" }, "简介来源", -1)),
               _createVNode$q(_component_v_switch, {
                 "model-value": props.settings.plotJavtxt,
                 color: "primary",
@@ -1747,7 +1749,7 @@ const _sfc_main$u = /* @__PURE__ */ _defineComponent$u({
                 class: "mb-1",
                 "onUpdate:modelValue": _cache[1] || (_cache[1] = (value) => patch("plotJavtxt", value === true))
               }, null, 8, ["model-value"]),
-              _cache[13] || (_cache[13] = _createElementVNode$s("p", { class: "text-caption text-medium-emphasis mb-4" }, [
+              _cache[14] || (_cache[14] = _createElementVNode$s("p", { class: "text-caption text-medium-emphasis mb-4" }, [
                 _createTextVNode$n(" javdb 侧不给简介（实测 12/12 "),
                 _createElementVNode$s("code", null, "summary"),
                 _createTextVNode$n(" 为 null），所以简介只能来自 Javtxt； 关掉它这一档等于「只写核心字段」。MetaTube 已于 0.8.1 整体下线，不再有第二个兜底源。 ")
@@ -1782,12 +1784,12 @@ const _sfc_main$u = /* @__PURE__ */ _defineComponent$u({
                   loading: checking.value,
                   onClick: runSelfcheck
                 }, {
-                  default: _withCtx$p(() => _cache[9] || (_cache[9] = [
+                  default: _withCtx$p(() => _cache[10] || (_cache[10] = [
                     _createTextVNode$n("模型自检")
                   ])),
                   _: 1
                 }, 8, ["loading"]),
-                _cache[10] || (_cache[10] = _createElementVNode$s("span", { class: "text-caption text-medium-emphasis" }, "POST /scrape/selfcheck（后端转 translator.selfcheck）", -1))
+                _cache[11] || (_cache[11] = _createElementVNode$s("span", { class: "text-caption text-medium-emphasis" }, "POST /scrape/selfcheck（后端转 translator.selfcheck）", -1))
               ]),
               check.value ? (_openBlock$u(), _createBlock$o(_component_v_alert, {
                 key: 0,
@@ -1801,7 +1803,7 @@ const _sfc_main$u = /* @__PURE__ */ _defineComponent$u({
                 ]),
                 _: 1
               }, 8, ["type"])) : _createCommentVNode$n("", true),
-              _cache[14] || (_cache[14] = _createElementVNode$s("div", { class: "text-caption text-medium-emphasis mb-1" }, "预告片", -1)),
+              _cache[15] || (_cache[15] = _createElementVNode$s("div", { class: "text-caption text-medium-emphasis mb-1" }, "预告片", -1)),
               _createVNode$q(_component_v_btn_toggle, {
                 "model-value": props.settings.trailerMode,
                 mandatory: "",
@@ -1827,7 +1829,18 @@ const _sfc_main$u = /* @__PURE__ */ _defineComponent$u({
                 _: 1
               }, 8, ["model-value"]),
               _createElementVNode$s("p", _hoisted_4$l, _toDisplayString$t(trailerHint.value) + " 产品口径：写媒体目录（本地文件那档）会让 Emby 立刻扫一遍库，所以这里默认停在「关闭」。 ", 1),
-              _cache[15] || (_cache[15] = _createElementVNode$s("div", { class: "text-caption text-medium-emphasis mb-1" }, "定时重刮", -1)),
+              _cache[16] || (_cache[16] = _createElementVNode$s("div", { class: "text-caption text-medium-emphasis mb-1" }, "下载完成即刮", -1)),
+              _createVNode$q(_component_v_switch, {
+                "model-value": props.settings.scrapeOnDownload,
+                color: "primary",
+                "hide-details": "",
+                inset: "",
+                label: "下载完成后立即刮削",
+                class: "mb-1",
+                "onUpdate:modelValue": _cache[5] || (_cache[5] = (value) => patch("scrapeOnDownload", value === true))
+              }, null, 8, ["model-value"]),
+              _cache[17] || (_cache[17] = _createElementVNode$s("p", { class: "text-caption text-medium-emphasis mb-4" }, " 台账入账那一刻就把这一部片刮一遍，不用等每天 3 次的订阅检查、也不用手动点。 代价：会写 Emby 元数据，每条之间按限流间隔串行（后台线程逐条做，不卡界面）； 「刮削模式」关掉时这一项不生效。 ", -1)),
+              _cache[18] || (_cache[18] = _createElementVNode$s("div", { class: "text-caption text-medium-emphasis mb-1" }, "定时重刮", -1)),
               _createVNode$q(_component_v_switch, {
                 "model-value": props.settings.autoScrapeTier1,
                 color: "primary",
@@ -1835,7 +1848,7 @@ const _sfc_main$u = /* @__PURE__ */ _defineComponent$u({
                 inset: "",
                 label: "Tier 1：新片与残缺片（指数退避 6h→24h→72h→7d→14d）",
                 class: "mb-1",
-                "onUpdate:modelValue": _cache[5] || (_cache[5] = (value) => patch("autoScrapeTier1", value === true))
+                "onUpdate:modelValue": _cache[6] || (_cache[6] = (value) => patch("autoScrapeTier1", value === true))
               }, null, 8, ["model-value"]),
               _createVNode$q(_component_v_switch, {
                 "model-value": props.settings.autoScrapeTier2,
@@ -1844,9 +1857,9 @@ const _sfc_main$u = /* @__PURE__ */ _defineComponent$u({
                 inset: "",
                 label: "Tier 2：全库冷数据滚动（每轮取最久未更新的 5 条）",
                 class: "mb-1",
-                "onUpdate:modelValue": _cache[6] || (_cache[6] = (value) => patch("autoScrapeTier2", value === true))
+                "onUpdate:modelValue": _cache[7] || (_cache[7] = (value) => patch("autoScrapeTier2", value === true))
               }, null, 8, ["model-value"]),
-              _cache[16] || (_cache[16] = _createElementVNode$s("p", { class: "text-caption text-medium-emphasis mb-0" }, " 两档默认都关：打开后由后端调度器按退避节奏跑，队列长度在数据台「刮削」栏顶部看。 ", -1))
+              _cache[19] || (_cache[19] = _createElementVNode$s("p", { class: "text-caption text-medium-emphasis mb-0" }, " 两档默认都关：打开后由后端调度器按退避节奏跑，队列长度在数据台「刮削」栏顶部看。 ", -1))
             ]),
             _: 1
           })
@@ -1857,7 +1870,7 @@ const _sfc_main$u = /* @__PURE__ */ _defineComponent$u({
   }
 });
 
-const ScrapePanel = /* @__PURE__ */ _export_sfc(_sfc_main$u, [["__scopeId", "data-v-b30ce3d7"]]);
+const ScrapePanel = /* @__PURE__ */ _export_sfc(_sfc_main$u, [["__scopeId", "data-v-139af106"]]);
 
 const RULE_FALLBACK = {
   res: "1080p",

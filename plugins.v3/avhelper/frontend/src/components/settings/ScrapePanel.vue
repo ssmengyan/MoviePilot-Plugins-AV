@@ -4,7 +4,7 @@
  *
  * 这一栏是 `docs/AVHelper-最终方案-v4.1.md` §10.1 与 `docs/AVHelper-刮削v4-模块契约.md` §3.8
  * 要求的「刮削」设置栏：**刮削模式 / 简介源开关 / 翻译模型 + 模型自检 /
- * 预告片模式 / 定时重刮**。观感与写法照 `RulePanel.vue`（同一套 `v-card` + `v-btn-toggle` +
+ * 预告片模式 / 下载完成即刮 / 定时重刮**。观感与写法照 `RulePanel.vue`（同一套 `v-card` + `v-btn-toggle` +
  * `v-switch` + 「说明一句在控件下面」的排布），数据进 `ScrapeSettings`（`./panels.ts`）。
  *
  * 三处口径写死在代码里，改之前先读契约：
@@ -214,6 +214,23 @@ async function runSelfcheck(): Promise<void> {
       <p class="text-caption text-medium-emphasis mb-4">
         {{ trailerHint }}
         产品口径：写媒体目录（本地文件那档）会让 Emby 立刻扫一遍库，所以这里默认停在「关闭」。
+      </p>
+
+      <!-- ===== 下载完成即刮（S6） ===== -->
+      <div class="text-caption text-medium-emphasis mb-1">下载完成即刮</div>
+      <v-switch
+        :model-value="props.settings.scrapeOnDownload"
+        color="primary"
+        hide-details
+        inset
+        label="下载完成后立即刮削"
+        class="mb-1"
+        @update:model-value="(value: any) => patch('scrapeOnDownload', value === true)"
+      />
+      <p class="text-caption text-medium-emphasis mb-4">
+        台账入账那一刻就把这一部片刮一遍，不用等每天 3 次的订阅检查、也不用手动点。
+        代价：会写 Emby 元数据，每条之间按限流间隔串行（后台线程逐条做，不卡界面）；
+        「刮削模式」关掉时这一项不生效。
       </p>
 
       <!-- ===== 定时重刮 ===== -->

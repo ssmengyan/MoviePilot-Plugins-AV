@@ -1470,10 +1470,20 @@ class TaskEngine:
                     if not (isinstance(item, dict) and _queue_fingerprint(item) in moved)]
 
         try:
-            return self.store.kv_update(QUEUE_KEY, keep)
+            remaining = self.store.kv_update(QUEUE_KEY, keep)
         except Exception as error:
             logger.error(f"AVHelper 从队列移除已完成条目失败：{error}")
             return queue
+        # 下载完成钩子（S6）：台账写成功、条目已摘掉之后，才把**这一批真下完的番号**交出去，
+        # 让插件侧安排「这一部片马上刮一遍」。只 duck-typing 探一下（本文件不 import 刮削），
+        # 钩子自己的异常绝不能影响入账与摘除 —— 台账才是真值，刮削只是附加动作。
+        hook = getattr(self.plugin, "on_download_done", None)
+        if callable(hook) and moved:
+            try:
+                hook([str(e.get("number") or "") for e in done if _queue_fingerprint(e) in moved])
+            except Exception as error:      # 钩子炸了也只 warning：台账与摘除已经完成
+                logger.warning(f"AVHelper 下载完成钩子失败（不影响入账）：{type(error).__name__}: {error}")
+        return remaining
 
     def _flush_gone(self, queue: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """把「下载器里已经没有」的条目从队列摘掉，返回摘完的队列。

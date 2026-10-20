@@ -1465,6 +1465,8 @@ class TestScrapeConf:
             "translateModel": "hy3", "translateModelFallback": "deepseek-v4.1-flash",
             "trailerMode": "off",
             "autoScrapeTier1": True, "autoScrapeTier2": True,
+            # S6：下载入账即刮这一部片（调度者 2026-10-21 授权补这一行，其余断言未动）
+            "scrapeOnDownload": True,
             "cleanSuffixes": [], "nameTemplate": "{number}{badge} {title}",
             # P1-2：每 host 请求间隔（调用方没显式给间隔时用）与逐 host/站点覆盖
             "defaultRateLimit": "2", "rateLimits": {},
