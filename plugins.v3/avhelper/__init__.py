@@ -114,6 +114,24 @@ SCRAPE_QUEUE_PROBE = 200
 SCRAPE_NOT_READY = "刮削模块未就绪"
 # 没配 Emby（插件与 MP 两处都取不到连接信息）时 `/scrape/*` 的文案：写线离开 Emby 没有意义
 EMBY_NOT_READY = "Emby 未配置"
+# 演员子系统（0.9.0）：`store.actor_*` / `actor_sources` / `actor_sync` 三者缺任一即回这个文案
+ACTOR_NOT_READY = "演员子系统未就绪"
+# 演员设置的 6 项：存 kv 的 `global_rule`（不是宿主插件配置），键名与设置台「演员」栏逐字一致
+ACTOR_SETTING_DEFAULTS: Dict[str, Any] = {
+    "actorEnabled": True,
+    "actorGfriends": True,
+    "actorJavdbFallback": True,
+    "actorAutoSync": True,
+    "actorBatchSize": 20,
+    "actorInterval": 2,
+}
+# 两个数值项的夹取范围：batch 1–200 位/轮，interval 0–60 秒（0 = 不额外等，仍受限流器约束）
+ACTOR_BATCH_RANGE = (1, 200)
+ACTOR_INTERVAL_RANGE = (0, 60)
+# `/img` 的本地派生图分支：手工裁剪/上传的图没有 http 地址，S3 把**绝对路径**写进
+# `actor.images[].url`。只认这几种扩展名，且必须落在 `imgproxy.cache_dir()` 之内。
+LOCAL_IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp", ".gif"})
+LOCAL_IMAGE_MAX_BYTES = 8 * 1024 * 1024
 # 配置里的枚举项（任务书 E）：不认识的值一律回落默认，老配置缺这个键也不会报错
 SCRAPE_MODES = ("off", "fill", "hybrid", "own")
 # 裁切锚点不再暴露给用户（0.7.2 减负）：固定走 `scraper.DEFAULT_OPTS["crop_anchor"]="auto"`，
@@ -442,7 +460,7 @@ class AVHelper(_PluginBase):
     # 0.8.0 = 两条并行的 0.7.4 线汇合 + 后台按 amane 的运维纪律重构
     # （失败原因闭枚举 + 单一记账点 + 单一出站函数、声明式取数图、逐站快照、限流单一执行点、
     #  /img ETag、迁移与索引纪律）
-    plugin_version = "0.8.1"
+    plugin_version = "0.9.0"
     plugin_label = "发现"
     plugin_author = "ssmengyan"
     plugin_config_prefix = "avhelper_"
@@ -580,16 +598,21 @@ class AVHelper(_PluginBase):
     # ---------- 宿主扩展点 ----------
 
     def get_service(self) -> List[Dict[str, Any]]:
-        """注册定时服务：订阅检查（每天 3 次）与缓存清理（每天 4 点）。
+        """注册定时服务：订阅检查（每天 3 次）、缓存清理（每天 4 点）、演员头像同步（每 15 分钟）。
 
-        本插件是在用插件，两个 cron 必须挂着 —— 否则订阅检查会静默停摆。
+        本插件是在用插件，订阅检查的 cron 必须挂着 —— 否则会静默停摆。
         （若用分身/副本再装一份，务必只让一边挂 cron：会重复抓站点、重复下载。）
+
+        演员同步这条自带门禁（`actorEnabled` / `actorAutoSync` 任一关着就静默 return 0），
+        所以常驻注册表也不会白跑。
         """
         return [
             {"id": "subcheck", "name": "AV 订阅检查", "trigger": "cron",
              "kwargs": {"hour": "9,14,21", "minute": "30"}, "func": self.job_subcheck},
             {"id": "cacheclean", "name": "AV 缓存清理", "trigger": "cron",
              "kwargs": {"hour": 4, "minute": 0}, "func": self.job_cacheclean},
+            {"id": "actorsync", "name": "AV 演员头像同步", "trigger": "cron",
+             "kwargs": {"minute": "5,20,35,50"}, "func": self.job_actor_sync},
         ]
 
     def get_media_source(self) -> Optional[List[Dict[str, Any]]]:
@@ -784,6 +807,32 @@ class AVHelper(_PluginBase):
              "summary": "首屏状态聚合"},
             {"path": "/rankings", "endpoint": self.api_rankings, "methods": ["GET"], "auth": "bear",
              "summary": "榜单", "description": "日/周/月 × 有码/无码/FC2"},
+            # ---- 演员子系统（0.9.0 · S4 的对外面）：**必须排在 `/actor` / `/actors` 之前** ----
+            # 宿主按注册顺序匹配，`/actor` 会把 `/actor/xxx` 吃掉；这 7 条一律不走路径参数
+            # （查询串或 body），所以 `GET /actor?name=`（javdb 演员页）与 `GET /actor/detail?id=`
+            # 互不干扰 —— 改这几条时不要引入 `{id}` 这类路径参数。
+            {"path": "/actor/list", "endpoint": self.api_actor_list, "methods": ["GET"],
+             "auth": "bear", "summary": "演员卡片墙",
+             "description": "?q=&filter=&page=&limit=；filter 支持 missing_avatar / locked / failed"},
+            {"path": "/actor/detail", "endpoint": self.api_actor_detail, "methods": ["GET"],
+             "auth": "bear", "summary": "演员详情",
+             "description": "?id= → {actor(多图带 primary), numbers[], history[]}："
+                            "整行 + 作品史（规范名比对，≤200）+ 最近动作（scrape_log，≤20）"},
+            {"path": "/actor/sources", "endpoint": self.api_actor_sources, "methods": ["GET"],
+             "auth": "bear", "summary": "演员来源与索引状态",
+             "description": "源清单 + gFriends 索引的条数/拉取时间/是否过期"},
+            {"path": "/actor/scrape", "endpoint": self.api_actor_scrape, "methods": ["POST"],
+             "auth": "bear", "summary": "演员刮削(单据/批量)",
+             "description": "POST {id?|ids?|persons?|names?, dry_run?, force?, limit?}；dry_run 默认 true"},
+            {"path": "/actor/crop-avatar", "endpoint": self.api_actor_crop_avatar, "methods": ["POST"],
+             "auth": "bear", "summary": "裁 3:4 并前插为主图",
+             "description": "POST {id, rect?}：拿当前主图裁 3:4 → 前插为 images[0] 并锁 images"},
+            {"path": "/actor/lock", "endpoint": self.api_actor_lock, "methods": ["POST"],
+             "auth": "bear", "summary": "锁/解锁演员字段",
+             "description": 'POST {id, field="images", on=true}'},
+            {"path": "/actor/gfriends/refresh", "endpoint": self.api_actor_gfriends_refresh,
+             "methods": ["POST"], "auth": "bear", "summary": "强制刷新 gFriends 索引",
+             "description": "POST {}：忽略 7 天 TTL 重拉 Filetree.json，拉不到就留旧缓存"},
             {"path": "/actors", "endpoint": self.api_actors, "methods": ["GET"], "auth": "bear",
              "summary": "演员榜"},
             {"path": "/actor", "endpoint": self.api_actor, "methods": ["GET"], "auth": "bear",
@@ -2061,11 +2110,49 @@ class AVHelper(_PluginBase):
         return Response(content=blob, media_type=ui_media_type(target),
                         headers={"Cache-Control": "no-cache"})
 
+    @staticmethod
+    def local_image(url: Any) -> Optional[bytes]:
+        """手工裁剪/上传产生的**本地派生图**：`url` 是缓存目录内的图片文件就回字节，否则 None。
+
+        S3 的裁剪/上传把派生图落在 `imgproxy.cache_dir()`（= `paths.images_dir()`）里，本地
+        文件没有 http 地址可给，只能把**绝对路径**写进 `actor.images[].url`；而前端所有图都走
+        `/img?url=` —— 少这一条分支，用户裁完图看到的就是裂图。
+
+        **安全边界**（这条分支等于把「读服务器文件」暴露给匿名 GET，必须卡死）：
+
+        - 只认 `imgproxy.cache_dir()` **之内**的文件：`Path.resolve()` 解掉 `../` 与符号链接后，
+          真实路径必须仍在该目录下（`root in real.parents`）；
+        - 扩展名限 `.jpg/.jpeg/.png/.webp/.gif`，大小 (0, 8MB]。
+
+        任何一条不满足都回 None，调用方据此**落回原来的白名单分支**（行为一个字不变）。
+        """
+        text = str(url or "").strip()
+        if not text:
+            return None
+        try:
+            path = Path(text)
+            if not path.is_file() or path.suffix.lower() not in LOCAL_IMAGE_SUFFIXES:
+                return None
+            size = path.stat().st_size
+            if size <= 0 or size > LOCAL_IMAGE_MAX_BYTES:
+                return None
+            root = Path(imgproxy.cache_dir()).resolve()
+            real = path.resolve()
+            if root not in real.parents:            # 挡住 ../ 与指向外部的符号链接
+                return None
+            return real.read_bytes()
+        except (OSError, ValueError):                # pragma: no cover - 防御
+            return None
+
     def api_img(self, request: Request, url: str = "", emby: str = "",
                 emby_person: str = "", type: str = "Primary") -> Response:
         """图片代理：白名单内 URL → XOR 解包后的图片，否则 404。
 
         平时只服务 javdb 封面/预览图；长缩略图在浏览器直连失败时才退回这里（WebP 原样透传）。
+
+        另有一条**本地派生图**分支（0.9.0 演员线）：`?url=` 给的是缓存目录内的绝对路径时
+        直接读文件回（手工裁剪/上传的图没有 http 地址）。安全边界见 `local_image()` ——
+        只认缓存目录内的图片文件；不是本地文件就原样落到白名单分支，老行为一字不变。
 
         3.7 起多两个分支（**服务端回源，仍然匿名**，契约 §3.5 / v4.1 C2）：
         `?emby={item_id}&type=Primary`（影片原图）与 `?emby_person={person_id}`（演员原图）。
@@ -2083,8 +2170,11 @@ class AVHelper(_PluginBase):
             blob = (imgproxy.emby_image(host, apikey, target, type or "Primary")
                     if host and apikey else None)
         else:
-            # 走插件配置里那份代理：这条路是「浏览器直连失败」的兜底，服务端同样可能需要代理
-            blob = imgproxy.fetch(url or "", proxy=self._proxy)
+            # 先试本地派生图（裁剪/上传的落盘路径）；不是缓存目录内的图片文件才走白名单取图
+            blob = self.local_image(url)
+            if blob is None:
+                # 走插件配置里那份代理：这条路是「浏览器直连失败」的兜底，服务端同样可能需要代理
+                blob = imgproxy.fetch(url or "", proxy=self._proxy)
         if blob is None:
             return Response(status_code=404)
         etag = f'"{hashlib.sha1(blob).hexdigest()[:16]}"'
@@ -3593,6 +3683,380 @@ class AVHelper(_PluginBase):
         return {"success": True, "ok": True, "canonical_id": str(cid or ""),
                 "message": f"已保存 {name} → {zh}"}
 
+    # ---------- API：演员子系统（0.9.0 · S4 的对外面） ----------
+    # 7 条端点全部只做「解析入参 → 交给线程池 → 原样透传结果」，业务在 S1 的 `store.actor_*`、
+    # S2 的 `actor_sources`、S3 的 `actor_sync` 里。三者任一没落盘都回
+    # `{success:false, "演员子系统未就绪"}`，绝不让端点 500。
+
+    def actor_opts(self) -> Dict[str, Any]:
+        """演员设置的 6 项（**存放在 kv 的 `global_rule` 里**，不是宿主插件配置）。
+
+        口径照 `scrape_conf()`：只读不写、缺键逐项回落默认值 —— 设置台还没写 `actor*` 键时
+        照样不报错，`/rule` POST 进来的未知键也原样留在 kv 里。键名一个字母都不许改
+        （设置台「演员」栏按这套 camelCase 读写）。
+
+        两个数值项在这里夹取（batch 1–200、interval 0–60），端点与定时任务都从这里取，
+        免得各处散着 `.get()` 各夹一套夹出两种口径。
+        """
+        try:
+            rule = self.global_rule() or {}
+        except Exception as error:                              # noqa: BLE001 - 防御
+            logger.warning(f"AVHelper 读演员设置失败（回落默认值）：{error}")
+            rule = {}
+        low, high = ACTOR_BATCH_RANGE
+        batch = min(max(to_int(rule.get("actorBatchSize"),
+                               ACTOR_SETTING_DEFAULTS["actorBatchSize"]), low), high)
+        low, high = ACTOR_INTERVAL_RANGE
+        interval = min(max(to_int(rule.get("actorInterval"),
+                                  ACTOR_SETTING_DEFAULTS["actorInterval"]), low), high)
+        return {
+            "actorEnabled": pick_bool(rule.get("actorEnabled"),
+                                      ACTOR_SETTING_DEFAULTS["actorEnabled"]),
+            "actorGfriends": pick_bool(rule.get("actorGfriends"),
+                                       ACTOR_SETTING_DEFAULTS["actorGfriends"]),
+            "actorJavdbFallback": pick_bool(rule.get("actorJavdbFallback"),
+                                            ACTOR_SETTING_DEFAULTS["actorJavdbFallback"]),
+            "actorAutoSync": pick_bool(rule.get("actorAutoSync"),
+                                       ACTOR_SETTING_DEFAULTS["actorAutoSync"]),
+            "actorBatchSize": batch,
+            "actorInterval": interval,
+        }
+
+    def actor_sync_module(self) -> Any:
+        """延迟导入 S3 的 `actor_sync`：缺失/导入失败回 None，端点据此给明确错误。"""
+        try:
+            from . import actor_sync  # noqa: F401  pylint: disable=import-outside-toplevel
+            return actor_sync
+        except Exception as error:
+            logger.warning(f"AVHelper 演员同步模块不可用（延迟导入 actor_sync 失败）：{error}")
+            return None
+
+    def actor_sources_module(self) -> Any:
+        """延迟导入 S2 的 `actor_sources`：同上，回 None 让端点给明确错误。"""
+        try:
+            from . import actor_sources  # noqa: F401  pylint: disable=import-outside-toplevel
+            return actor_sources
+        except Exception as error:
+            logger.warning(f"AVHelper 演员来源模块不可用（延迟导入 actor_sources 失败）：{error}")
+            return None
+
+    @classmethod
+    def actor_not_ready(cls, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """演员子系统依赖没落盘时的统一错误体（`success:false` + 明确文案）。"""
+        return cls.api_error(ACTOR_NOT_READY, extra)
+
+    @staticmethod
+    def _name_list(value: Any) -> Optional[List[str]]:
+        """body 里的名字数组：不是数组（含缺键）回 None —— 调用方据此区分「没点名」与「点了空」。"""
+        if not isinstance(value, list):
+            return None
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    @staticmethod
+    def _actor_out(row: Any) -> Dict[str, Any]:
+        """actor 行 → 返回体：`images[].primary` **现场算**（`images[0]` 就是主图）。
+
+        库里 `images_json` 只存「图从哪来、多大」，主图位是由**位置**决定的（方案 §2）——
+        所以这里按序补布尔位，**不回写库**：回写会让「前插一张」变成两次写、两处口径。
+        """
+        if not isinstance(row, dict):
+            return {}
+        out = dict(row)
+        images: List[Dict[str, Any]] = []
+        for index, item in enumerate(out.get("images") or []):
+            if not isinstance(item, dict):
+                continue
+            entry = dict(item)
+            entry["primary"] = index == 0
+            images.append(entry)
+        out["images"] = images
+        return out
+
+    def actor_person(self, row: Any) -> str:
+        """actor 行（或 `meta.actors` 里的一条）→ Emby 规范名，走 `scraper.person_from_actor()`。
+
+        行里自带 `person` 就直接用（`_avatar_index()` 的口径）：那是写进 Emby 那一刻算出来的
+        值，重算反而可能因为映射表被改而漂掉。算不出来回空串，**不抛**。
+        """
+        if not isinstance(row, dict):
+            return str(row or "").strip()
+        person = str(row.get("person") or "").strip()
+        if person:
+            return person
+        mod = self.scrape_module()
+        fn = getattr(mod, "person_from_actor", None) if mod is not None else None
+        if not callable(fn):
+            return ""
+        try:
+            return str(fn(row) or "").strip()
+        except Exception as error:                              # noqa: BLE001 - 防御
+            logger.warning(f"AVHelper 算演员规范名失败：{error}")
+            return ""
+
+    def actor_numbers(self, row: Any, limit: int = 200) -> List[Dict[str, Any]]:
+        """这位演员出现在哪些片里：扫 `meta.actors`，**按规范名精确比对**（不拿 name/zh 猜）。
+
+        口径与 `scraper._avatar_index()` 同一条链（`person_from_actor()`），所以「演员页列出的
+        片」与「写进 Emby 的 People 名」永远是同一个键。命中 `limit` 部就停；读失败回空数组
+        并只 warning —— 详情页不能因为作品史读不出来就整页失败。
+        """
+        person = self.actor_person(row)
+        list_fn = getattr(self.store, "meta_list", None)
+        if not person or not callable(list_fn):
+            return []
+        try:
+            rows = list_fn() or []
+        except Exception as error:                              # noqa: BLE001 - 读接口不报错
+            logger.warning(f"AVHelper 读作品元数据失败（演员作品史留空）：{error}")
+            return []
+        found: List[Dict[str, Any]] = []
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            for actor in (item.get("actors") or []):
+                if not isinstance(actor, dict) or self.actor_person(actor) != person:
+                    continue
+                number = str(item.get("display_number") or item.get("key") or "").strip()
+                if number and number not in {hit["number"] for hit in found}:
+                    found.append({"number": number,
+                                  "title": str(item.get("title_zh")
+                                               or item.get("title_jp") or "")})
+                break
+            if len(found) >= limit:
+                break
+        return found
+
+    def actor_history(self, row: Any, limit: int = 20) -> List[Dict[str, Any]]:
+        """这位演员最近的 `scrape_log` 记录（`source_name='actor'`，行键是规范名/展示名）。
+
+        `actor_sync._log()` 写进来的 `key` 是 `person`（`no_person` 那条是原始名），所以四个
+        名字都认。查不到（或 store 没有这个方法）回空数组，**不报错**。
+        """
+        if not isinstance(row, dict):
+            return []
+        keys = {str(row.get(name) or "").strip() for name in ("person", "name", "zh", "jp")}
+        keys.discard("")
+        fn = getattr(self.store, "scrape_log_recent", None)
+        if not keys or not callable(fn):
+            return []
+        try:
+            logs = fn(200, source_name="actor") or []
+        except Exception as error:                              # noqa: BLE001 - 读接口不报错
+            logger.warning(f"AVHelper 读演员日志失败（历史留空）：{error}")
+            return []
+        out: List[Dict[str, Any]] = []
+        for log in logs:
+            if not isinstance(log, dict) or str(log.get("key") or "") not in keys:
+                continue
+            out.append({"at": str(log.get("created_at") or ""),
+                        "action": str(log.get("status") or ""),
+                        "reason": str(log.get("reason") or log.get("error_summary") or "")})
+            if len(out) >= limit:
+                break
+        return out
+
+    def api_actor_list(self, q: str = "", filter: str = "", page: int = 1,
+                       limit: int = 60) -> Dict[str, Any]:
+        """`/actor/list?q=&filter=&page=&limit=`：演员卡片墙（S1 的 `actor_list()`）。
+
+        行形状是 `store.actor_*` 的契约，这里**不重塑**（多图/来源/锁都在行里，前端按详情读）。
+        `filter` 认 `missing_avatar` / `locked` / `failed` 三个值，其它（含空串）等于不过滤；
+        分页在 SQL 侧做（`offset` 由 page 换算），别把整表拉回来再切片。
+        """
+        page = max(1, to_int(page, 1))
+        size = min(max(to_int(limit, 60), 1), 200)
+        empty = {"items": [], "total": 0, "page": page, "limit": size}
+        fn = getattr(self.store, "actor_list", None)
+        if not callable(fn):
+            return self.actor_not_ready(empty)
+        try:
+            data = fn(q=str(q or ""), flt=str(filter or ""), limit=size,
+                      offset=(page - 1) * size)
+        except Exception as error:
+            logger.error(f"AVHelper 读演员列表失败：{error}")
+            return self.api_error(str(error), empty)
+        rows = [self._actor_out(row) for row in ((data or {}).get("items") or [])
+                if isinstance(row, dict)]
+        return {"success": True, "items": rows,
+                "total": to_int((data or {}).get("total"), len(rows)),
+                "page": page, "limit": size}
+
+    def api_actor_detail(self, id: str = "") -> Dict[str, Any]:
+        """`/actor/detail?id=`：一位演员的全部明细 + 作品史 + 最近动作。
+
+        返回 `{success, actor, numbers, history}`：
+
+        - `actor`：S1 那一行（`images` 每项带 `primary`，`images[0]` 即主图）；
+        - `numbers`：这位演员在库里的片（`[{number, title}]`，按规范名精确比对，最多 200）；
+        - `history`：`scrape_log` 里属于他的最近动作（`[{at, action, reason}]`，最多 20）。
+
+        用**查询参数**而不是路径参数 `/actor/{id}`：宿主的 `/actor` 注册在前，
+        路径参数写法会被前缀抢先匹配（同页的 javdb 演员页就废了）。
+        """
+        actor_id = to_int(id)
+        empty = {"actor": None, "numbers": [], "history": []}
+        if actor_id <= 0:
+            return self.api_error("缺少演员 id", empty)
+        fn = getattr(self.store, "actor_get", None)
+        if not callable(fn):
+            return self.actor_not_ready(empty)
+        try:
+            row = fn(actor_id=actor_id)
+        except Exception as error:
+            logger.error(f"AVHelper 读演员详情失败（{actor_id}）：{error}")
+            return self.api_error(str(error), empty)
+        if not row:
+            return self.api_error(f"没有这位演员（id={actor_id}）", empty)
+        return {"success": True, "actor": self._actor_out(row),
+                "numbers": self.actor_numbers(row), "history": self.actor_history(row)}
+
+    async def api_actor_sources(self) -> Dict[str, Any]:
+        """`/actor/sources`：源清单 + gFriends 索引状态（多少条 / 什么时候拉的 / 是否过期）。
+
+        索引状态是同步磁盘 IO（6.5 MB 落盘 JSON + 进程内缓存），交给宿主线程池；
+        `index_status()` 的四个键（count/fetched_at/stale/source）原样透传，界面「索引状态」
+        与结果明细里的 `index_stale` 徽标直接读它。
+        """
+        opts = self.actor_opts()
+        # `note` 是给前端当 title 用的一句话（这个源干什么、关掉会怎样），不要在下发后拼文案
+        sources = [
+            {"role": "image", "id": "gfriends", "name": "gFriends 直连",
+             "enabled": opts["actorGfriends"],
+             "note": "gFriends 头像索引（7 天缓存，上万条艺名）；关掉就只剩 javdb 缩略图"},
+            {"role": "image", "id": "javdb", "name": "javdb 演员附图",
+             "enabled": opts["actorJavdbFallback"],
+             "note": "gFriends 没命中时回落 javdb 演员附图（100×100–400×400 缩略图）；"
+                     "关掉后没候选的演员记 no_avatar"},
+            {"role": "profile", "id": "namemap", "name": "本地映射表", "enabled": True,
+             "note": "内置 5.7k 条 + 用户映射，本地不联网；三语名与规范名都由它算出来"},
+            {"role": "profile", "id": "javdb", "name": "javdb 演员页", "enabled": True,
+             "note": "javdb 演员页补资料（生日/身高/三围），只填空字段，不覆盖已有"},
+        ]
+        status: Dict[str, Any] = {"count": 0, "fetched_at": "", "stale": True, "source": ""}
+        extra = {"index": status, "sources": sources, "opts": opts}
+        mod = self.actor_sources_module()
+        fn = getattr(mod, "index_status", None) if mod is not None else None
+        if not callable(fn):
+            return self.actor_not_ready(extra)
+        try:
+            raw = await asyncio.to_thread(fn)
+        except Exception as error:
+            logger.error(f"AVHelper 读 gFriends 索引状态失败：{error}")
+            return self.api_error(str(error), extra)
+        if isinstance(raw, dict):
+            status.update({key: raw[key] for key in status if key in raw})
+        return {"success": True, "index": status, "sources": sources, "opts": opts}
+
+    async def api_actor_scrape(self, request: Request) -> Dict[str, Any]:
+        """`/actor/scrape`：单据与批量合一（`{id?, ids?, persons?, names?, dry_run?, force?, limit?}`）。
+
+        `dry_run` **默认 true**（与 `/scrape/avatars` 同一口径）：不带这个键只想看清单，
+        真正写 Emby 要显式 `dry_run:false`。返回体是 S3 `run_actor_scrape()` 的
+        `{ok, dry_run, counts, items, errors}` 原样透传，只补一个 `success`（取 `ok`）。
+        全空入参 = 全库预览（「一键补齐缺失头像」的 dry-run 即这条路）。
+        """
+        payload = await self._json_body(request)
+        extra = {"ok": False, "dry_run": True, "counts": {}, "items": [], "errors": []}
+        mod = self.actor_sync_module()
+        fn = getattr(mod, "run_actor_scrape", None) if mod is not None else None
+        if not callable(fn):
+            return self.actor_not_ready(extra)
+        actor_ids = [to_int(item) for item in payload["ids"]] \
+            if isinstance(payload.get("ids"), list) else None
+        if actor_ids is not None:
+            actor_ids = [item for item in actor_ids if item > 0] or None
+        single = to_int(payload.get("id"))
+        if single > 0:
+            actor_ids = [single] + [item for item in (actor_ids or []) if item != single]
+        dry_run = pick_bool(payload.get("dry_run"), True)
+        try:
+            result = await asyncio.to_thread(
+                fn, self.store, self.emby_client(),
+                actor_ids=actor_ids, persons=self._name_list(payload.get("persons")),
+                names=self._name_list(payload.get("names")), dry_run=dry_run,
+                force=pick_bool(payload.get("force"), False), limit=to_int(payload.get("limit")),
+                proxy=self._proxy, opts=dict(self.actor_opts()))
+        except Exception as error:
+            logger.error(f"AVHelper 演员刮削失败：{error}")
+            return self.api_error(str(error), {"ok": False, "dry_run": dry_run,
+                                               "counts": {}, "items": [], "errors": [str(error)]})
+        out = dict(result) if isinstance(result, dict) else {}
+        out["success"] = bool(out.get("ok", True))
+        return out
+
+    async def api_actor_crop_avatar(self, request: Request) -> Dict[str, Any]:
+        """`/actor/crop-avatar`：按 3:4 裁当前主图 → 前插为主图并锁 `images`。
+
+        取图、裁切、上传、落库全在 S3 的流水线里（`actor_sync.crop_avatar()`），这里只解析
+        入参交给线程池 —— `rect` 可选，缺省由它按 3:4 自判（`imgproxy.crop_poster` 的口径）。
+        信封与 `/actor/lock` 一致：`{success, actor}`（写后的整行，`images[0]` 就是新主图）。
+        """
+        payload = await self._json_body(request)
+        actor_id = to_int(payload.get("id"))
+        if actor_id <= 0:
+            return self.api_error("缺少演员 id", {"actor": None})
+        mod = self.actor_sync_module()
+        fn = getattr(mod, "crop_avatar", None) if mod is not None else None
+        if not callable(fn):
+            return self.actor_not_ready({"actor": None})
+        rect = payload.get("rect")
+        try:
+            result = await asyncio.to_thread(
+                fn, self.store, self.emby_client(), actor_id=actor_id,
+                rect=rect if isinstance(rect, dict) else None,
+                opts=dict(self.actor_opts()))
+        except Exception as error:
+            logger.error(f"AVHelper 裁切演员头像失败（{actor_id}）：{error}")
+            return self.api_error(str(error), {"actor": None})
+        out = dict(result) if isinstance(result, dict) else {}
+        return {"success": bool(out.get("ok", True)),
+                "actor": self._actor_out(out.get("actor"))}
+
+    async def api_actor_lock(self, request: Request) -> Dict[str, Any]:
+        """`/actor/lock`：锁/解锁一位演员的字段（默认 `field="images"`、`on=true`）。
+
+        锁了 `images` 之后 `scrape` 只补资料不换图；解锁走同一个端点（`on:false`），
+        不需要另开一条 —— 前端的锁按钮因此只有一个动作。信封：`{success, actor}`
+        （`actor` 是写后的整行，前端拿到就能直接重渲染，不必再打一次 detail）。
+        """
+        payload = await self._json_body(request)
+        actor_id = to_int(payload.get("id"))
+        if actor_id <= 0:
+            return self.api_error("缺少演员 id", {"actor": None})
+        field = str(payload.get("field") or "images").strip() or "images"
+        on = pick_bool(payload.get("on"), True)
+        fn = getattr(self.store, "actor_lock", None)
+        if not callable(fn):
+            return self.actor_not_ready({"actor": None})
+        try:
+            result = await asyncio.to_thread(fn, actor_id, field=field, on=on)
+        except Exception as error:
+            logger.error(f"AVHelper 锁演员字段失败（{actor_id}/{field}）：{error}")
+            return self.api_error(str(error), {"actor": None})
+        return {"success": isinstance(result, dict) and bool(result),
+                "actor": self._actor_out(result)}
+
+    async def api_actor_gfriends_refresh(self) -> Dict[str, Any]:
+        """`/actor/gfriends/refresh`：忽略 7 天 TTL 强制重拉 Filetree.json。
+
+        拉取失败**保留旧缓存**（S2 的口径：`refresh_index()` 返回刷新后的 `index_status()`，
+        没有 `ok` 键）—— 所以 `success` 取 `stale` 的反面：拉到了才叫成功，旧缓存照用但界面
+        该亮 `index_stale`。`proxy` 用插件配置的那个（raw.githubusercontent.com 基本都要走它）。
+        """
+        extra = {"ok": False, "index": {"count": 0, "fetched_at": "", "stale": True, "source": ""}}
+        mod = self.actor_sources_module()
+        fn = getattr(mod, "refresh_index", None) if mod is not None else None
+        if not callable(fn):
+            return self.actor_not_ready(extra)
+        try:
+            result = await asyncio.to_thread(fn, proxy=self._proxy)
+        except Exception as error:
+            logger.error(f"AVHelper 刷新 gFriends 索引失败：{error}")
+            return self.api_error(str(error), extra)
+        out = dict(result) if isinstance(result, dict) else {}
+        out["success"] = bool(out.get("ok", not bool(out.get("stale", True))))
+        return out
+
     # ---------- API：缓存维护 ----------
 
     def api_cache_clean(self) -> Dict[str, Any]:
@@ -3699,6 +4163,43 @@ class AVHelper(_PluginBase):
             self.notifier.info("缓存清理", f"本次清理释放 {removed_bytes / 1024 ** 3:.1f} GB")
         logger.info(f"AVHelper 缓存清理完成，释放 {removed_bytes / 1024 ** 2:.1f} MB")
         return int(removed_bytes)
+
+    def job_actor_sync(self) -> int:
+        """演员头像同步（cron 每 15 分钟一轮）：把 `actor_queue` 里的一批走一遍流水线。
+
+        两个开关（`actorEnabled` / `actorAutoSync`）任一关着就**静默** return 0 —— 定时任务
+        不该为「用户关了它」每 15 分钟留一条日志。依赖模块（S3 的 `actor_sync`）没落盘同样
+        return 0，端点那边才是给人看的报错位置。
+
+        **整个函数体包在 try/except 里**：宿主 scheduler 是全局共享的，这里抛出去会把订阅检查
+        一起带停。异常只 `logger.warning`，返回 0 让宿主当「本轮没活干」。
+
+        :return: 本轮真进流水线的条数（取值顺序 `handled` → `counts['total']` → `popped`；
+                 cron 调用方忽略该值）
+        """
+        try:
+            opts = self.actor_opts()
+            if not opts["actorEnabled"] or not opts["actorAutoSync"]:
+                return 0
+            mod = self.actor_sync_module()
+            fn = getattr(mod, "queue_tick", None) if mod is not None else None
+            if not callable(fn):
+                return 0
+            result = fn(self.store, self.emby_client(), batch=opts["actorBatchSize"],
+                        proxy=self._proxy, opts=dict(opts))
+            if not isinstance(result, dict):
+                return 0
+            # S3 的 queue_tick()：`handled` 是**真进流水线**的条数（含 due 补位），比 `popped`
+            # （只从队列取走的）准；两个都没有时退 `counts['total']`。都认不出就按 0。
+            counts = result.get("counts") if isinstance(result.get("counts"), dict) else {}
+            count = to_int(result.get("handled") or counts.get("total")
+                           or result.get("popped") or 0)
+            if count:
+                logger.info(f"AVHelper 演员头像同步：本轮处理 {count} 位")
+            return count
+        except Exception as error:                              # noqa: BLE001 - 定时任务绝不外抛
+            logger.warning(f"AVHelper 演员头像同步失败（下一轮重试）：{error}")
+            return 0
 
     def trigger_check_now(self) -> None:
         """界面“立即检查”入口：挂一次性任务，避免阻塞请求线程。"""

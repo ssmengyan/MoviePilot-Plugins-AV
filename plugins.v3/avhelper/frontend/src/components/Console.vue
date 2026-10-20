@@ -14,10 +14,14 @@ import { useRuntimeInfo } from '../composables/useRuntimeInfo'
 import { useSettingsDraft, type RuleState } from '../composables/useSettingsDraft'
 import { useHostConfirm } from '../composables/useHostDialogs'
 import {
+  ACTOR_DEFAULTS,
+  ACTOR_SECTIONS,
   SCRAPE_DEFAULTS,
   SCRAPE_SECTIONS,
   SETTINGS_SECTIONS,
+  toActorSettings,
   toScrapeSettings,
+  type ActorSettings,
   type ScrapeSettings,
   type SectionItem,
 } from './settings/panels'
@@ -25,6 +29,7 @@ import GeneralPanel from './settings/GeneralPanel.vue'
 import SitesPanel from './settings/SitesPanel.vue'
 import RulePanel from './settings/RulePanel.vue'
 import ScrapePanel from './settings/ScrapePanel.vue'
+import ActorPanel from './settings/ActorPanel.vue'
 import ScrapeRulePanel from './settings/ScrapeRulePanel.vue'
 import NotifyPanel from './settings/NotifyPanel.vue'
 import LibraryPanel from './settings/LibraryPanel.vue'
@@ -36,6 +41,7 @@ import LibraryView from './views/LibraryView.vue'
 import TasksView from './views/TasksView.vue'
 import SubsView from './views/SubsView.vue'
 import ActorsView from './views/ActorsView.vue'
+import ActorLibraryView from './views/ActorLibraryView.vue'
 import DiscoverView from './views/DiscoverView.vue'
 import ScrapeView from './views/ScrapeView.vue'
 import DetailDrawer from './detail/DetailDrawer.vue'
@@ -82,6 +88,10 @@ const emit = defineEmits(CONSOLE_EMIT_NAMES)
 const DATA_SECTIONS: SectionItem[] = [
   { key: 'discover', title: '发现榜单', icon: 'mdi-chart-line' },
   { key: 'actors', title: '我的演员', icon: 'mdi-account-star' },
+  // 「演员库」（0.9.0 演员线 S5 加）：后端 actor 表的全部演员（卡片墙 + 缺头像筛选 + 详情）。
+  // 与「我的演员」分工：那一栏是**我收藏的**演员作品史，这一栏是**刮削得到的**演员与头像维护。
+  // 图标刻意与「我的演员」区分开（同一个 mdi-account-star 会让左栏出现两个一模一样的图标）。
+  { key: 'actorLibrary', title: '演员库', icon: 'mdi-account-box-multiple' },
   { key: 'subs', title: '订阅', icon: 'mdi-rss' },
   { key: 'tasks', title: '任务', icon: 'mdi-clipboard-list' },
   // 「下载」内部有两个页签（下载中 / 下载历史，2026-10-12 融合）：完成的番号落到台账后
@@ -121,6 +131,8 @@ const NATIVE_VIEWS: Record<string, Component> = {
   tasks: TasksView,
   subs: SubsView,
   actors: ActorsView,
+  // 第九栏（0.9.0 演员线 S5）：演员库（卡片墙 + 详情：轮播 / 重刮 / 锁 / 3:4 裁剪）。
+  actorLibrary: ActorLibraryView,
   // 第八栏（v4 刮削线 0.7.0）：全库刮削工作台 + 数据源自检。
   scrape: ScrapeView,
 }
@@ -449,11 +461,78 @@ async function saveScrapeSettings(): Promise<boolean> {
 }
 
 /**
+ * 「演员」栏的设置草稿（0.9.0 演员线 S5 加）。
+ *
+ * 与上面刮削两栏**同一套机制、同一份 kv**（`POST /rule`），只是键名不同
+ * （`ACTOR_KEYS`：`actorEnabled` / `actorGfriends` / `actorJavdbFallback` /
+ * `actorAutoSync` / `actorBatchSize` / `actorInterval`）。
+ * 两侧刻意各写一份状态而不是合并：合并要动刮削那条已经真机验收过的路径，收益只是一次 GET。
+ * 脏标记同样在 `panels.ts` 里标 `none`，由 `sectionDirtyEx()` 或进来。
+ */
+const actorSettings = ref<ActorSettings>({ ...ACTOR_DEFAULTS })
+const actorPatches = ref<Partial<ActorSettings>>({})
+const actorDirty = computed(() => Object.keys(actorPatches.value).length > 0)
+/** 面板显示值 = 已存值 + 未提交补丁（面板只读这一份，自己不存状态）。 */
+const actorView = computed<ActorSettings>({ ...actorSettings.value, ...actorPatches.value } as ActorSettings)
+/** 只在真正进「演员」栏时读一次 `GET /rule`。 */
+let actorLoaded = false
+
+function ensureActorLoaded(): void {
+  if (actorLoaded) return
+  actorLoaded = true
+  void loadActorSettings()
+}
+
+async function loadActorSettings(): Promise<void> {
+  try {
+    const res: any = await currentApi().get('plugin/rule')
+    const payload = res && typeof res === 'object' && 'data' in res ? res.data : res
+    const raw = payload && typeof payload === 'object' && 'rule' in payload ? payload.rule : payload
+    actorSettings.value = toActorSettings(raw)
+  } catch {
+    // 读不到（老后端 / 请求失败）：保持默认值即可，保存时后端 `merge_rule()` 还会兜一道。
+    actorSettings.value = { ...ACTOR_DEFAULTS }
+  }
+}
+
+function patchActor(patch: Partial<ActorSettings>): void {
+  actorPatches.value = { ...actorPatches.value, ...patch }
+}
+
+/**
+ * 提交演员设置（只发补丁本身）。
+ *
+ * 后端是**以已存规则为基准合并**（`merge_rule({**self.global_rule(), **payload.rule})`），
+ * 所以只发这几个键不会冲掉「下载规则」与「刮削」那两批。
+ */
+async function saveActorSettings(): Promise<boolean> {
+  if (!actorDirty.value) return true
+  try {
+    const res: any = await currentApi().post('plugin/rule', { rule: { ...actorPatches.value } })
+    const payload = res && typeof res === 'object' && 'data' in res ? res.data : res
+    if (payload && typeof payload === 'object' && (payload as any).success === false) {
+      toast.error(String((payload as any).message || '演员设置保存失败'))
+      return false
+    }
+    actorSettings.value = { ...actorSettings.value, ...actorPatches.value }
+    actorPatches.value = {}
+    return true
+  } catch (err) {
+    toast.error(`演员设置保存失败：${errorText(err)}`)
+    return false
+  }
+}
+
+/**
  * 左栏脏点：草稿层那两个组 + 刮削两栏自己的补丁。
  * `panels.ts` 里把这两栏的 `DIRTY_GROUPS` 标成 `none`（草稿层认不出它们的字段），所以在这里或进来。
  */
 function sectionDirtyEx(key: string): boolean {
-  return sectionDirty(key) || (scrapeDirty.value && SCRAPE_SECTIONS.includes(key))
+  return (
+    sectionDirty(key)
+    || (scrapeDirty.value && SCRAPE_SECTIONS.includes(key))
+    || (actorDirty.value && ACTOR_SECTIONS.includes(key))
+  )
 }
 
 function pick(item: SectionItem): void {
@@ -464,6 +543,8 @@ function pickSetting(item: SectionItem): void {
   settingsSection.value = item.key
   // 刮削两栏的字段不在草稿层里：真正点进这两栏时才读一次 `GET /rule` 拿它们的现值。
   if (SCRAPE_SECTIONS.includes(item.key)) ensureScrapeLoaded()
+  // 「演员」栏同一条待遇（见 `actorSettings`）。
+  if (ACTOR_SECTIONS.includes(item.key)) ensureActorLoaded()
 }
 
 /**
@@ -563,6 +644,9 @@ async function saveAll(): Promise<void> {
   // 失败就**不**往下走 —— 与草稿层「第 1 步失败不提交第 2 步」同一条纪律。
   const scrapeOk = await saveScrapeSettings()
   if (!scrapeOk) return
+  // 「演员」栏同理（同一条纪律：上一步失败就不往下走）。
+  const actorOk = await saveActorSettings()
+  if (!actorOk) return
   const ok = await saveDraft()
   if (!ok) return
   emit('action')
@@ -721,6 +805,7 @@ function applyPendingSection(): void {
   if (pending && SETTINGS_SECTIONS.some(item => item.key === pending)) {
     settingsSection.value = pending
     if (SCRAPE_SECTIONS.includes(pending)) ensureScrapeLoaded()
+    if (ACTOR_SECTIONS.includes(pending)) ensureActorLoaded()
   }
 }
 
@@ -991,15 +1076,16 @@ onBeforeUnmount(() => {
           <v-spacer />
 
           <!-- 保存按钮跟着设置窗口走：数据台没有可保存的东西。
-               `scrapeDirty` 是刮削两栏的补丁（不在草稿层的字段集合里），两处合起来才是完整的未保存态。 -->
+               `scrapeDirty` / `actorDirty` 是刮削两栏与演员栏的补丁（不在草稿层的字段集合里），
+               三处合起来才是完整的未保存态。 -->
           <v-btn
-            :color="dirty || scrapeDirty ? 'warning' : 'primary'"
-            :variant="dirty || scrapeDirty ? 'flat' : 'tonal'"
+            :color="dirty || scrapeDirty || actorDirty ? 'warning' : 'primary'"
+            :variant="dirty || scrapeDirty || actorDirty ? 'flat' : 'tonal'"
             prepend-icon="mdi-content-save"
             :loading="draftSaving"
             class="me-2"
             @click="saveAll"
-          >{{ scrapeDirty ? '保存修改 ● 未保存' : saveButtonLabel }}</v-btn>
+          >{{ dirty || scrapeDirty || actorDirty ? '保存修改 ● 未保存' : saveButtonLabel }}</v-btn>
 
           <v-btn
             variant="text"
@@ -1013,7 +1099,7 @@ onBeforeUnmount(() => {
         <v-divider />
 
         <div class="avh-settings__body">
-          <!-- 左栏：设置九栏 -->
+          <!-- 左栏：设置十栏 -->
           <nav class="avh-settings__nav">
             <v-list density="compact" nav :selected="[settingsSection]" mandatory>
               <v-list-item
@@ -1093,6 +1179,14 @@ onBeforeUnmount(() => {
               :api="currentApi()"
               :toast="injectedToast"
               @patch="patchScrape"
+            />
+
+            <ActorPanel
+              v-else-if="settingsSection === 'actor'"
+              :settings="actorView"
+              :api="currentApi()"
+              :toast="injectedToast"
+              @patch="patchActor"
             />
 
             <NotifyPanel

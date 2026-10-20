@@ -48,6 +48,8 @@ ALLOWED_HOSTS = {
     "pic.duga.jp",
     # Gfriends 演员头像（v4.1 §5.2 第二顺位头像源；raw.githubusercontent.com 直出）
     "raw.githubusercontent.com",
+    # Gfriends 索引镜像（jsdelivr 代理 GitHub 仓库；演员线 actor_sources.GFRIENDS_MIRROR）
+    "cdn.jsdelivr.net",
 }
 
 #: 后缀匹配的图床域（**必须以 `.` 开头**，只匹配子域，不匹配域本身）。

@@ -3654,6 +3654,30 @@ def scrape_one(key: Any, *, store: Any, cli: Any, emby_client: Any,
         except Exception as error:                              # noqa: BLE001 - 头像同步不阻断刮削
             logger.warning(f"AVHelper 头像同步失败（不影响刮削）：{type(error).__name__}: {error}")
             report["warnings"].append(f"头像同步失败：{type(error).__name__}: {error}")
+    # 女演员入 actor 队列（0.9.0 方案 §4「自动入队」）：这里**只登记、不立刻请求**，由定时 tick
+    # 批量消费（每轮 ≤20 位、两车间隔 ≥2s）。整段必须自己兜住：入队失败绝不能让刮削失败。
+    # 只登记女演员：拿得到 gender 才过滤 gender == 1；拿不到就全登记（**不猜**，与 0.8.1 的
+    # existing 口径一致 —— 缺失 ≠ 男）。store 还没有这套 API（S1 未落地）时静默跳过，不记 warning。
+    if wrote:
+        try:
+            queued: List[str] = []
+            for row in actor_rows(target.get("actors")):
+                gender = row.get("gender")
+                try:
+                    gender = None if gender in (None, "") else int(gender)
+                except (TypeError, ValueError):
+                    gender = None
+                if gender == 1:
+                    continue
+                person = str(row.get("person") or person_from_actor(row) or "")
+                if person and person not in queued:
+                    queued.append(person)
+            pusher = getattr(store, "actor_queue_push", None)
+            if queued and callable(pusher):
+                pusher(queued)
+        except Exception as error:                              # noqa: BLE001 - 入队不阻断刮削
+            logger.warning(f"AVHelper 演员入队失败（不影响刮削）：{type(error).__name__}: {error}")
+            report["warnings"].append(f"演员入队失败：{type(error).__name__}: {error}")
     meta = _meta_of(store, key_text)
     report["retry"] = {
         "retry_count": _to_int((meta or {}).get("retry_count")),
@@ -4168,125 +4192,14 @@ def sync_actor_avatars(store: Any, emby_client: Any, *, limit: int = 0, dry_run:
     返回 `{ok, dry_run, actors, planned:[{name, person_id, action, reason, url?, source?}],
     applied:[…], errors:[…], missing_person, gender_unknown}`；`actors` 是**过滤后真正进流程**的
     条数（性别 + `names` 过滤在前，`limit` 在后）。
-    """
-    options = dict(opts or {})
-    mod = namemap_mod if namemap_mod is not None else namemap
-    planned: List[Dict[str, Any]] = []
-    applied: List[Dict[str, Any]] = []
-    errors: List[str] = []
-    out: Dict[str, Any] = {
-        "ok": False, "dry_run": bool(dry_run), "actors": 0, "planned": planned,
-        "applied": applied, "errors": errors, "missing_person": 0, "gender_unknown": 0,
-    }
-    if emby_client is None or not _emby_write_ok(emby_client):
-        errors.append("未配置 Emby（emby_client 不可用）")
-        return out
-    index = _avatar_index(store, mod)
-    rows = sorted(index.values(), key=lambda row: row["name"])
-    if names is not None:                       # R5：单片路径只处理这一片的演员
-        wanted = {_clean_text(item) for item in names}
-        wanted.discard("")
-        rows = [row for row in rows if _wanted_slot(row, wanted)]
-        if not rows:
-            out["ok"] = True                    # 这些名字还不在 meta 索引里 = 无事可做，不是错误
-            return out
-    if not rows:
-        errors.append("meta 里还没有演员（先刮削几条再来同步头像）")
-        return out
-    # gender 过滤（R3 + 0.7.4）：1=男 直接跳过；None=旧数据缺字段 **保守保留**并单独计数；
-    # 只有 0=女 与 None 进流程 —— 详见上面第 8 条。
-    female: List[Dict[str, Any]] = []
-    for row in rows:
-        gender = row.get("gender")
-        if gender in (None, ""):
-            gender = None
-        else:
-            try:
-                gender = int(gender)
-            except (TypeError, ValueError):
-                gender = None
-        if gender == 1:
-            continue
-        if gender is None:
-            # ⚠️ **缺失 ≠ 男**（0.7.4）：本库 201 位去重演员里还有 **12 位没有 `gender`**
-            # （109 女 / 80 男 / 12 缺），老代码在这里直接 `continue`，于是这 12 位
-            # ——看名字多数是女演员——**一个头像都同步不到**（只在计数里报 gender_unknown），
-            # 用户看到的就是「女优头像设置还是不行」。
-            # 口径按方案 §2.6 的原文：**缺失时保守保留** —— 宁可给某位男演员多传一张头像，
-            # 也不要漏掉女优；重刮一遍把 gender 补齐后，这批名字自然收敛到正确分支。
-            out["gender_unknown"] += 1
-        female.append(row)
-    rows = female
-    size = _to_int(limit)
-    if size > 0:
-        rows = rows[:size]
-    out["actors"] = len(rows)
-    if not rows:
-        out["ok"] = not errors                  # 全被 gender 过滤掉：没有可同步的，不是错误
-        return out
 
-    writer = bool(_opt(options, "person_provider_ids", True))
-    for row in rows:
-        name = row["name"]
-        entry: Dict[str, Any] = {"name": name, "person_id": "", "action": "skip", "reason": ""}
-        finder = getattr(emby_client, "find_person", None)
-        person = None
-        if callable(finder):
-            try:
-                person = finder(name)
-            except Exception as error:                          # noqa: BLE001 - 故意的
-                errors.append(f"{name}：find_person 异常 {type(error).__name__}: {error}")
-                entry["reason"] = "find_failed"
-                planned.append(entry)
-                continue
-        if not isinstance(person, dict) or not str(person.get("Id") or ""):
-            out["missing_person"] += 1
-            entry["reason"] = "person_missing"
-            planned.append(entry)
-            continue
-        entry["person_id"] = str(person.get("Id"))
-        has_image = bool((person.get("ImageTags") or {}).get("Primary"))
-        if has_image and not bool(_opt(options, "avatar_force", False)):
-            entry["reason"] = "has_image"
-            planned.append(entry)
-            continue
-        # 取图：**只剩 javdb**（0.8.1 起 MetaTube 整体下线，原先优先的 Gfriends 源一起去掉）。
-        # javdb 的 `tp.spfcas.com/…/avatars/xx/*.jpg` 是**列表缩略图**（100×100 ~ 400×400），
-        # 比 Gfriends 整图小 —— 这是让 MetaTube 下线必须接受的画质代价；没有图就如实跳过，
-        # 绝不挂错人，也不拿别的站点猜一张。
-        avatar_url = str(row.get("avatar") or "")
-        source = "javdb" if avatar_url else ""
-        if not avatar_url:
-            entry["reason"] = "no_avatar"        # javdb 没给头像：如实跳过
-            planned.append(entry)
-            continue
-        entry.update({"action": "upload_avatar", "url": avatar_url, "source": source})
-        planned.append(entry)
-        if dry_run:
-            continue
-        raw, error = _image_bytes(avatar_url, options)
-        if not raw:
-            entry["action"] = "failed"
-            entry["reason"] = error
-            errors.append(f"{name}：{error}")
-            continue
-        ok, detail = _call(emby_client, "upload_image", entry["person_id"], "Primary", raw)
-        if not ok:
-            entry["action"] = "failed"
-            entry["reason"] = detail
-            errors.append(f"{name}：上传头像失败 {detail}")
-            continue
-        applied.append(dict(entry, bytes=len(raw)))
-        _log_source(store, AVATAR_SOURCE, "ok", name, 0, "")
-        if writer and row.get("javdb_actor_id"):
-            ok2, detail2 = _call(emby_client, "update_item", entry["person_id"],
-                                 {"ProviderIds": {"JavDB": row["javdb_actor_id"]}})
-            if not ok2:
-                # 不致命：头像已经上去了，provider 写失败只记日志（S3/S2 的口径）
-                errors.append(f"{name}：写 ProviderIds.JavDB 失败 {detail2}")
-                _log_source(store, AVATAR_SOURCE, "error", name, 0, detail2)
-    out["ok"] = not errors
-    return out
+    实现已迁到 `actor_sync.py`（0.9.0 演员线）：本函数只剩转调，`opts`/`names`/`limit` 的
+    口径不变；新入口是 `actor_sync.run_actor_scrape()`（actor 表、退避、gFriends 源）。
+    """
+    from . import actor_sync          # ⚠️ 必须函数体内 lazy import：actor_sync 模块级 import 本模块
+    return actor_sync.sync_actor_avatars(
+        store, emby_client, limit=limit, dry_run=dry_run, namemap_mod=namemap_mod,
+        opts=opts, names=names)
 
 
 # ---------------------------------------------------------------------------

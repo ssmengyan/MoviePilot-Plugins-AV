@@ -1,5 +1,6 @@
 """插件自管 SQLite 存储：收藏演员 / 订阅 / 已知番号 / 搜索任务 / 通知 / 缓存索引 / 下载台账，
-以及 v4 刮削层的五张表（作品元数据 · 媒体实例 · 三语映射 · 翻译缓存 · 数据源自检日志）。
+以及 v4 刮削层的五张表（作品元数据 · 媒体实例 · 三语映射 · 翻译缓存 · 数据源自检日志），
+以及 0.9.0 演员线的两张表（`actor` 演员主体 · `actor_queue` 待刮队列）。
 
 数据库落在数据根的 `meta/avhelper.db`（数据根由 `paths` 解析：老部署仍是 `/avhelper/cache`，
 新部署落到 MoviePilot 的插件数据目录）。全部方法同步实现，由 FastAPI 的线程池或插件定时任务调用。
@@ -273,6 +274,36 @@ CREATE TABLE IF NOT EXISTS site_snapshot(
 -- 索引见 `_ensure_indexes()`
 """
 
+# 0.9.0 演员线两张表：**DDL 按 `docs/AVHelper-演员刮削子系统方案.md` §2 原样**（列名一个都不许改）。
+# 一条演员一行，业务唯一键 `person` 是 Emby `People[].Name` 的 D13 规范名（全链路唯一的精确键）；
+# 头像本体在 imgproxy 的 URL 缓存里（磁盘），所以这里只存 URL 与尺寸，**不建 actor_image 表**
+# —— 删表不删图，缓存淘汰仍归现有清理逻辑。
+_SCHEMA_ACTOR = """
+CREATE TABLE IF NOT EXISTS actor(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  person TEXT UNIQUE NOT NULL,
+  name TEXT DEFAULT '', zh TEXT DEFAULT '', jp TEXT DEFAULT '',
+  gender INTEGER,
+  aliases_json TEXT DEFAULT '[]',
+  javdb_actor_id TEXT DEFAULT '',
+  images_json TEXT DEFAULT '[]',
+  field_sources_json TEXT DEFAULT '{}',
+  locked_fields_json TEXT DEFAULT '[]',
+  last_scraped_at TEXT DEFAULT '',
+  retry_count INTEGER DEFAULT 0,
+  next_retry TEXT DEFAULT '',
+  updated_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS actor_queue(
+  actor_id INTEGER PRIMARY KEY,
+  person TEXT DEFAULT '',
+  state TEXT DEFAULT 'wait',
+  created_at TEXT DEFAULT '',
+  taken_at TEXT DEFAULT ''
+);
+-- 索引见 `_ensure_indexes()`：建表脚本里不建索引（老库半截迁移时缺列，建索引会打挂启动）
+"""
+
 # 老库动态补列（SQLite 的 ALTER TABLE ADD COLUMN 没有 IF NOT EXISTS，先看 PRAGMA table_info 再补）。
 # `hidden` 是 0.3.4 加的墓碑列，后三条是 v4 刮削线加的，声明与 `_SCHEMA` 里的逐字一致。
 _DL_ADD_COLUMNS = (
@@ -433,6 +464,32 @@ _NAME_MAP_DEFAULTS: Dict[str, Any] = {
     "source": "builtin_xml",
 }
 
+# ---------- 0.9.0 演员线（actor / actor_queue） ----------
+
+_ACTOR_COLUMNS = (
+    "id", "person", "name", "zh", "jp", "gender", "aliases_json", "javdb_actor_id",
+    "images_json", "field_sources_json", "locked_fields_json", "last_scraped_at",
+    "retry_count", "next_retry", "updated_at",
+)
+_ACTOR_SELECT = ", ".join(_ACTOR_COLUMNS)
+_ACTOR_DEFAULTS: Dict[str, Any] = {
+    "person": "", "name": "", "zh": "", "jp": "", "gender": None, "aliases_json": "[]",
+    "javdb_actor_id": "", "images_json": "[]", "field_sources_json": "{}",
+    "locked_fields_json": "[]", "last_scraped_at": "", "retry_count": 0,
+    "next_retry": "", "updated_at": "",
+}
+_ACTOR_JSON_FIELDS = {"aliases_json": "[]", "images_json": "[]",
+                      "field_sources_json": "{}", "locked_fields_json": "[]"}
+#: 资料列：`actor_set_profile()` 与 `actor_upsert()` 共用（逐列判"空值不写"与"锁了就跳过"）
+_ACTOR_PROFILE_FIELDS = frozenset({"name", "zh", "jp", "gender", "aliases_json", "javdb_actor_id"})
+#: `actor_upsert()` 能写的列 = 资料列 + `person`。**状态列不在里面**（理由见 actor_upsert 的 docstring）
+_ACTOR_UPSERT_FIELDS = _ACTOR_PROFILE_FIELDS | {"person"}
+
+#: 演员失败退避序列（小时），第 1..5 档；第 6 次到顶后不再排期。
+#: 与 `scraper.BACKOFF_HOURS` **同源同值**（方案 §4：与影片刮削同一个 6h→24h→72h→7d→14d 序列），
+#: 这里另写一份是因为 `scraper` 已经 import 了 `store`，反向 import 会成环；**改序列时两处一起改**。
+BACKOFF_HOURS: Tuple[int, ...] = (6, 24, 72, 168, 336)
+
 # 自检日志保留条数：`scrape_log_add` 每次都顺手裁到最近这么多条（照 notice 只留 200 条的思路；
 # 全库一轮刮削约 3 个源 × 每个番号一条，给足重扫余量又不让它无限长）。
 _SCRAPE_LOG_KEEP = 2000
@@ -484,6 +541,24 @@ def _item_order(raw: Any) -> str:
 def _shift_days(days: int) -> str:
     """当前时间往前/后挪 `days` 天（同样的字符串格式；给快照淘汰算 cutoff 用）。"""
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() + days * 86400))
+
+
+def _shift_hours(hours: int, base: str = "") -> str:
+    """把 `base`（缺省现在）往后挪 `hours` 小时，落库格式与 `_now()` 逐字相同。
+
+    与 `_shift_days()` 分开写而不是让它转发，是因为退避排期要按**小时**算，而
+    `actor_due()` 拿 `next_retry` 与 `_now()` 做**字典序**比较 —— 两头必须同一种格式，
+    差一个字符就会把"到点"判成"没到"（`scraper.apply_backoff()` 用的是 ISO 的 `T`，
+    ASCII 里比空格大 0x34，混着用会让比较整体偏一天的量级）。
+    """
+    stamp = str(base or "").strip()
+    base_at = time.time()
+    if stamp:
+        try:
+            base_at = time.mktime(time.strptime(stamp, "%Y-%m-%d %H:%M:%S"))
+        except ValueError:
+            base_at = time.time()
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(base_at + int(hours) * 3600))
 
 
 #: 单条快照的体积上限（64KB）：快照是加速器，超了就不写 —— 别把库撑爆
@@ -553,6 +628,11 @@ _INDEXES: "Tuple[Tuple[str, str], ...]" = (
     ("idx_scrape_log_source", "scrape_log(source_name, id DESC)"),
     ("idx_scrape_log_run", "scrape_log(run_id)"),
     ("idx_site_snapshot_fetched", "site_snapshot(fetched_at)"),
+    # 0.9.0 演员线：`actor_due()` 的 WHERE + ORDER BY（next_retry / last_scraped_at）与队列领取
+    # 各一条。列序与 SQL 逐字对齐，且**只在这里建**（补齐列之后，单条失败只 warning）。
+    ("idx_actor_next_retry", "actor(next_retry, last_scraped_at)"),
+    ("idx_actor_last_scraped", "actor(last_scraped_at)"),
+    ("idx_actor_queue_state", "actor_queue(state, created_at)"),
 )
 
 
@@ -569,11 +649,25 @@ def _ensure_indexes(conn: sqlite3.Connection) -> None:
             logger.warning(f"AVHelper 建索引 {name} 失败（跳过，不影响功能）：{error}")
 
 
+def _migrate_v2(conn: sqlite3.Connection) -> None:
+    """迁移 v2（0.9.0 演员线）：建 `actor` / `actor_queue` 两张表。
+
+    建表落在**迁移函数**里（而不是散落的 try/except ALTER）：`_MIGRATIONS` 是"这个库走在
+    哪一版"的唯一执行序列，`schema_meta.schema_version` 与它一一对应 —— 表结构一次性建全，
+    之后要改就再追加一条 v3，绝不回头改这一条。
+    `IF NOT EXISTS` 让它天然幂等：老库上反复 init()、以及"版本已是 2 但表被手工 DROP"都收敛。
+    **索引不在这里建**：老库的 actor 表可能来自半截迁移（缺列），建索引失败会打挂插件启动
+    —— 统一放到 `_ensure_indexes()`（2026-10-15 的真机教训）。
+    """
+    conn.executescript(_SCHEMA_ACTOR)
+
+
 #: schema 版本 + **有序**迁移表（P1-8）。加迁移 = 往后面追加一条，**不改已有条目**。
 #: 版本号只增不减；`schema_meta.schema_version` 是"这个库走在哪一版"的唯一真值。
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _MIGRATIONS: "List[Tuple[int, str, Callable[[sqlite3.Connection], None]]]" = [
     (1, "task/downloads/scrape_log/meta 补列", _repair_columns),
+    (2, "actor", _migrate_v2),
 ]
 
 #: 任务状态清单（0.8.0 / P1-7）：**只加不改**，改一个旧值就等于让历史行"状态未知"。
@@ -736,6 +830,53 @@ def _name_map_row(row: Any) -> Dict[str, Any]:
         out[name] = _NAME_MAP_DEFAULTS.get(name, "") if value is None else value
     out["is_delete_rule"] = _to_int(out.get("is_delete_rule"))
     out["keywords"] = split_keywords(out.get("keywords_norm"))
+    return out
+
+
+def _actor_value(column: str, value: Any) -> Any:
+    """把调用方给的值收成 `actor` 该列的落库类型（JSON 列序列化、gender 转 int/NULL、文本去空白）。"""
+    if column in _ACTOR_JSON_FIELDS:
+        return _json_text(value, _ACTOR_JSON_FIELDS[column])
+    if column == "gender":
+        text = "" if value is None else str(value).strip()
+        return None if not text else _to_int(text)
+    return "" if value is None else str(value).strip()
+
+
+def _actor_blank(column: str, value: Any) -> bool:
+    """这一格算不算「空」（`actor_upsert` / `actor_set_profile` 靠它决定跳过）。
+
+    「空」的判据按列类型走：JSON 列是 `''`/`[]`/`{}`，`gender` 是 NULL，文本列是空串。
+    混着用的后果很具体：一次 `gender=None` 的登记若当成 0 落库，"未知性别"就变成了"女"，
+    而写侧正是按这个值过滤女演员的。
+    """
+    if column == "gender":
+        return value is None
+    if column in _ACTOR_JSON_FIELDS:
+        return str(value or "") in ("", "[]", "{}")
+    return not str(value or "").strip()
+
+
+def _actor_row(row: Any) -> Dict[str, Any]:
+    """一行 actor → dict（JSON 列另给解析副本：`aliases` / `images` / `field_sources` / `locked_fields`）。
+
+    与 `_meta_row()` 同一套给法：原始串照给（排障要原样）、解析副本另给（调用方不必各自
+    再解析一遍，口径不会漂）。`gender` 的 NULL 原样留成 `None`：0=女 / 1=男 / None=未知，
+    把未知折成 0 等于凭空认定"是女的"。`images[0]` 就是主图（顺序有意义，这里不重排）。
+    """
+    out: Dict[str, Any] = {}
+    for idx, name in enumerate(_ACTOR_COLUMNS):
+        value = row[idx]
+        if name == "gender":
+            out[name] = None if value is None else _to_int(value)
+        else:
+            out[name] = _ACTOR_DEFAULTS.get(name, "") if value is None else value
+    out["id"] = _to_int(out.get("id"))
+    out["retry_count"] = _to_int(out.get("retry_count"))
+    out["aliases"] = _json_load(out.get("aliases_json"), [])
+    out["images"] = _json_load(out.get("images_json"), [])
+    out["field_sources"] = _json_load(out.get("field_sources_json"), {})
+    out["locked_fields"] = _json_load(out.get("locked_fields_json"), [])
     return out
 
 
@@ -935,6 +1076,9 @@ class Store:
         conn.executescript(_SCHEMA)
         conn.executescript(_SCHEMA_SCHEMA_META)
         conn.executescript(_SCHEMA_SCRAPE_V4)
+        # 演员表在迁移 v2 里也建一次（幂等，且版本账本靠它推进）；这里先建是为了让
+        # "版本已是 2、表却被手工 DROP" 的老库自愈 —— 与 `_repair_columns` 的两处调用同一思路。
+        conn.executescript(_SCHEMA_ACTOR)
         for version, name, apply in _MIGRATIONS:
             if version <= current:
                 continue
@@ -2514,3 +2658,609 @@ class Store:
             for token in row.get("keywords") or []:
                 add(token)
         return found
+
+    # ---------- 演员主体表（actor / actor_queue，0.9.0 演员线） ----------
+
+    @staticmethod
+    def _actor_current(conn: sqlite3.Connection, actor_id: Any) -> Optional[Dict[str, Any]]:
+        """在**已持锁**的同一事务里读一行 actor（`actor_set_*` / `actor_mark_*` 的前置读）。
+
+        为什么不走 `actor_get()`：那边每次自己 `_connect()` 读一遍，读与随后的写之间没有
+        任何保证；这里要的是"读到的就是马上要被改的那一行"，所以用调用方那条连接、在它的锁里读。
+        """
+        key = _to_int(actor_id)
+        if key <= 0:
+            return None
+        rows = conn.execute(f"SELECT {_ACTOR_SELECT} FROM actor WHERE id=?", (key,)).fetchall()
+        return _actor_row(rows[0]) if rows else None
+
+    def actor_upsert(self, row: Dict[str, Any]) -> int:
+        """按 `person` 幂等 upsert 一位演员，返回 `actor.id`（person 为空回 0、不入库）。
+
+        为什么「只覆盖非空字段」：这一条 upsert 是三路的合流点 —— 影片刮完的 `actors_json`
+        回填、namemap 补三语名、任务侧补 javdb id。每路只带自己这次真拿到的那几个字段，
+        整行覆盖会让"这一轮没查到日文名"把上一轮查到的抹成空串（与 `meta_upsert()` 同一条口径）。
+
+        为什么状态列**不在可写集合**里（`images_json` / `field_sources_json` /
+        `locked_fields_json` / `last_scraped_at` / `retry_count` / `next_retry`）：
+        头像是 `actor_set_images()` 的职责、退避是 `actor_mark_*` 的职责。让 upsert 也能写它们，
+        任何一次"顺手登记"都会把手工锁和退避计数冲掉 —— 那正是本任务要防的事故。
+
+        `locked_fields_json` 里点名的资料字段（name/zh/jp/gender/aliases/javdb id）在 upsert
+        路径上同样跳过：手工锁优先于任何来源。`aliases` 这个入参名是给调用方的糖
+        （列名是 `aliases_json`，让人传 JSON 后缀很奇怪）。
+        """
+        person = str((row or {}).get("person") or "").strip()
+        if not person:
+            return 0
+        picked: Dict[str, Any] = {}
+        for name, value in (row or {}).items():
+            column = "aliases_json" if str(name) == "aliases" else str(name)
+            if column not in _ACTOR_UPSERT_FIELDS or column == "person":
+                continue
+            conv = _actor_value(column, value)
+            if _actor_blank(column, conv):
+                continue
+            picked[column] = conv
+        now = _now()
+        actor_id = 0
+        with self._lock:
+            conn = self._connect()
+            try:
+                hit = conn.execute("SELECT id, locked_fields_json FROM actor WHERE person=?",
+                                   (person,)).fetchone()
+                if hit is None:
+                    values: Dict[str, Any] = dict(_ACTOR_DEFAULTS)
+                    values.update(picked)
+                    values["person"] = person
+                    values["updated_at"] = now
+                    cols = [c for c in _ACTOR_COLUMNS if c != "id"]
+                    cur = conn.execute(
+                        f"INSERT INTO actor({', '.join(cols)}) "
+                        f"VALUES({', '.join('?' * len(cols))})",
+                        tuple(values.get(c) for c in cols),
+                    )
+                    actor_id = _to_int(cur.lastrowid)
+                else:
+                    actor_id = _to_int(hit[0])
+                    locked = {str(f) for f in (_json_load(hit[1], []) or [])}
+                    sets = [c for c in picked if c not in locked]
+                    if sets:
+                        conn.execute(
+                            "UPDATE actor SET " + ", ".join(f"{c}=?" for c in sets)
+                            + ", updated_at=? WHERE id=?",
+                            (*(picked[c] for c in sets), now, actor_id),
+                        )
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+        return actor_id
+
+    def actor_get(self, actor_id: int = 0, person: str = "") -> Optional[Dict[str, Any]]:
+        """按 id 或 Emby 规范名取一位演员（id 优先）；没有回 None。
+
+        两个入口都要，是因为上下游手里是两套标识：端点与任务拿 `actor.id`，而影片刮削链
+        只有 `person_from_actor()` 算出的规范名（D15 的唯一精确键，Emby 按 `Name` 精确建人）。
+        """
+        key = _to_int(actor_id)
+        if key > 0:
+            rows = self._exec(f"SELECT {_ACTOR_SELECT} FROM actor WHERE id=?",
+                              (key,), fetch=True) or []
+        else:
+            name = str(person or "").strip()
+            if not name:
+                return None
+            rows = self._exec(f"SELECT {_ACTOR_SELECT} FROM actor WHERE person=?",
+                              (name,), fetch=True) or []
+        return _actor_row(rows[0]) if rows else None
+
+    def actor_list(self, q: str = "", flt: str = "", limit: int = 60,
+                   offset: int = 0) -> Dict[str, Any]:
+        """演员卡片墙的一页：名称模糊查 + 四种筛选，返回 `{"items": [...], "total": n}`。
+
+        为什么 `total` 必须和 `items` 一起给：卡片墙是分页的（`limit/offset`），前端要显示
+        "共 N 位"，而 N 只能由**同一个 WHERE** 算出来 —— 两边分开写迟早对不上。
+
+        `flt` 的四个口径与 `actor_stats()` 的计数逐字一致（点数字就跳到对应筛选）：
+        `missing_avatar` = 还没有任何候选图（`images_json` 是 `''` 或 `'[]'`，两者都算）；
+        `locked` = 有任意手工锁；`failed` = `retry_count > 0`（退避中或已退避到顶）。
+        认不出的筛选只 warning 并忽略 —— 绝不把调用方给的片段拼进 SQL（P1-9 的注入面教训）。
+        """
+        clause: List[str] = []
+        args: List[Any] = []
+        text = str(q or "").strip()
+        if text:
+            like = f"%{_like_escape(text)}%"
+            clause.append("(person LIKE ? ESCAPE '\\' OR name LIKE ? ESCAPE '\\' "
+                          "OR zh LIKE ? ESCAPE '\\' OR jp LIKE ? ESCAPE '\\' "
+                          "OR aliases_json LIKE ? ESCAPE '\\')")
+            args.extend([like] * 5)
+        kind = str(flt or "").strip()
+        if kind == "missing_avatar":
+            clause.append("(images_json IS NULL OR images_json IN ('', '[]'))")
+        elif kind == "locked":
+            clause.append("(locked_fields_json IS NOT NULL "
+                          "AND locked_fields_json NOT IN ('', '[]'))")
+        elif kind == "failed":
+            clause.append("retry_count > 0")
+        elif kind:
+            logger.warning(f"AVHelper actor_list(filter=…) 认不出的筛选（已忽略）：{kind[:40]}")
+        where = (" WHERE " + " AND ".join(clause)) if clause else ""
+        total_rows = self._exec(f"SELECT COUNT(*) FROM actor{where}", tuple(args), fetch=True) or [(0,)]
+        sql = f"SELECT {_ACTOR_SELECT} FROM actor{where} ORDER BY updated_at DESC, id ASC"
+        size = _to_int(limit)
+        skip = _to_int(offset)
+        if size > 0:
+            sql += " LIMIT ?"
+            args.append(size)
+        if skip > 0:
+            sql += (" OFFSET ?" if size > 0 else " LIMIT -1 OFFSET ?")
+            args.append(skip)
+        rows = self._exec(sql, tuple(args), fetch=True) or []
+        return {"items": [_actor_row(r) for r in rows], "total": _to_int(total_rows[0][0])}
+
+    def actor_set_images(self, actor_id: int, images: List[Dict[str, Any]],
+                         field_sources: Dict[str, Any] = None) -> Dict[str, Any]:
+        """写候选头像（`images[0]` 就是主图），返回写后的整行；行不存在回 `{}`。
+
+        **锁了 `images` 就原样返回、一个字都不写**：手工裁剪/上传的图被下一次重刮覆盖是
+        最难发现的事故（用户眼里"昨天还是对的图"），锁是唯一防线（方案 §5.6）。
+        只收带 `url` 的条目：`images_json` 每一项都是"图从哪来、多大"，没有 url 的项下游
+        下载必然失败，宁可在写入口就丢掉，也不要留给执行器去猜。
+        `field_sources` 是**合并**不是替换：主图来源只是溯源里的一格，替换会把资料侧
+        （`zh`/`jp` 是谁给的）整段抹掉。
+        """
+        key = _to_int(actor_id)
+        if key <= 0:
+            return {}
+        picked = [dict(item) for item in (images if isinstance(images, list) else [])
+                  if isinstance(item, dict) and str(item.get("url") or "").strip()]
+        sources = {str(k): v for k, v in (field_sources or {}).items() if str(k).strip()}
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                current = self._actor_current(conn, key)
+                if current is None:
+                    return {}
+                if "images" in {str(f) for f in (current.get("locked_fields") or [])}:
+                    return current
+                merged = dict(current.get("field_sources") or {})
+                merged.update(sources)
+                conn.execute(
+                    "UPDATE actor SET images_json=?, field_sources_json=?, updated_at=? "
+                    "WHERE id=?",
+                    (_json_text(picked, "[]"), _json_text(merged, "{}"), now, key),
+                )
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+            return self._actor_current(conn, key) or {}
+
+    def actor_set_profile(self, actor_id: int, fields: Dict[str, Any],
+                          field_sources: Dict[str, Any] = None) -> Dict[str, Any]:
+        """合并资料字段（name/zh/jp/gender/aliases/javdb_actor_id），返回写后的整行。
+
+        与 `actor_upsert()` 的分工：upsert 认 `person`（顺手建行），这里认 `id`（行必须已存在）
+        —— 任务侧手里是 `actor.id`，不该被迫再拼一遍 person 去撞唯一键。
+        两条口径与 upsert 共用：**空值不写**（"这一轮没查到日文名"不是"日文名没了"）、
+        **锁住的字段跳过**（锁是逐字段的，锁了 `zh` 不该连 `jp` 一起停更）。
+        """
+        key = _to_int(actor_id)
+        if key <= 0:
+            return {}
+        picked: Dict[str, Any] = {}
+        for name, value in (fields or {}).items():
+            column = "aliases_json" if str(name) == "aliases" else str(name)
+            if column not in _ACTOR_PROFILE_FIELDS:
+                continue
+            conv = _actor_value(column, value)
+            if _actor_blank(column, conv):
+                continue
+            picked[column] = conv
+        sources = {str(k): v for k, v in (field_sources or {}).items() if str(k).strip()}
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                current = self._actor_current(conn, key)
+                if current is None:
+                    return {}
+                locked = {str(f) for f in (current.get("locked_fields") or [])}
+                sets = [c for c in picked if c not in locked]
+                values: List[Any] = [picked[c] for c in sets]
+                if sources:
+                    merged = dict(current.get("field_sources") or {})
+                    merged.update(sources)
+                    sets.append("field_sources_json")
+                    values.append(_json_text(merged, "{}"))
+                if not sets:
+                    return current
+                conn.execute(
+                    "UPDATE actor SET " + ", ".join(f"{c}=?" for c in sets)
+                    + ", updated_at=? WHERE id=?",
+                    (*values, now, key),
+                )
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+            return self._actor_current(conn, key) or {}
+
+    def actor_mark_ok(self, actor_id: int, when: str = "") -> Dict[str, Any]:
+        """记一次抓取成功：`retry_count` 归零、退避清空、`last_scraped_at` 落到 `when`（缺省现在）。
+
+        成功必须把 `retry_count` 清零：偶发失败留下的计数不清，这位演员此后只要再连败两次
+        就直接吃到 72h 那一档 —— 退避序列被人为拉长了。`when` 让调用方补记"任务真正跑完
+        的时刻"（而不是落库时刻），批量任务里这两者能差几分钟。
+        """
+        key = _to_int(actor_id)
+        if key <= 0:
+            return {}
+        stamp = str(when or "").strip() or _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                if self._actor_current(conn, key) is None:
+                    return {}
+                conn.execute(
+                    "UPDATE actor SET retry_count=0, next_retry='', last_scraped_at=?, "
+                    "updated_at=? WHERE id=?", (stamp, _now(), key),
+                )
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+            return self._actor_current(conn, key) or {}
+
+    def actor_mark_failed(self, actor_id: int, reason: str = "") -> Dict[str, Any]:
+        """记一次失败：`retry_count += 1`，`next_retry` 按 `BACKOFF_HOURS` 排下一档。
+
+        序列是 6h → 24h → 72h → 7d → 14d；跑完第 5 档 `next_retry` **留空**（到顶后自动重试
+        是纯空转，方案 §4 定的是只等手动），但 `retry_count` 继续加 —— 界面要靠它区分
+        "失败过一次"与"已经放弃自动重试"。
+        `reason` 只进日志、不落表：`actor` 没有"失败原因"列，明细该进 `scrape_log`
+        （`source_name='actor'`）；塞进 `field_sources_json` 会污染溯源列的语义。
+        """
+        key = _to_int(actor_id)
+        if key <= 0:
+            return {}
+        with self._lock:
+            conn = self._connect()
+            try:
+                current = self._actor_current(conn, key)
+                if current is None:
+                    return {}
+                count = _to_int(current.get("retry_count")) + 1
+                next_retry = ("" if count > len(BACKOFF_HOURS)
+                              else _shift_hours(BACKOFF_HOURS[count - 1]))
+                conn.execute(
+                    "UPDATE actor SET retry_count=?, next_retry=?, updated_at=? WHERE id=?",
+                    (count, next_retry, _now(), key),
+                )
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+            logger.warning(f"AVHelper 演员抓取失败（第 {count} 次，下次 {next_retry or '不排期'}）"
+                           f" actor#{key}：{str(reason or '无原因')[:200]}")
+            return self._actor_current(conn, key) or {}
+
+    def actor_lock(self, actor_id: int, field: str = "images", on: bool = True) -> Dict[str, Any]:
+        """加/解一个字段的手工锁，返回写后的整行；行不存在回 `{}`。
+
+        锁落成 JSON 数组而不是每字段一个布尔列：字段还会长（生日/身高在 P2），加一个字符串
+        比加一列省一次迁移；**去重保序**让重复加锁/重复解锁天然幂等（不会长出两份，
+        也不会把释放顺序搞乱）。空 `field` 直接忽略 —— 空串锁等于锁了个不存在的东西。
+        已经是目标状态时不写库（连 `updated_at` 都不动）：反复点同一个按钮不该让卡片墙重排。
+        """
+        key = _to_int(actor_id)
+        name = str(field or "").strip()
+        if key <= 0:
+            return {}
+        if not name:
+            return self.actor_get(key) or {}
+        with self._lock:
+            conn = self._connect()
+            try:
+                current = self._actor_current(conn, key)
+                if current is None:
+                    return {}
+                locked = [str(f) for f in (current.get("locked_fields") or []) if str(f).strip()]
+                if on and name not in locked:
+                    locked.append(name)
+                elif not on and name in locked:
+                    locked = [f for f in locked if f != name]
+                else:
+                    return current
+                conn.execute(
+                    "UPDATE actor SET locked_fields_json=?, updated_at=? WHERE id=?",
+                    (_json_text(locked, "[]"), _now(), key),
+                )
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+            return self._actor_current(conn, key) or {}
+
+    def actor_due(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """这一轮该抓的演员：`next_retry` 为空（从没失败/已退避到顶）或已到点，最老的排前。
+
+        排序按 `last_scraped_at` 升序（空串最优先 = 从没抓过的排最前），与 `meta_due()` 的
+        tier2 同一套"饥饿兜底"口径：没有排序的队列会让同一批老面孔每轮都占满名额，
+        新演员永远轮不到。
+        `limit<=0` 按默认 20 —— 队列函数不给"全取"的口子（一轮的请求量必须可控）。
+        WHERE 写成 `IS NULL / = '' / <=` 而不是 `IFNULL(next_retry,'') = ''`：函数包住列会让
+        `idx_actor_next_retry` 失效（P1-9 的同一条教训），语义完全一样。
+        """
+        size = _to_int(limit) or 20
+        rows = self._exec(
+            f"SELECT {_ACTOR_SELECT} FROM actor "
+            "WHERE next_retry IS NULL OR next_retry = '' OR next_retry <= ? "
+            "ORDER BY last_scraped_at ASC, id ASC LIMIT ?",
+            (_now(), size), fetch=True,
+        ) or []
+        return [_actor_row(r) for r in rows]
+
+    def actor_queue_push(self, persons: List[str]) -> int:
+        """登记一批待刮演员，返回**本次新入队**的条数（已在队列里的不计）。
+
+        为什么要**自举**：影片刮完那一刻，`scraper.scrape_one()` 手里只有
+        `person_from_actor()` 算出的规范名，而存量回填可能还没跑过、actor 表里根本没有这一行。
+        所以对不认识的 person 先落一条最小行（`person` + `name`=person，其余留空、
+        `gender` 为 NULL）再入队 —— 否则新片的新演员永远进不了队列，
+        而"演员表覆盖全库"正是这条子系统的目的。
+
+        幂等靠主键：`actor_queue.actor_id` 是 PK，插入用 `INSERT OR IGNORE`；已存在
+        （含已取走的 `taken`）不重排 —— 重刮节奏归 `actor_due()` 的退避管，重复入队会把
+        "正在跑"的行重新排一遍，返回的计数也就没意义了。空串与重复入参就地丢掉。
+        """
+        wanted: List[str] = []
+        for item in (persons or []):
+            name = str(item or "").strip()
+            if name and name not in wanted:
+                wanted.append(name)
+        if not wanted:
+            return 0
+        now = _now()
+        added = 0
+        with self._lock:
+            conn = self._connect()
+            try:
+                for person in wanted:
+                    hit = conn.execute("SELECT id FROM actor WHERE person=?", (person,)).fetchone()
+                    if hit is None:
+                        cur = conn.execute(
+                            "INSERT INTO actor(person, name, updated_at) VALUES(?,?,?)",
+                            (person, person, now),
+                        )
+                        actor_id = _to_int(cur.lastrowid)
+                    else:
+                        actor_id = _to_int(hit[0])
+                    if actor_id <= 0:
+                        continue
+                    cur = conn.execute(
+                        "INSERT OR IGNORE INTO actor_queue(actor_id, person, state, created_at) "
+                        "VALUES(?,?,'wait',?)", (actor_id, person, now),
+                    )
+                    added += int(cur.rowcount or 0)
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+        return added
+
+    def actor_queue_pop(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """领取一批待刮演员，返回**actor 行**（不是队列行），并就地标成 `taken`。
+
+        为什么返回 actor 行：调用方拿到队列行还得再查一次表，而两次读之间那行可能已经变了；
+        它真正需要的是 person / 图 / 锁 / 退避这些字段。
+        为什么取与标必须在**同一事务**里：先取后标若失败，这批行会一直停在 `wait`，
+        下一轮被重复领取 —— 重复领不致命（演员任务单飞），但计数与日志会一路虚高。
+        队列里指向已删演员的孤儿行照旧标 taken 并跳过：留着它们等于每轮都白领一次。
+        """
+        size = _to_int(limit) or 20
+        now = _now()
+        found: List[Any] = []
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    "SELECT actor_id FROM actor_queue WHERE state='wait' "
+                    "ORDER BY created_at ASC, actor_id ASC LIMIT ?", (size,),
+                ).fetchall()
+                ids = [_to_int(r[0]) for r in rows if _to_int(r[0]) > 0]
+                if not ids:
+                    conn.commit()
+                    return []
+                conn.execute(
+                    "UPDATE actor_queue SET state='taken', taken_at=? "
+                    f"WHERE actor_id IN ({', '.join('?' * len(ids))})", (now, *ids),
+                )
+                found = conn.execute(
+                    f"SELECT {_ACTOR_SELECT} FROM actor "
+                    f"WHERE id IN ({', '.join('?' * len(ids))})", tuple(ids),
+                ).fetchall()
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+        by_id: Dict[int, Dict[str, Any]] = {}
+        for row in found:
+            item = _actor_row(row)
+            by_id[item["id"]] = item
+        return [by_id[key] for key in ids if key in by_id]
+
+    def actor_backfill(self, actors: Any = None, namemap_mod: Any = None) -> Dict[str, Any]:
+        """一次性回填存量演员（`meta.actors_json` 聚合 → actor 行），返回
+        `{"created", "updated", "total", "skipped"}`。
+
+        为什么只做一次（标记在 `schema_meta['actor_backfill_done']`，**与 schema 版本分开的两行**）：
+        这是给存量库补历史的动作，全表扫一遍在 NAS 上要几秒；每次插件加载都跑纯属浪费。
+        回填之后的新演员由 `actor_queue_push()` 自举（影片刮完就落行），所以关掉它不会漏人。
+        幂等的第二道保险在 `actor_upsert()`：即便标记被清掉再跑一遍，按 `person` 合并也只会
+        更新、不会长出重复行（那时 `created` 为 0，`updated` 是本轮仍碰到的存量行数）。
+
+        `actors` 缺省时自取 `meta_list()` 的 `actors`（老行只有 `actors_json` 串）；
+        `namemap_mod` 缺省时**延迟导入** namemap —— 单测能塞假映射，不必真加载 5351 条资源。
+        `gender` 取**第一个非空值**：同一演员散落在多部片里，javdb 只在部分行给了 gender。
+        """
+        with self._lock:
+            conn = self._connect()
+            try:
+                hit = conn.execute(
+                    "SELECT val FROM schema_meta WHERE key='actor_backfill_done'").fetchone()
+            except sqlite3.OperationalError:
+                hit = None
+        if hit and str(hit[0] or "").strip() == "1":
+            return {"created": 0, "updated": 0, "total": 0, "skipped": True}
+
+        raw_rows: List[Any] = []
+        if actors is None:
+            for item in self.meta_list():
+                raw = item.get("actors")
+                if not isinstance(raw, list):
+                    raw = _json_load(item.get("actors_json"), [])
+                raw_rows.extend(raw)
+        elif isinstance(actors, (list, tuple)):
+            raw_rows = list(actors)
+        else:
+            raw_rows = [actors]
+
+        slots: Dict[str, Dict[str, Any]] = {}
+        order: List[str] = []
+        for item in raw_rows:
+            if isinstance(item, str):
+                entry: Dict[str, Any] = {"person": item, "name": item}
+            elif isinstance(item, dict):
+                entry = item
+            else:
+                continue
+            person = str(entry.get("person") or entry.get("name") or "").strip()
+            if not person:
+                continue
+            slot = slots.get(person)
+            if slot is None:
+                slot = {"person": person, "name": "", "zh": "", "jp": "",
+                        "gender": None, "javdb_actor_id": "", "aliases": []}
+                slots[person] = slot
+                order.append(person)
+            for field in ("name", "zh", "jp", "javdb_actor_id"):
+                if not slot[field]:
+                    slot[field] = str(entry.get(field) or "").strip()
+            gender = entry.get("gender")
+            if slot["gender"] is None and gender is not None and str(gender).strip() != "":
+                slot["gender"] = _to_int(gender)
+            for alias in (entry.get("aliases") or []):
+                text = str(alias or "").strip()
+                if text and text not in slot["aliases"]:
+                    slot["aliases"].append(text)
+
+        module = namemap_mod
+        if module is None:
+            try:
+                from . import namemap as module        # noqa: F401 - 延迟导入：避免与 S3 互相拖死
+            except Exception as error:                 # noqa: BLE001 - 映射缺了只是少一层，不该中断回填
+                logger.warning(f"AVHelper 回填取不到 namemap（只按 meta 里的记录回填）：{error}")
+                module = None
+        lookup = getattr(module, "actor_lookup", None) if module is not None else None
+
+        created = updated = 0
+        for person in order:
+            slot = slots[person]
+            record: Dict[str, Any] = {}
+            if callable(lookup):
+                try:
+                    hit_record = lookup(person)
+                except Exception as error:             # noqa: BLE001 - 单条映射坏掉不中断整批
+                    logger.warning(f"AVHelper 回填查映射失败（{person}）：{error}")
+                    hit_record = None
+                if isinstance(hit_record, dict):
+                    record = hit_record
+            zh = slot["zh"] or str(record.get("zh_cn") or record.get("zh") or "").strip()
+            jp = slot["jp"] or str(record.get("jp") or "").strip()
+            javdb_id = slot["javdb_actor_id"] or str(record.get("javdb_actor_id") or "").strip()
+            aliases = list(slot["aliases"])
+            for candidate in list(record.get("aliases") or []) + [zh, jp]:
+                text = str(candidate or "").strip()
+                if text and text != person and text not in aliases:
+                    aliases.append(text)
+            existed = self.actor_get(person=person) is not None
+            if not self.actor_upsert({"person": person, "name": slot["name"], "zh": zh, "jp": jp,
+                                      "gender": slot["gender"], "javdb_actor_id": javdb_id,
+                                      "aliases": aliases}):
+                continue
+            if existed:
+                updated += 1
+            else:
+                created += 1
+
+        total = created + updated
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("INSERT OR REPLACE INTO schema_meta(key, val) "
+                             "VALUES('actor_backfill_done', '1')")
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+        logger.info(f"AVHelper 演员回填完成：新增 {created} / 合并 {updated}")
+        return {"created": created, "updated": updated, "total": total, "skipped": False}
+
+    def actor_stats(self) -> Dict[str, Any]:
+        """演员表计数（设置台「演员」栏与 `GET /actor/stats`）：total / missing_avatar / locked /
+        failed / due。
+
+        `failed` 与 `due` 是两件事，都留着：`failed` 是"失败过"（含已退避到顶、只等手动），
+        `due` 是"这一轮会被领走"的（`next_retry` 空或到点）—— 前者给用户看问题，后者给任务
+        看余量。计数口径与 `actor_list(filter=…)` 逐字一致，界面上点数字就能跳到那张表。
+        """
+        rows = self._exec(
+            "SELECT COUNT(*), "
+            "SUM(CASE WHEN images_json IS NULL OR images_json IN ('', '[]') THEN 1 ELSE 0 END), "
+            "SUM(CASE WHEN locked_fields_json IS NOT NULL "
+            "AND locked_fields_json NOT IN ('', '[]') THEN 1 ELSE 0 END), "
+            "SUM(CASE WHEN retry_count > 0 THEN 1 ELSE 0 END), "
+            "SUM(CASE WHEN next_retry IS NULL OR next_retry = '' OR next_retry <= ? "
+            "THEN 1 ELSE 0 END) FROM actor",
+            (_now(),), fetch=True,
+        ) or [(0, 0, 0, 0, 0)]
+        row = rows[0]
+        return {
+            "total": _to_int(row[0]),
+            "missing_avatar": _to_int(row[1]),
+            "locked": _to_int(row[2]),
+            "failed": _to_int(row[3]),
+            "due": _to_int(row[4]),
+        }
+

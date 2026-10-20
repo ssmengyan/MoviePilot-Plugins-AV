@@ -261,16 +261,18 @@ class TestMigrationBackup:
             assert conn.execute("SELECT COUNT(*) FROM known").fetchone()[0] == 1
             assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         info = again.schema_info()
-        assert info["version"] == 1 and info["target"] == 1
+        assert info["version"] == 2 and info["target"] == 2
         assert info["migrated_at"] and info["backup"].endswith(".bak")
-        assert "补列" in info["note"]
+        # note 记的是**最后跑过的那条**迁移（`_schema_record` 的语义），所以对着迁移表的末条断言：
+        # 写死 "补列"/"actor" 都会在下次加迁移时再红一次，而"只判非空"又验不出传错的名字。
+        assert info["note"] == store_mod._MIGRATIONS[-1][1]
 
     def test_fresh_db_needs_no_backup(self, store_mod, tmp_path):
         """全新空库没有可丢的数据 → 不写 .bak（否则每次新装都留一个空壳备份）。"""
         store = store_mod.Store(db_path=tmp_path / "new.db")
         store.init()
         assert list(tmp_path.glob("*.bak")) == []
-        assert store.schema_version() == 1
+        assert store.schema_version() == 2
 
     def test_second_init_does_not_back_up_again(self, store_mod, tmp_path):
         """已是最新版的库反复 init() 不再备份（插件每次加载都跑 init）。"""
@@ -310,7 +312,7 @@ class TestMigrationBackup:
         monkeypatch.setattr(store_mod.sqlite3, "connect", fake_connect)
         again = store_mod.Store(db_path=db)
         again.init()                                  # 不抛异常
-        assert again.schema_version() == 1            # 版本照记
+        assert again.schema_version() == 2            # 版本照记
         assert list(tmp_path.glob("*.bak")) == []     # 备份确实没写成
 
 
