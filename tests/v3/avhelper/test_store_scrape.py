@@ -44,6 +44,18 @@ def columns_of(store, table):
     return {r[1] for r in store._connect().execute(f"PRAGMA table_info({table})").fetchall()}
 
 
+def columns_list(store, table):
+    """按建表/补列后的真实列序读（PRAGMA 是 per-connection 的，别另开连接看）。"""
+    return [r[1] for r in store._connect().execute(f"PRAGMA table_info({table})").fetchall()]
+
+
+def assert_scrape_log_tail(store):
+    """`scrape_log` 的 reason / http_status / run_id 只能追加在 created_at 之后，且顺序固定 ——
+    新库建全与老库 ALTER 两条路径读出的列序必须逐项相同。"""
+    cols = columns_list(store, "scrape_log")
+    assert cols[-3:] == ["reason", "http_status", "run_id"], cols
+
+
 def tables_of(store):
     rows = store._connect().execute(
         "SELECT name FROM sqlite_master WHERE type='table'"
@@ -202,6 +214,7 @@ class TestLegacyMissingColumns:
         store = store_mod.Store(db_path=db)
         store.init()                                  # 修复前这里就是 no such column: run_id
         assert {"reason", "http_status", "run_id"} <= columns_of(store, "scrape_log")
+        assert_scrape_log_tail(store)                 # 老库补列后列序与新库一致
         assert store.scrape_log_recent(limit=5)[0]["key"] == "SNOS380"
         names = {row[0] for row in store._exec(
             "SELECT name FROM sqlite_master WHERE type='index'", fetch=True)}
@@ -413,6 +426,7 @@ class TestSchemaUpgrade:
         store = make_store(store_mod, tmp_path)
         assert "field_sources_json" in columns_of(store, "meta")
         assert {"reason", "http_status", "run_id"} <= columns_of(store, "scrape_log")
+        assert_scrape_log_tail(store)                 # 新库建全的列序
 
     def test_legacy_meta_gets_field_sources_column(self, store_mod, tmp_path):
         """老库的 `meta` 没有这一列（0.7.x 建的）→ init() 必须补上，且老行不动。
