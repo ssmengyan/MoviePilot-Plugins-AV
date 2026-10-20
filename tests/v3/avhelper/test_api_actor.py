@@ -950,11 +950,15 @@ class TestImgLocalDerived:
 # ---------------------------------------------------------------------------
 
 
+WRITE_ENVELOPE_KEYS = {"success", "ok", "actor", "reason"}
+
+
 class TestActorLockEndpoint:
     def test_lock_defaults(self, plugin, store):
         result = call(plugin.api_actor_lock(FakeRequest(body={"id": 7})))
-        assert result["success"] is True
-        assert set(result) == {"success", "actor"}       # 信封：摊平的行收回 actor 里
+        assert set(result) == WRITE_ENVELOPE_KEYS      # 摊平的行收回 actor，success/ok/reason 并列
+        assert result["success"] is True and result["ok"] is True
+        assert result["reason"] == ""
         assert result["actor"]["locked_fields"] == ["images"]
         assert result["actor"]["images"][0]["primary"] is True
         assert store.calls[-1] == ("actor_lock", 7, "images", True)
@@ -964,20 +968,34 @@ class TestActorLockEndpoint:
             FakeRequest(body={"id": 7, "field": "images", "on": False})))
         assert store.calls[-1] == ("actor_lock", 7, "images", False)
         assert result["actor"]["locked_fields"] == []
+        assert set(result) == WRITE_ENVELOPE_KEYS
+
+    def test_lock_missing_row_reports_reason(self, plugin):
+        """store 回 `{}`（没有这位演员）时 success/ok 同假，并把原因说清楚。"""
+        result = call(plugin.api_actor_lock(FakeRequest(body={"id": 999})))
+        assert set(result) == WRITE_ENVELOPE_KEYS
+        assert result["success"] is False and result["ok"] is False
+        assert result["actor"] is None
+        assert result["reason"] == "没有这位演员（id=999）"
 
     def test_lock_missing_id(self, plugin):
-        assert call(plugin.api_actor_lock(FakeRequest(body={})))["success"] is False
+        result = call(plugin.api_actor_lock(FakeRequest(body={})))
+        assert result["success"] is False and result["ok"] is False
+        assert result["reason"] == "缺少演员 id"
 
     def test_lock_missing_store_method(self, plugin, monkeypatch):
         monkeypatch.delattr(plugin._store.__class__, "actor_lock", raising=False)
         result = call(plugin.api_actor_lock(FakeRequest(body={"id": 7})))
         assert result["message"] == "演员子系统未就绪"
+        assert result["reason"] == "演员子系统未就绪"     # api_error 分支也带 reason
+        assert result["success"] is False and result["ok"] is False
 
     def test_lock_exception_is_envelope(self, plugin, store):
         store.boom = {"actor_lock"}
         result = call(plugin.api_actor_lock(FakeRequest(body={"id": 7})))
-        assert result["success"] is False
+        assert result["success"] is False and result["ok"] is False
         assert "库挂了" in result["message"]
+        assert result["reason"] == result["message"]
 
 
 class TestActorCropEndpoint:
@@ -985,12 +1003,23 @@ class TestActorCropEndpoint:
         fake = with_actor_sync(api_mod, monkeypatch, FakeActorSync())
         result = call(plugin.api_actor_crop_avatar(
             FakeRequest(body={"id": 7, "rect": {"x": 0, "y": 0, "w": 300, "h": 400}})))
-        assert result["success"] is True
-        assert set(result) == {"success", "actor"}       # 信封：{success, actor}
+        assert set(result) == WRITE_ENVELOPE_KEYS      # {success, ok, actor, reason}
+        assert result["success"] is True and result["ok"] is True
+        assert result["reason"] == ""
         assert result["actor"] == {"id": 7, "images": []}
         _, _, kwargs = fake.crop_calls[0]
         assert kwargs["actor_id"] == 7
         assert kwargs["rect"] == {"x": 0, "y": 0, "w": 300, "h": 400}
+
+    def test_crop_failure_keeps_reason(self, plugin, api_mod, monkeypatch):
+        """流水线回 `ok:false + reason`：原因必须透传到信封（真机就是看不到这句话）。"""
+        with_actor_sync(api_mod, monkeypatch, FakeActorSync(
+            crop={"ok": False, "actor": None, "reason": "actor.images 为空"}))
+        result = call(plugin.api_actor_crop_avatar(FakeRequest(body={"id": 7})))
+        assert set(result) == WRITE_ENVELOPE_KEYS
+        assert result["success"] is False and result["ok"] is False
+        assert result["actor"] is None
+        assert result["reason"] == "actor.images 为空"
 
     def test_crop_without_rect(self, plugin, api_mod, monkeypatch):
         fake = with_actor_sync(api_mod, monkeypatch, FakeActorSync())
@@ -999,14 +1028,17 @@ class TestActorCropEndpoint:
 
     def test_crop_missing_id(self, plugin):
         result = call(plugin.api_actor_crop_avatar(FakeRequest(body={})))
-        assert result["success"] is False
+        assert result["success"] is False and result["ok"] is False
         assert result["message"] == "缺少演员 id"
+        assert result["reason"] == "缺少演员 id"
         assert result["actor"] is None
 
     def test_crop_missing_module(self, plugin, api_mod, monkeypatch):
         no_actor_sync(api_mod, monkeypatch)
         result = call(plugin.api_actor_crop_avatar(FakeRequest(body={"id": 7})))
         assert result["message"] == "演员子系统未就绪"
+        assert result["reason"] == "演员子系统未就绪"     # actor_not_ready 分支也带 reason
+        assert result["ok"] is False
 
     def test_crop_module_without_handler(self, plugin, api_mod, monkeypatch):
         """S3 还没写 `crop_avatar()` 时也只回未就绪，不 500。"""
@@ -1017,5 +1049,6 @@ class TestActorCropEndpoint:
     def test_crop_exception_is_envelope(self, plugin, api_mod, monkeypatch):
         with_actor_sync(api_mod, monkeypatch, FakeActorSync(boom=True))
         result = call(plugin.api_actor_crop_avatar(FakeRequest(body={"id": 7})))
-        assert result["success"] is False
+        assert result["success"] is False and result["ok"] is False
         assert "裁切炸了" in result["message"]
+        assert result["reason"] == result["message"]

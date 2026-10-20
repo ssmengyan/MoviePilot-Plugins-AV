@@ -32,7 +32,10 @@ upload_avatar(store, actor, raw, *, source="manual", opts=None, emby_client=None
    丢弃并试下一个候选，最多试 3 个**；字节 > 5MB 丢弃。⚠️ 尺寸取不到（本机无 Pillow /
    解码失败）时**放行**：imgproxy 已经验过它是一张图，"量不出尺寸"不该成为丢掉头像的理由。
    **下载全失败才算 failed**；只是候选不达标 → 仍是 `no_avatar`（skip）。
-4. **上传** `find_person(person)` → 无 `ImageTags.Primary`（或 force 点名）→
+4. **落库 + 上传** 选中合规字节即 `store.actor_set_images()` **前插成 `images[0]`**
+   —— 演员库的「有图」与 `crop-avatar` 的"当前主图"都只读这一格（0.9.0 真机缺口：只传了
+   Emby、库里恒 `[]`）；`person_missing` 也记候选，只是不传 Emby。然后
+   `find_person(person)` → 无 `ImageTags.Primary`（或 force 点名）→
    `upload_image(person_id, "Primary", raw)`；可选合并写 `ProviderIds.JavDB`
    （沿用 `person_provider_ids` 开关）。找不到 Person → `person_missing`，
    **记 skip 不计失败**（影片还没刮过是必然过渡态）。
@@ -398,6 +401,48 @@ def _candidates_for(row: Dict[str, Any], proxy: str,
 # 单个演员：选图 → 下载 → 校验 → 上传
 # ---------------------------------------------------------------------------
 
+def _record_images(store: Any, row: Dict[str, Any], cand: Dict[str, str],
+                   raw: bytes = b"", width: int = 0, height: int = 0) -> bool:
+    """把**选中的这张图**记进演员行（`images[0]` 是主图；原图去重后保留在后面）。
+
+    为什么流水线必须自己写这一格：`images_json` 是演员库与"裁剪当前主图"唯一的数据来源
+    （方案 §2）。只传 Emby 不落库的话，Emby 侧明明有图，而 `/actor/list` 的「有图」恒为 0、
+    `crop-avatar` 报"没有当前主图"—— 0.9.0 真机就是这样（199 奥田咲上传成功但库里是 `[]`）。
+
+    条目形状与 `_apply_master()`（手工裁剪/上传）保持一致；同一 url 不重复追加，旧条目
+    `primary` 一律置 False。写库失败只 warning：**不能**因为记不上账就否定这一条的结论。
+    """
+    actor_id = scraper._to_int((row or {}).get("id"))
+    if actor_id <= 0:                       # 兼容壳的行来自 meta.actors_json，没有 actor 主键
+        return False
+    setter = getattr(store, "actor_set_images", None)
+    if not callable(setter):
+        return False                        # store 还没有 actor 表（S1 未落地时就是这条路）
+    if "images" in _as_list((row or {}).get("locked_fields")):
+        return False                        # 双保险：锁了就不写（调用点前面也拦过）
+    url = str((cand or {}).get("url") or "").strip()
+    if not url:
+        return False
+    entry = {"url": url, "source": str((cand or {}).get("source") or "manual"),
+             "w": int(width or 0), "h": int(height or 0), "bytes": len(bytes(raw or b"")),
+             "primary": True}
+    images = [entry]
+    for old in _as_list((row or {}).get("images")):
+        if not isinstance(old, dict):
+            continue
+        keep = dict(old)
+        if not str(keep.get("url") or "").strip() or str(keep.get("url")) == url:
+            continue
+        keep["primary"] = False
+        images.append(keep)
+    try:
+        setter(actor_id, images, field_sources={"images": entry["source"]})
+    except Exception as error:              # noqa: BLE001 - 记账失败不影响这一条的 ok/failed
+        logger.warning(f"AVHelper 写演员候选图失败（{actor_id}）：{type(error).__name__}: {error}")
+        return False
+    return True
+
+
 def _scrape_row(store: Any, emby_client: Any, row: Dict[str, Any], *, force: bool = False,
                 dry_run: bool = True, proxy: str = "",
                 opts: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -450,6 +495,14 @@ def _scrape_row(store: Any, emby_client: Any, row: Dict[str, Any], *, force: boo
     if not person_id:
         item["reason"] = "person_missing"        # skip，不是失败（影片还没刮过）
         _log(store, "skipped", person, "person_missing")
+        # Emby 里还没这个人 ≠ 没图：候选照样记进演员库（演员库要显示、crop-avatar 要用），
+        # 只是这一步不下载（不需要字节就能入库），也绝不因此把这一条算成失败。
+        if not dry_run:
+            missing_candidates, missing_stale = _candidates_for(
+                row, str(options.get("proxy") or ""), options)
+            item["index_stale"] = bool(missing_stale)
+            if missing_candidates:
+                _record_images(store, row, missing_candidates[0])
         return item
     item["person_id"] = person_id
     has_image = bool(((found or {}).get("ImageTags") or {}).get("Primary"))
@@ -520,6 +573,8 @@ def _scrape_row(store: Any, emby_client: Any, row: Dict[str, Any], *, force: boo
                  "w": width, "h": height, "action": "upload_avatar", "reason": ""})
     if dry_run:                         # dry_run 零写请求（与 0.8.1 的既有口径一致）
         return item
+    # ★ 只要选到合规字节就落库（上传成败另说）：演员库的「有图」与「裁剪当前主图」都读这一格。
+    _record_images(store, row, cand, raw, width, height)
     ok, detail = scraper._call(emby_client, "upload_image", person_id, "Primary", raw)
     if not ok:
         item.update(action="failed", reason=str(detail or "upload_failed"),

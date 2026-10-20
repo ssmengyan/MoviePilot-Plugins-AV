@@ -719,6 +719,90 @@ class TestBookkeeping:
 
 
 # ---------------------------------------------------------------------------
+# 候选图落库（0.9.0 真机缺口：只传了 Emby、actor.images_json 恒 "[]"）
+# ---------------------------------------------------------------------------
+
+class TestImagesLedger:
+    """`images_json` 是演员库「有图」与 `crop-avatar`「当前主图」的**唯一**数据源（方案 §2）。"""
+
+    OLD_URL = "https://tp.spfcas.com/avatars/old/old.jpg"
+
+    def _store(self):
+        return FakeActorStore([_row(images=[{"url": self.OLD_URL, "source": "javdb",
+                                             "w": 100, "h": 100, "bytes": 999,
+                                             "primary": True}])])
+
+    def test_upload_records_candidate_images(self, actor_sync, scraper, monkeypatch):
+        """★ 上传成功后 `images[0]` 就是这次的候选，旧图**保留**在后面（前插不是覆盖）。"""
+        blob = _png(400, 600)
+        sources = FakeSources(hits=[{"name": "ア", "url": GF_URL, "folder": "f", "file": "f"}])
+        _wire(monkeypatch, scraper, actor_sync, sources=sources, blobs={GF_URL: blob})
+        store = self._store()
+        emby = FakeEmby({PERSON: {"Id": "50", "ImageTags": {}}})
+        result = actor_sync.run_actor_scrape(store, emby, actor_ids=[7], dry_run=False)
+        assert result["ok"] is True and len(emby.uploaded) == 1
+
+        written = store.calls["set_images"][-1]["images"]
+        assert [one["url"] for one in written] == [GF_URL, self.OLD_URL]
+        assert written[0] == {"url": GF_URL, "source": "gfriends", "w": 400, "h": 600,
+                             "bytes": len(blob), "primary": True}
+        assert written[1]["primary"] is False              # 旧图降级但仍留在列表里
+        assert store.rows[0]["field_sources"]["images"] == "gfriends"
+        assert store.rows[0]["images"][0]["url"] == GF_URL  # 真的写进库了
+
+    def test_person_missing_still_records_candidate_images(self, actor_sync, scraper,
+                                                           monkeypatch):
+        """Emby 里还没这个人也是"有候选"：照记 `images`（演员库要显示、裁剪要用），且不算失败。"""
+        sources = FakeSources(hits=[{"name": "ア", "url": GF_URL, "folder": "f", "file": "f"}])
+        proxy = _wire(monkeypatch, scraper, actor_sync, sources=sources,
+                      blobs={GF_URL: _png(400, 600)})
+        store = self._store()
+        result = actor_sync.run_actor_scrape(store, FakeEmby({}), actor_ids=[7], dry_run=False)
+        assert result["items"][0]["reason"] == "person_missing"
+        assert result["counts"]["failed"] == 0 and result["ok"] is True
+        written = store.calls["set_images"][-1]["images"]
+        assert [one["url"] for one in written] == [GF_URL, self.OLD_URL]
+        assert written[0]["primary"] is True and written[0]["source"] == "gfriends"
+        assert proxy.calls == []                            # 只记地址，不必为它下载一张图
+
+    def test_dry_run_records_no_images(self, actor_sync, scraper, monkeypatch):
+        """`dry_run` 仍然**零写**：连候选图落库都不许发生（预览不是应用）。"""
+        sources = FakeSources(hits=[{"name": "ア", "url": GF_URL, "folder": "f", "file": "f"}])
+        _wire(monkeypatch, scraper, actor_sync, sources=sources, blobs={GF_URL: _png(400, 600)})
+        store = self._store()
+        result = actor_sync.run_actor_scrape(store, FakeEmby({PERSON: {"Id": "51", "ImageTags": {}}}),
+                                            actor_ids=[7], dry_run=True)
+        assert result["items"][0]["action"] == "upload_avatar"
+        assert store.calls.get("set_images") is None        # ★ zero write
+        assert store.rows[0]["images"][0]["url"] == self.OLD_URL
+
+    def test_locked_images_are_not_recorded(self, actor_sync, scraper, monkeypatch):
+        sources = FakeSources(hits=[{"name": "ア", "url": GF_URL, "folder": "f", "file": "f"}])
+        _wire(monkeypatch, scraper, actor_sync, sources=sources, blobs={GF_URL: _png(400, 600)})
+        store = FakeActorStore([_row(locked_fields=["images"],
+                                     images=[{"url": self.OLD_URL, "source": "javdb"}])])
+        result = actor_sync.run_actor_scrape(store, FakeEmby({PERSON: {"Id": "52", "ImageTags": {}}}),
+                                             actor_ids=[7], dry_run=False, force=True)
+        assert result["items"][0]["reason"] == "locked"
+        assert store.calls.get("set_images") is None        # ★ 锁了连账都不记
+        assert store.rows[0]["images"][0]["url"] == self.OLD_URL
+
+    def test_record_failure_does_not_change_the_verdict(self, actor_sync, scraper, monkeypatch):
+        """写库抛异常只 warning：Emby 已经传上去了，这一条仍算成功。"""
+        sources = FakeSources(hits=[{"name": "ア", "url": GF_URL, "folder": "f", "file": "f"}])
+        _wire(monkeypatch, scraper, actor_sync, sources=sources, blobs={GF_URL: _png(400, 600)})
+        store = self._store()
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("数据库锁住了")
+
+        store.actor_set_images = boom
+        emby = FakeEmby({PERSON: {"Id": "53", "ImageTags": {}}})
+        result = actor_sync.run_actor_scrape(store, emby, actor_ids=[7], dry_run=False)
+        assert result["ok"] is True and len(emby.uploaded) == 1
+        assert result["items"][0]["action"] == "upload_avatar"
+
+# ---------------------------------------------------------------------------
 # 单飞与队列 tick
 # ---------------------------------------------------------------------------
 

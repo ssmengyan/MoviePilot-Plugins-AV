@@ -3758,6 +3758,25 @@ class AVHelper(_PluginBase):
         """演员子系统依赖没落盘时的统一错误体（`success:false` + 明确文案）。"""
         return cls.api_error(ACTOR_NOT_READY, extra)
 
+    def actor_write_out(self, result: Any) -> Dict[str, Any]:
+        """`crop-avatar` / `lock` 的返回信封：`{success, ok, actor, reason}`（只增不改）。
+
+        `success` 与 `ok` **同值** —— 后者保留流水线给的原始键，前端两个都认；`reason` 是失败
+        原因（流水线的 `reason`，没有就空串）。真机教训：缺了它界面只能显示「失败」，说不出
+        为什么（这一次就是 `actor.images` 为空，但人看不到那句话）。
+        """
+        out = dict(result) if isinstance(result, dict) else {}
+        ok = bool(out.get("ok", True))
+        actor = out.get("actor")
+        return {"success": ok, "ok": ok,
+                "actor": self._actor_out(actor) if actor else None,
+                "reason": str(out.get("reason") or "")}
+
+    @classmethod
+    def actor_write_error(cls, message: str) -> Dict[str, Any]:
+        """写端点的失败信封：`message` 与 `reason` **同文案**（前端只读 `reason` 也不丢信息）。"""
+        return cls.api_error(message, {"ok": False, "actor": None, "reason": message})
+
     @staticmethod
     def _name_list(value: Any) -> Optional[List[str]]:
         """body 里的名字数组：不是数组（含缺键）回 None —— 调用方据此区分「没点名」与「点了空」。"""
@@ -4002,16 +4021,17 @@ class AVHelper(_PluginBase):
 
         取图、裁切、上传、落库全在 S3 的流水线里（`actor_sync.crop_avatar()`），这里只解析
         入参交给线程池 —— `rect` 可选，缺省由它按 3:4 自判（`imgproxy.crop_poster` 的口径）。
-        信封与 `/actor/lock` 一致：`{success, actor}`（写后的整行，`images[0]` 就是新主图）。
+        信封与 `/actor/lock` 一致：`{success, ok, actor, reason}`（`actor` 是写后的整行，
+        `images[0]` 就是新主图；`reason` 说明为什么没成）。
         """
         payload = await self._json_body(request)
         actor_id = to_int(payload.get("id"))
         if actor_id <= 0:
-            return self.api_error("缺少演员 id", {"actor": None})
+            return self.actor_write_error("缺少演员 id")
         mod = self.actor_sync_module()
         fn = getattr(mod, "crop_avatar", None) if mod is not None else None
         if not callable(fn):
-            return self.actor_not_ready({"actor": None})
+            return self.actor_write_error(ACTOR_NOT_READY)
         rect = payload.get("rect")
         try:
             result = await asyncio.to_thread(
@@ -4020,34 +4040,33 @@ class AVHelper(_PluginBase):
                 opts=dict(self.actor_opts()))
         except Exception as error:
             logger.error(f"AVHelper 裁切演员头像失败（{actor_id}）：{error}")
-            return self.api_error(str(error), {"actor": None})
-        out = dict(result) if isinstance(result, dict) else {}
-        return {"success": bool(out.get("ok", True)),
-                "actor": self._actor_out(out.get("actor"))}
+            return self.actor_write_error(str(error))
+        return self.actor_write_out(result)
 
     async def api_actor_lock(self, request: Request) -> Dict[str, Any]:
         """`/actor/lock`：锁/解锁一位演员的字段（默认 `field="images"`、`on=true`）。
 
         锁了 `images` 之后 `scrape` 只补资料不换图；解锁走同一个端点（`on:false`），
-        不需要另开一条 —— 前端的锁按钮因此只有一个动作。信封：`{success, actor}`
-        （`actor` 是写后的整行，前端拿到就能直接重渲染，不必再打一次 detail）。
+        不需要另开一条 —— 前端的锁按钮因此只有一个动作。信封：`{success, ok, actor, reason}`
+        （`actor` 是写后的整行，前端拿到就能直接重渲染，不必再打一次 detail；`reason` 说明为什么没成）。
         """
         payload = await self._json_body(request)
         actor_id = to_int(payload.get("id"))
         if actor_id <= 0:
-            return self.api_error("缺少演员 id", {"actor": None})
+            return self.actor_write_error("缺少演员 id")
         field = str(payload.get("field") or "images").strip() or "images"
         on = pick_bool(payload.get("on"), True)
         fn = getattr(self.store, "actor_lock", None)
         if not callable(fn):
-            return self.actor_not_ready({"actor": None})
+            return self.actor_write_error(ACTOR_NOT_READY)
         try:
             result = await asyncio.to_thread(fn, actor_id, field=field, on=on)
         except Exception as error:
             logger.error(f"AVHelper 锁演员字段失败（{actor_id}/{field}）：{error}")
-            return self.api_error(str(error), {"actor": None})
-        return {"success": isinstance(result, dict) and bool(result),
-                "actor": self._actor_out(result)}
+            return self.actor_write_error(str(error))
+        row = result if isinstance(result, dict) else {}
+        return self.actor_write_out({"ok": bool(row), "actor": row,
+                                     "reason": "" if row else f"没有这位演员（id={actor_id}）"})
 
     async def api_actor_gfriends_refresh(self) -> Dict[str, Any]:
         """`/actor/gfriends/refresh`：忽略 7 天 TTL 强制重拉 Filetree.json。
