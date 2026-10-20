@@ -70,14 +70,10 @@ export type TrailerMode = 'off' | 'remote' | 'local'
  * 后端（S8）读法：`self.global_rule().get("scrapeMode")` 等，缺键按下面的默认值兜底。
  */
 export interface ScrapeSettings {
-  /** 刮削模式：`off` 关闭 / `fill` 只补空缺 / `hybrid` 自建层 + MetaTube 兜底 / `own` 只用自建层。 */
+  /** 刮削模式：`off` 关闭 / `fill` 只补空缺 / `hybrid` 自建层 + 站点兜底 / `own` 只用自建层。 */
   scrapeMode: ScrapeMode
   /** 简介源：Javtxt（中文直出，契约 §4.2）。 */
   plotJavtxt: boolean
-  /** 简介源：MetaTube（日文 + LLM 翻译）。 */
-  plotMetatube: boolean
-  /** MetaTube 服务地址（0.7.0 加：只在开了上面的开关时才有意义；**代码里不写死**，留空 = 不做兜底）。 */
-  metatubeBase: string
   /** 翻译模型（契约 D6：默认 `hy3`，失败降级 `translateModelFallback`）。 */
   translateModel: string
   /** 备用翻译模型（同一网关）。 */
@@ -94,7 +90,7 @@ export interface ScrapeSettings {
   nameTemplate: string
   /**
    * 启用哪些数据源（0.8.0 / P1-5，**取数图的新真值**）。可选值由后端 `/scrape/graph` 下发；
-   * `javdb` 是骨架、永远在。`plotJavtxt` / `plotMetatube` 由它派生（老前端仍按布尔读）。
+   * `javdb` 是骨架、永远在。`plotJavtxt` 由它派生（老前端仍按布尔读）；0.8.1 起只剩 javdb / javtxt。
    */
   sources: string[]
   /** 字段优先级（稀疏）：`{字段: [站点…]}` —— 把某些源在**这个字段**上提前（P0-1）。 */
@@ -111,8 +107,6 @@ export interface ScrapeSettings {
 export const SCRAPE_DEFAULTS: ScrapeSettings = {
   scrapeMode: 'off',
   plotJavtxt: true,
-  plotMetatube: true,
-  metatubeBase: '',
   translateModel: 'hy3',
   translateModelFallback: 'deepseek-v4.1-flash',
   trailerMode: 'off',
@@ -120,7 +114,7 @@ export const SCRAPE_DEFAULTS: ScrapeSettings = {
   autoScrapeTier2: false,
   cleanSuffixes: ['-UC', '_4K', '-4K', '-C', '-L', '-VR', '-ISO', 'CD1', 'CD2', '中字', '流出'],
   nameTemplate: '{number}{badge} {title}',
-  sources: ['javdb', 'javtxt', 'metatube'],
+  sources: ['javdb', 'javtxt'],
   fieldPriority: {},
   fieldBlacklist: {},
   defaultRateLimit: '2',
@@ -195,9 +189,6 @@ export function toScrapeSettings(raw: unknown): ScrapeSettings {
   return {
     scrapeMode: pick(src.scrapeMode, MODES, SCRAPE_DEFAULTS.scrapeMode),
     plotJavtxt: boolOf(src.plotJavtxt, SCRAPE_DEFAULTS.plotJavtxt),
-    plotMetatube: boolOf(src.plotMetatube, SCRAPE_DEFAULTS.plotMetatube),
-    // 地址没有默认值：留空就是留空（后端据此报「未配置 MetaTube 地址」），不回落
-    metatubeBase: typeof src.metatubeBase === 'string' ? src.metatubeBase.trim() : '',
     translateModel: textOf(src.translateModel, SCRAPE_DEFAULTS.translateModel),
     translateModelFallback: textOf(src.translateModelFallback, SCRAPE_DEFAULTS.translateModelFallback),
     trailerMode: pick(src.trailerMode, TRAILERS, SCRAPE_DEFAULTS.trailerMode),
@@ -218,8 +209,6 @@ export function toScrapeSettings(raw: unknown): ScrapeSettings {
 export const SCRAPE_KEYS: (keyof ScrapeSettings)[] = [
   'scrapeMode',
   'plotJavtxt',
-  'plotMetatube',
-  'metatubeBase',
   'translateModel',
   'translateModelFallback',
   'trailerMode',

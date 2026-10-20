@@ -574,7 +574,7 @@ function avatarResult(counts: AvatarCounts, dryRun: boolean, extraNotes: string[
  * 照常留在结果条上，用户一眼能看出是被什么挡住的。
  *
  * `force`（0.7.4）＝**覆盖已有头像**。用户报「很多女优头像非常不清晰、很低清」的根因是
- * 存量头像里有大量 MetaTube/javdb 时代的 100×100 缩略图，而 `has_image` 一挡就永远换不掉；
+ * 存量头像里有大量历史刮削时代的 100×100 缩略图，而 `has_image` 一挡就永远换不掉；
  * 后端已改成 Gfriends（564×720 ~ 1235×1851 整图）优先，但要**真的换上去**还得跑一次覆盖。
  */
 async function syncAvatars(force = false): Promise<void> {

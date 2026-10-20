@@ -46,8 +46,8 @@ function patch(key: keyof ScrapeSettings, value: unknown): void {
 const MODES: { value: ScrapeMode; label: string; hint: string }[] = [
   { value: 'off', label: '关闭', hint: '不启用自建刮削层：Emby 侧维持现状。' },
   { value: 'fill', label: '只补空缺', hint: '只写 Emby 里为空的字段，已有值不覆盖。' },
-  { value: 'hybrid', label: '混合', hint: '自建层优先，它拿不到的字段回落 MetaTube。' },
-  { value: 'own', label: '仅自建', hint: '只用自建层的结果；拿不到就留空，不回落 MetaTube。' },
+  { value: 'hybrid', label: '混合', hint: '自建层优先，它拿不到的字段按站点链继续问（javdb → javtxt）。' },
+  { value: 'own', label: '仅自建', hint: '只用自建层的结果；拿不到就留空，不再问别的站点。' },
 ]
 
 const modeHint = computed(
@@ -150,32 +150,10 @@ async function runSelfcheck(): Promise<void> {
         class="mb-1"
         @update:model-value="(value: any) => patch('plotJavtxt', value === true)"
       />
-      <v-switch
-        :model-value="props.settings.plotMetatube"
-        color="primary"
-        hide-details
-        inset
-        label="MetaTube（日文 + 翻译）"
-        class="mb-1"
-        @update:model-value="(value: any) => patch('plotMetatube', value === true)"
-      />
-      <p class="text-caption text-medium-emphasis mb-1">
-        javdb 侧不给简介（实测 12/12 <code>summary</code> 为 null），所以简介只能来自这两个源；
-        两个都关掉时这一档等于「只写核心字段」。
+      <p class="text-caption text-medium-emphasis mb-4">
+        javdb 侧不给简介（实测 12/12 <code>summary</code> 为 null），所以简介只能来自 Javtxt；
+        关掉它这一档等于「只写核心字段」。MetaTube 已于 0.8.1 整体下线，不再有第二个兜底源。
       </p>
-      <v-text-field
-        v-if="props.settings.plotMetatube"
-        :model-value="props.settings.metatubeBase"
-        label="MetaTube 地址"
-        placeholder="http://metatube:8080"
-        hint="自建 MetaTube Server 的根地址；留空 = 不做 MetaTube 兜底（数据源自检会显式报「未配置」）"
-        persistent-hint
-        variant="outlined"
-        density="comfortable"
-        clearable
-        class="mb-4"
-        @update:model-value="(value: any) => patch('metatubeBase', String(value ?? '').trim())"
-      />
 
       <!-- ===== 翻译模型 + 自检 ===== -->
       <div class="avh-grid mb-2">

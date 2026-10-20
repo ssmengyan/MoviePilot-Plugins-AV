@@ -136,7 +136,7 @@ interface FieldRow {
   target: string
   changed: boolean
   hasValue: boolean
-  /** 这个值是谁给的（`javdb` / `javtxt` / `metatube` / `llm`）；老后端没有这个键就是空串 */
+  /** 这个值是谁给的（`javdb` / `javtxt` / `llm`）；老后端没有这个键就是空串 */
   source: string
 }
 
@@ -328,7 +328,7 @@ defineExpose({ openFor })
 
       <v-card-text>
         <div v-if="loading" class="avh-sd__loading">
-          正在抓取「{{ number || key }}」的信息…（javdb / Javtxt / MetaTube 逐个问一遍，通常几秒）
+          正在抓取「{{ number || key }}」的信息…（javdb / Javtxt / 翻译逐个跑一遍，通常几秒）
         </div>
 
         <EmptyState
@@ -435,7 +435,7 @@ defineExpose({ openFor })
                       有变化
                     </v-chip>
                   </td>
-                  <!-- 「这条是谁给的」：javdb 骨架 / javtxt 中文 / metatube 兜底 / llm 译文。
+                  <!-- 「这条是谁给的」：javdb 骨架 / javtxt 中文 / llm 译文。
                        没值或老后端不给时留空，不猜。 -->
                   <td>
                     <code v-if="row.source" class="avh-sd__src">{{ row.source }}</code>
@@ -502,7 +502,7 @@ defineExpose({ openFor })
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
 
-/* 溯源小字（`javdb` / `javtxt` / `metatube` / `llm`）：等宽、弱化，只作注脚 */
+/* 溯源小字（`javdb` / `javtxt` / `llm`）：等宽、弱化，只作注脚 */
 .avh-sd__src {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;

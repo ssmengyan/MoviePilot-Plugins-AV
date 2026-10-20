@@ -57,17 +57,17 @@
   gap: 12px 16px;
 }
 
-.avh-panel[data-v-87745c97] {
+.avh-panel[data-v-b30ce3d7] {
   margin-bottom: 12px;
 }
 
 /* 与 `RulePanel` 同一套「自动铺列」网格（窄屏自然折成一列） */
-.avh-grid[data-v-87745c97] {
+.avh-grid[data-v-b30ce3d7] {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px 16px;
 }
-.avh-row[data-v-87745c97] {
+.avh-row[data-v-b30ce3d7] {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -605,33 +605,33 @@
 }
 
 /* 工具条：与下载页/演员页同款（`.toolbar` + `.hint` + `.spacer`） */
-.avh-history__toolbar[data-v-7cf5d9d5] {
+.avh-history__toolbar[data-v-36ac003f] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 8px;
 }
-.avh-history__hint[data-v-7cf5d9d5] {
+.avh-history__hint[data-v-36ac003f] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-history__spacer[data-v-7cf5d9d5] {
+.avh-history__spacer[data-v-36ac003f] {
   flex: 1;
 }
 
 /* 搜索框宽度固定：不跟着输入内容长短伸缩，工具条高度就不会跳 */
-.avh-history__q[data-v-7cf5d9d5] {
+.avh-history__q[data-v-36ac003f] {
   width: 220px;
   flex: none;
 }
 
 /* 开关自带上下留白，压掉一部分，让它和按钮在同一条基线上 */
-.avh-history__switch[data-v-7cf5d9d5] {
+.avh-history__switch[data-v-36ac003f] {
   flex: none;
   margin: 0;
 }
-.avh-history__stats[data-v-7cf5d9d5] {
+.avh-history__stats[data-v-36ac003f] {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -640,7 +640,7 @@
 }
 
 /* 骨架表格顶上那句说明：与演员页 `.avh-loading` 同一号字，但居中留白小一些 */
-.avh-history__loading[data-v-7cf5d9d5] {
+.avh-history__loading[data-v-36ac003f] {
   padding: 14px 8px 4px;
   text-align: center;
   font-size: 13px;
@@ -648,7 +648,7 @@
 }
 
 /* 表格外框：与候选表 `.avh-cand` 同一套底色/描边/圆角 */
-.avh-history__tablewrap[data-v-7cf5d9d5] {
+.avh-history__tablewrap[data-v-36ac003f] {
   overflow: hidden;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
   border-radius: 10px;
@@ -662,52 +662,52 @@
  * 必须自己 `overflow:hidden` + 省略号，否则内容会溢到相邻列上。
  * 唯一的弹性列是「标题」（唯一 `<col>` 不带 class 的那条）。
  */
-.avh-history__table[data-v-7cf5d9d5] {
+.avh-history__table[data-v-36ac003f] {
   table-layout: fixed;
   width: 100%;
   border-collapse: collapse;
   font-size: 12.5px;
 }
-.avh-history__col-pic[data-v-7cf5d9d5] {
+.avh-history__col-pic[data-v-36ac003f] {
   width: 60px;
 }
-.avh-history__col-no[data-v-7cf5d9d5] {
+.avh-history__col-no[data-v-36ac003f] {
   width: 108px;
 }
-.avh-history__col-actor[data-v-7cf5d9d5] {
+.avh-history__col-actor[data-v-36ac003f] {
   width: 110px;
 }
-.avh-history__col-size[data-v-7cf5d9d5] {
+.avh-history__col-size[data-v-36ac003f] {
   width: 84px;
 }
 
 /* 完整时间戳「YYYY-MM-DD HH:MM:SS」不截断（表格里时间排成一列才好扫） */
-.avh-history__col-time[data-v-7cf5d9d5] {
+.avh-history__col-time[data-v-36ac003f] {
   width: 152px;
 }
 
 /* 「不在库（可能已删除）」是这一页最长的一格文案，给足宽度免得被省略号吃掉；
    0.7.4 起这一格还要塞下在库行的「打开 ↗」，所以加宽 20px。 */
-.avh-history__col-lib[data-v-7cf5d9d5] {
+.avh-history__col-lib[data-v-36ac003f] {
   width: 190px;
 }
-.avh-history__col-act[data-v-7cf5d9d5] {
+.avh-history__col-act[data-v-36ac003f] {
   width: 100px;
 }
-.avh-history__table th[data-v-7cf5d9d5],
-.avh-history__table td[data-v-7cf5d9d5] {
+.avh-history__table th[data-v-36ac003f],
+.avh-history__table td[data-v-36ac003f] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.avh-history__table th[data-v-7cf5d9d5] {
+.avh-history__table th[data-v-36ac003f] {
   padding: 8px;
   text-align: left;
   font-weight: 500;
   color: rgba(var(--v-theme-on-surface), 0.5);
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.12);
 }
-.avh-history__table td[data-v-7cf5d9d5] {
+.avh-history__table td[data-v-36ac003f] {
   /* 单行定高（正文行约 19px + 上下 9px），矮一行就能多塞几部 */
   height: 38px;
   padding: 9px 8px;
@@ -716,12 +716,12 @@
 }
 
 /* 封面列：整行被 64px 的竖图撑起（唯一不自设高度的一格） */
-.avh-history__table td.avh-history__pic[data-v-7cf5d9d5] {
+.avh-history__table td.avh-history__pic[data-v-36ac003f] {
   height: auto;
   padding: 6px 8px;
   vertical-align: middle;
 }
-.avh-history__thumb[data-v-7cf5d9d5] {
+.avh-history__thumb[data-v-36ac003f] {
   width: 48px;
   height: 64px;
   border-radius: 6px;
@@ -729,7 +729,7 @@
 }
 
 /* 番号是扫表的锚点，给它一行里最重的字重（照候选表的`.avh-cand__no`口径） */
-.avh-history__no[data-v-7cf5d9d5] {
+.avh-history__no[data-v-36ac003f] {
   font-size: 13px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -737,16 +737,16 @@
 
 /* 标题列是唯一的弹性列（`<colgroup>` 里那条不带 class 的 `<col>`）：
    表格剩余宽度都给它，长标题靠下面那条省略号规则兜 */
-.avh-history__title[data-v-7cf5d9d5] {
+.avh-history__title[data-v-36ac003f] {
   color: rgba(var(--v-theme-on-surface), 0.87);
 }
-.avh-history__act[data-v-7cf5d9d5] {
+.avh-history__act[data-v-36ac003f] {
   text-align: right;
   white-space: nowrap;
 }
 
 /* 库状态标签：跟表格同一号字（`v-chip` 默认字比表格大一点，会显得突兀） */
-.avh-history__lib[data-v-7cf5d9d5] {
+.avh-history__lib[data-v-36ac003f] {
   font-size: 11.5px;
 }
 
@@ -755,31 +755,31 @@
  * 在库那一格本来就是这一行最长的内容（170px 列宽），所以按钮必须能跟着 chip 挤在同一行
  * —— `nowrap` 交给 `td` 的既有规则，这里只控字号与颜色。
  */
-.avh-history__embylink[data-v-7cf5d9d5] {
+.avh-history__embylink[data-v-36ac003f] {
   margin-left: 6px;
   font-size: 11.5px;
   color: rgb(var(--v-theme-primary));
   text-decoration: none;
   white-space: nowrap;
 }
-.avh-history__embylink[data-v-7cf5d9d5]:hover {
+.avh-history__embylink[data-v-36ac003f]:hover {
   text-decoration: underline;
 }
 
 /* 骨架格：主题前景色 8% 铺一条，按文字高度给高（不引入动画，避免抢注意力） */
-.avh-history__sk[data-v-7cf5d9d5] {
+.avh-history__sk[data-v-36ac003f] {
   height: 12px;
   border-radius: 3px;
   background: rgba(var(--v-theme-on-surface), 0.08);
 }
-.avh-history__sk--pic[data-v-7cf5d9d5] {
+.avh-history__sk--pic[data-v-36ac003f] {
   width: 48px;
   height: 64px;
   border-radius: 6px;
 }
 
 /* 末尾哨兵（`usePagedList` 的 `sentinel`）：只画一行进度提示；滚动到底自动追加靠它定位滚动层 */
-.avh-history__more[data-v-7cf5d9d5] {
+.avh-history__more[data-v-36ac003f] {
   padding: 14px 4px 2px;
   text-align: center;
 }
@@ -1845,58 +1845,58 @@
   grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
 }
 
-.avh-sd__subtitle[data-v-4bc334fd] {
+.avh-sd__subtitle[data-v-9c9d1182] {
   margin-left: 8px;
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.55);
 }
-.avh-sd__hint[data-v-4bc334fd] {
+.avh-sd__hint[data-v-9c9d1182] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
 
-/* 溯源小字（`javdb` / `javtxt` / `metatube` / `llm`）：等宽、弱化，只作注脚 */
-.avh-sd__src[data-v-4bc334fd] {
+/* 溯源小字（`javdb` / `javtxt` / `llm`）：等宽、弱化，只作注脚 */
+.avh-sd__src[data-v-9c9d1182] {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   color: rgba(var(--v-theme-on-surface), 0.6);
 }
-.avh-sd__loading[data-v-4bc334fd] {
+.avh-sd__loading[data-v-9c9d1182] {
   padding: 40px 20px;
   text-align: center;
   font-size: 13px;
   color: rgba(var(--v-theme-on-surface), 0.6);
 }
-.avh-sd__media[data-v-4bc334fd] {
+.avh-sd__media[data-v-9c9d1182] {
   display: flex;
   gap: 14px;
   align-items: flex-start;
   margin-bottom: 10px;
 }
-.avh-sd__cover img[data-v-4bc334fd] {
+.avh-sd__cover img[data-v-9c9d1182] {
   width: 118px;
   border-radius: 6px;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.16);
   display: block;
 }
-.avh-sd__mediainfo[data-v-4bc334fd] {
+.avh-sd__mediainfo[data-v-9c9d1182] {
   flex: 1;
   min-width: 0;
 }
-.avh-sd__checkline[data-v-4bc334fd] {
+.avh-sd__checkline[data-v-9c9d1182] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
 }
-.avh-sd__sources[data-v-4bc334fd] {
+.avh-sd__sources[data-v-9c9d1182] {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 4px;
   margin-bottom: 8px;
 }
-.avh-sd__head[data-v-4bc334fd] {
+.avh-sd__head[data-v-9c9d1182] {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1905,78 +1905,78 @@
   letter-spacing: 0.4px;
   color: rgba(var(--v-theme-on-surface), 0.55);
 }
-.avh-sd__tablewrap[data-v-4bc334fd] {
+.avh-sd__tablewrap[data-v-9c9d1182] {
   overflow-x: auto;
 }
-.avh-sd__table[data-v-4bc334fd] {
+.avh-sd__table[data-v-9c9d1182] {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
   font-size: 12.5px;
 }
-.avh-sd__table th[data-v-4bc334fd],
-.avh-sd__table td[data-v-4bc334fd] {
+.avh-sd__table th[data-v-9c9d1182],
+.avh-sd__table td[data-v-9c9d1182] {
   padding: 4px 8px;
   text-align: left;
   vertical-align: top;
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
 }
-.avh-sd__table th[data-v-4bc334fd] {
+.avh-sd__table th[data-v-9c9d1182] {
   font-weight: 600;
   color: rgba(var(--v-theme-on-surface), 0.6);
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.16);
 }
-.avh-sd__cell[data-v-4bc334fd] {
+.avh-sd__cell[data-v-9c9d1182] {
   white-space: normal;
   word-break: break-word;
   line-height: 1.5;
 }
-.avh-sd__row--off[data-v-4bc334fd] {
+.avh-sd__row--off[data-v-9c9d1182] {
   opacity: 0.55;
 }
-.avh-sd__more[data-v-4bc334fd] {
+.avh-sd__more[data-v-9c9d1182] {
   margin-top: 4px;
 }
-.avh-sd__people[data-v-4bc334fd] {
+.avh-sd__people[data-v-9c9d1182] {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
 }
 
 /* 与下载页/订阅页同一套工具条几何 */
-.avh-scrape__toolbar[data-v-1572fa3a] {
+.avh-scrape__toolbar[data-v-8bc44df4] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 12px;
 }
-.avh-scrape__hint[data-v-1572fa3a] {
+.avh-scrape__hint[data-v-8bc44df4] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-scrape__spacer[data-v-1572fa3a] {
+.avh-scrape__spacer[data-v-8bc44df4] {
   flex: 1;
 }
-.avh-scrape__meta[data-v-1572fa3a] {
+.avh-scrape__meta[data-v-8bc44df4] {
   display: flex;
   align-items: baseline;
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 10px;
 }
-.avh-scrape__actions[data-v-1572fa3a] {
+.avh-scrape__actions[data-v-8bc44df4] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 10px;
 }
-.avh-scrape__checkall[data-v-1572fa3a] {
+.avh-scrape__checkall[data-v-8bc44df4] {
   flex: none;
   max-width: 190px;
 }
-.avh-scrape__loading[data-v-1572fa3a] {
+.avh-scrape__loading[data-v-8bc44df4] {
   padding: 44px 20px;
   text-align: center;
   font-size: 13px;
@@ -1984,13 +1984,13 @@
 }
 
 /* 状态卡片（照发现榜单那组 tabs 的胶囊观感，改成可点的方块） */
-.avh-stats[data-v-1572fa3a] {
+.avh-stats[data-v-8bc44df4] {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
   gap: 10px;
   margin-bottom: 10px;
 }
-.avh-stat[data-v-1572fa3a] {
+.avh-stat[data-v-8bc44df4] {
   padding: 10px 12px;
   cursor: pointer;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
@@ -1998,25 +1998,25 @@
   background: rgba(var(--v-theme-on-surface), 0.04);
   transition: 0.15s;
 }
-.avh-stat[data-v-1572fa3a]:hover {
+.avh-stat[data-v-8bc44df4]:hover {
   border-color: rgb(var(--v-theme-primary));
 }
-.avh-stat--on[data-v-1572fa3a] {
+.avh-stat--on[data-v-8bc44df4] {
   border-color: rgb(var(--v-theme-primary));
   background: rgba(var(--v-theme-primary), 0.16);
 }
-.avh-stat__num[data-v-1572fa3a] {
+.avh-stat__num[data-v-8bc44df4] {
   font-size: 20px;
   font-weight: 700;
   line-height: 1.2;
 }
-.avh-stat__label[data-v-1572fa3a] {
+.avh-stat__label[data-v-8bc44df4] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.6);
 }
 
 /* 四档的常驻图例（用户问过「缺核心是什么意思」，答案必须看得见，不能只藏在悬浮提示里） */
-.avh-scrape__legend[data-v-1572fa3a] {
+.avh-scrape__legend[data-v-8bc44df4] {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 14px;
@@ -2024,23 +2024,23 @@
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.55);
 }
-.avh-scrape__legenditem[data-v-1572fa3a] {
+.avh-scrape__legenditem[data-v-8bc44df4] {
   display: inline-flex;
   align-items: center;
 }
 
 /* 表格（`table-layout: fixed` + 显式列宽：宽屏不把「操作」列挤出去，照 S6 候选表的教训） */
-.avh-tablewrap[data-v-1572fa3a] {
+.avh-tablewrap[data-v-8bc44df4] {
   overflow-x: auto;
 }
-.avh-table[data-v-1572fa3a] {
+.avh-table[data-v-8bc44df4] {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
   font-size: 12.5px;
 }
-.avh-table th[data-v-1572fa3a],
-.avh-table td[data-v-1572fa3a] {
+.avh-table th[data-v-8bc44df4],
+.avh-table td[data-v-8bc44df4] {
   padding: 6px 8px;
   text-align: left;
   vertical-align: middle;
@@ -2049,26 +2049,26 @@
   white-space: nowrap;
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
 }
-.avh-table th[data-v-1572fa3a] {
+.avh-table th[data-v-8bc44df4] {
   font-weight: 600;
   color: rgba(var(--v-theme-on-surface), 0.6);
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.16);
 }
-.avh-table__right[data-v-1572fa3a] {
+.avh-table__right[data-v-8bc44df4] {
   text-align: right;
 }
-.avh-table__num[data-v-1572fa3a] {
+.avh-table__num[data-v-8bc44df4] {
   font-weight: 600;
 }
-.avh-table__ellipsis[data-v-1572fa3a] {
+.avh-table__ellipsis[data-v-8bc44df4] {
   max-width: 0;
 }
-.avh-rowbtns[data-v-1572fa3a] {
+.avh-rowbtns[data-v-8bc44df4] {
   display: flex;
   gap: 4px;
   justify-content: flex-end;
 }
-.avh-scrape__secttl[data-v-1572fa3a] {
+.avh-scrape__secttl[data-v-8bc44df4] {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -2080,14 +2080,14 @@
 
 /* 失败原因（`scrape_log.reason`）：等宽小字、弱化色，只作"为什么"的注脚，
    不与状态 chip 抢视觉 —— 状态说"成没成"，它说"为什么"。 */
-.avh-scrape__reason[data-v-1572fa3a] {
+.avh-scrape__reason[data-v-8bc44df4] {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   color: rgba(var(--v-theme-on-surface), 0.6);
 }
 
 /* 版本角标（与 `LibraryView` / `DownloadsView` 同一套观感） */
-.avh-vbadge[data-v-1572fa3a] {
+.avh-vbadge[data-v-8bc44df4] {
   display: inline-block;
   padding: 1px 6px;
   font-size: 10px;
@@ -2097,7 +2097,7 @@
   background: rgba(var(--v-theme-secondary), 0.9);
   border: 1px solid rgba(255, 255, 255, 0.14);
 }
-.avh-vbadge--inline[data-v-1572fa3a] {
+.avh-vbadge--inline[data-v-8bc44df4] {
   margin-left: 4px;
 }
 
@@ -2109,7 +2109,7 @@
  */
 
 /* 页签胶囊：与「下载」栏那组同一套（两份 scoped CSS 各有作用域，本项目既有做法） */
-.avh-tabs[data-v-1572fa3a] {
+.avh-tabs[data-v-8bc44df4] {
   display: flex;
   gap: 4px;
   padding: 3px;
@@ -2117,7 +2117,7 @@
   border-radius: 8px;
   background: rgba(var(--v-theme-on-surface), 0.04);
 }
-.avh-tabs button[data-v-1572fa3a] {
+.avh-tabs button[data-v-8bc44df4] {
   padding: 4px 12px;
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
@@ -2126,7 +2126,7 @@
   border-radius: 6px;
   cursor: pointer;
 }
-.avh-tabs__on[data-v-1572fa3a] {
+.avh-tabs__on[data-v-8bc44df4] {
   color: rgb(var(--v-theme-on-primary)) !important;
   background: rgb(var(--v-theme-primary)) !important;
 }
