@@ -664,10 +664,29 @@ def _migrate_v2(conn: sqlite3.Connection) -> None:
 
 #: schema 版本 + **有序**迁移表（P1-8）。加迁移 = 往后面追加一条，**不改已有条目**。
 #: 版本号只增不减；`schema_meta.schema_version` 是"这个库走在哪一版"的唯一真值。
-_SCHEMA_VERSION = 2
+def _migrate_v3(conn: sqlite3.Connection) -> None:
+    """迁移 v3（0.9.0 修复）：把 `meta` 里 `T` 分隔的时间戳统一改写成空格分隔。
+
+    病根：`scraper.apply_backoff()` 过去写 `2026-10-21T03:00:00`，而 `meta_due()` 拿它跟
+    `time.strftime("%Y-%m-%d %H:%M:%S")` 做**字典序比较** —— `'T'(0x54) > ' '(0x20)`，
+    于是同一天到点的行被判成「还没到」，Tier1 退避要等**日期翻页**才被领走（6h 退化成「明天再说」）。
+    写入侧已同步改成空格分隔，这里把存量行就地改写，两边收敛到同一口径。
+
+    幂等：`WHERE ... LIKE '%T%'` 跑第二遍就是 0 行；列缺失（更老的老库）只 warning、不抛。
+    """
+    for column in ("next_retry_at", "last_scraped_at"):
+        try:
+            conn.execute(f"UPDATE meta SET {column}=REPLACE({column},'T',' ') "
+                         f"WHERE {column} LIKE '%T%'")
+        except sqlite3.OperationalError as error:                # 老库可能还没有这一列
+            logger.warning(f"AVHelper 迁移 v3：改写 meta.{column} 失败（跳过）：{error}")
+
+
+_SCHEMA_VERSION = 3
 _MIGRATIONS: "List[Tuple[int, str, Callable[[sqlite3.Connection], None]]]" = [
     (1, "task/downloads/scrape_log/meta 补列", _repair_columns),
     (2, "actor", _migrate_v2),
+    (3, "meta 时间戳统一成空格分隔", _migrate_v3),
 ]
 
 #: 任务状态清单（0.8.0 / P1-7）：**只加不改**，改一个旧值就等于让历史行"状态未知"。

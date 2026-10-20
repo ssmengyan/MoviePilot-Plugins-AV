@@ -183,11 +183,16 @@ MATRIX_FIELDS: Tuple[str, ...] = (
 
 
 def _now(opts: Optional[Dict[str, Any]] = None) -> str:
-    """当前时间（ISO 秒级、UTC，与 `store._now()` 同形）；`opts['now']` 可覆盖（单测用）。"""
+    """当前时间（UTC 秒级，**与 `store._now()` 逐字同形**：空格分隔、不带时区）；`opts['now']` 可覆盖（单测用）。
+
+    为什么必须是空格分隔：`store.meta_due()` 拿库里的时间戳跟这个串做**字典序比较**，而
+    `'T'(0x54) > ' '(0x20)` —— 写成 `2026-10-21T03:00:00` 会让同一天到点的行被判成
+    「还没到」，Tier1 退避要等日期翻页才生效（0.8.x 的真 bug，0.9.0 修）。
+    """
     fixed = str((opts or {}).get("now") or "").strip()
     if fixed:
         return fixed
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _opt(opts: Optional[Dict[str, Any]], name: str, default: Any = None) -> Any:
@@ -319,12 +324,17 @@ def apply_backoff(completeness: str, retry_count: Any, now: str = "") -> Tuple[i
     if count > len(BACKOFF_HOURS):
         return count, ""
     stamp = str(now or "").strip() or _now()
+    # 入参两种写法都吃：库里的存量行可能是老的 `T` 分隔（v3 迁移会统一改写），
+    # 而 `fromisoformat` 在 3.11 以前只认 `T` —— 先归一成空格再解析，两头都不挑。
+    stamp = stamp.replace("T", " ")
     try:
         base = datetime.fromisoformat(stamp)
     except ValueError:                                          # pragma: no cover - 防御
         base = datetime.now(timezone.utc).replace(tzinfo=None)
     due = base + timedelta(hours=BACKOFF_HOURS[count - 1])
-    return count, due.strftime("%Y-%m-%dT%H:%M:%S")
+    # 输出**空格分隔**：`store.meta_due()` 拿它跟 `"%Y-%m-%d %H:%M:%S"` 做字典序比较，
+    # 写成 `T` 分隔会让同一天到点的行永远「还没到」（见 `_now()` 的说明）。
+    return count, due.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def completeness_of(title_zh: str, title_jp: str, plot_zh: str) -> str:

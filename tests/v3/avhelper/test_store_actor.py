@@ -100,12 +100,13 @@ class TestMigrationV2:
         first = store_mod.Store(db_path=db)
         first.init()
         assert {"actor", "actor_queue"} <= names_of(first, "table")
-        assert first.schema_version() == 2
-        assert first.schema_info()["note"] == "actor"
+        assert first.schema_version() == store_mod._SCHEMA_VERSION
+        # note 记的是**最后跑过的那条**迁移，对着迁移表末条断言（写死迁移名会在下次加迁移时再红）
+        assert first.schema_info()["note"] == store_mod._MIGRATIONS[-1][1]
         # 插件每次加载都会再跑一遍 init()：第二次必须是纯空转
         second = store_mod.Store(db_path=db)
         second.init()
-        assert second.schema_version() == 2
+        assert second.schema_version() == store_mod._SCHEMA_VERSION
         assert columns_of(second, "actor") == ACTOR_COLUMNS
         assert columns_of(second, "actor_queue") == QUEUE_COLUMNS
         # 老库里的数据一条都不许丢（迁移绝不 DROP 重建）
@@ -133,18 +134,18 @@ class TestMigrationV2:
         store_mod.Store(db_path=db).init()
         store = store_mod.Store(db_path=db)
         store.init()
-        assert store.schema_version() == 2
+        assert store.schema_version() == store_mod._SCHEMA_VERSION
         assert columns_of(store, "actor") == ACTOR_COLUMNS
         assert store.actor_stats()["total"] == 0
 
     def test_dropped_actor_table_self_heals(self, store_mod, tmp_path):
-        """版本是 2、表却被手工 DROP：`init()` 幂等建表自愈，且**不改版本**。"""
+        """版本已是当前版、表却被手工 DROP：`init()` 幂等建表自愈，且**不改版本**。"""
         store = make_store(store_mod, tmp_path)
         store._exec("DROP TABLE actor")
         again = store_mod.Store(db_path=tmp_path / "actor.db")
         again.init()
         assert "actor" in names_of(again, "table")
-        assert again.schema_version() == 2
+        assert again.schema_version() == store_mod._SCHEMA_VERSION
 
 
 class TestActorUpsert:

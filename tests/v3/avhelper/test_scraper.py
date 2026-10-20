@@ -587,8 +587,8 @@ class TestVersionAndBackoff:
     def test_backoff_sequence(self, scraper):
         """6h → 24h → 72h → 7d → 14d，跑完 5 档不再排。"""
         now = "2026-10-14T00:00:00"
-        want = ["2026-10-14T06:00:00", "2026-10-15T00:00:00", "2026-10-17T00:00:00",
-                "2026-10-21T00:00:00", "2026-10-28T00:00:00"]
+        want = ["2026-10-14 06:00:00", "2026-10-15 00:00:00", "2026-10-17 00:00:00",
+                "2026-10-21 00:00:00", "2026-10-28 00:00:00"]
         count = 0
         for step, due in enumerate(want, start=1):
             count, stamp = scraper.apply_backoff("missing_plot", count, now)
@@ -1462,7 +1462,8 @@ class TestScrapeOne:
             "SNOS-380", store=store, cli=FakeCli(detail=dict(JAVDB_DETAIL, title="日文标题")),
             emby_client=emby, opts=self._opts())
         assert report["completeness"] == "missing_plot"
-        assert report["retry"] == {"retry_count": 1, "next_retry_at": "2026-10-14T06:00:00"}
+        # 空格分隔（0.9.0 修）：`store.meta_due()` 按字典序比较，`T` 会让同一天到点的行永远"还没到"。
+        assert report["retry"] == {"retry_count": 1, "next_retry_at": "2026-10-14 06:00:00"}
 
     def test_retry_backoff_full_sequence(self, scraper, store_mod, tmp_path, monkeypatch):
         """连续 5 轮 `missing_plot` → 6h/24h/72h/7d/14d，第 6 轮不再排。"""
@@ -1470,8 +1471,8 @@ class TestScrapeOne:
         store.item_upsert("emby:12598", "SNOS380", display_number="SNOS-380", emby_id="12598")
         _patch_fetch(monkeypatch, lambda url, **k: (
             JAVTXT_SEARCH_EMPTY.encode(), "", 200))
-        want = ["2026-10-14T06:00:00", "2026-10-15T00:00:00", "2026-10-17T00:00:00",
-                "2026-10-21T00:00:00", "2026-10-28T00:00:00"]
+        want = ["2026-10-14 06:00:00", "2026-10-15 00:00:00", "2026-10-17 00:00:00",
+                "2026-10-21 00:00:00", "2026-10-28 00:00:00"]
         for index, due in enumerate(want, start=1):
             scraper.scrape_one(
                 "SNOS-380", store=store,
