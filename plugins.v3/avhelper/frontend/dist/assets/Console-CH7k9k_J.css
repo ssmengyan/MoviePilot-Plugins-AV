@@ -605,33 +605,33 @@
 }
 
 /* 工具条：与下载页/演员页同款（`.toolbar` + `.hint` + `.spacer`） */
-.avh-history__toolbar[data-v-26ddfac9] {
+.avh-history__toolbar[data-v-7cf5d9d5] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 8px;
 }
-.avh-history__hint[data-v-26ddfac9] {
+.avh-history__hint[data-v-7cf5d9d5] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-history__spacer[data-v-26ddfac9] {
+.avh-history__spacer[data-v-7cf5d9d5] {
   flex: 1;
 }
 
 /* 搜索框宽度固定：不跟着输入内容长短伸缩，工具条高度就不会跳 */
-.avh-history__q[data-v-26ddfac9] {
+.avh-history__q[data-v-7cf5d9d5] {
   width: 220px;
   flex: none;
 }
 
 /* 开关自带上下留白，压掉一部分，让它和按钮在同一条基线上 */
-.avh-history__switch[data-v-26ddfac9] {
+.avh-history__switch[data-v-7cf5d9d5] {
   flex: none;
   margin: 0;
 }
-.avh-history__stats[data-v-26ddfac9] {
+.avh-history__stats[data-v-7cf5d9d5] {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -640,7 +640,7 @@
 }
 
 /* 骨架表格顶上那句说明：与演员页 `.avh-loading` 同一号字，但居中留白小一些 */
-.avh-history__loading[data-v-26ddfac9] {
+.avh-history__loading[data-v-7cf5d9d5] {
   padding: 14px 8px 4px;
   text-align: center;
   font-size: 13px;
@@ -648,7 +648,7 @@
 }
 
 /* 表格外框：与候选表 `.avh-cand` 同一套底色/描边/圆角 */
-.avh-history__tablewrap[data-v-26ddfac9] {
+.avh-history__tablewrap[data-v-7cf5d9d5] {
   overflow: hidden;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
   border-radius: 10px;
@@ -662,51 +662,52 @@
  * 必须自己 `overflow:hidden` + 省略号，否则内容会溢到相邻列上。
  * 唯一的弹性列是「标题」（唯一 `<col>` 不带 class 的那条）。
  */
-.avh-history__table[data-v-26ddfac9] {
+.avh-history__table[data-v-7cf5d9d5] {
   table-layout: fixed;
   width: 100%;
   border-collapse: collapse;
   font-size: 12.5px;
 }
-.avh-history__col-pic[data-v-26ddfac9] {
+.avh-history__col-pic[data-v-7cf5d9d5] {
   width: 60px;
 }
-.avh-history__col-no[data-v-26ddfac9] {
+.avh-history__col-no[data-v-7cf5d9d5] {
   width: 108px;
 }
-.avh-history__col-actor[data-v-26ddfac9] {
+.avh-history__col-actor[data-v-7cf5d9d5] {
   width: 110px;
 }
-.avh-history__col-size[data-v-26ddfac9] {
+.avh-history__col-size[data-v-7cf5d9d5] {
   width: 84px;
 }
 
 /* 完整时间戳「YYYY-MM-DD HH:MM:SS」不截断（表格里时间排成一列才好扫） */
-.avh-history__col-time[data-v-26ddfac9] {
+.avh-history__col-time[data-v-7cf5d9d5] {
   width: 152px;
 }
 
-/* 「不在库（可能已删除）」是这一页最长的一格文案，给足宽度免得被省略号吃掉 */
-.avh-history__col-lib[data-v-26ddfac9] {
-  width: 170px;
+/* 「不在库（可能已删除）」是这一页最长的一格文案，给足宽度免得被省略号吃掉；
+   0.7.4 起这一格还要塞下在库行的「打开 ↗」，所以加宽 20px。 */
+.avh-history__col-lib[data-v-7cf5d9d5] {
+  width: 190px;
 }
-.avh-history__col-act[data-v-26ddfac9] {
+.avh-history__col-act[data-v-7cf5d9d5] {
   width: 100px;
 }
-.avh-history__table th[data-v-26ddfac9],
-.avh-history__table td[data-v-26ddfac9] {
+.avh-history__table th[data-v-7cf5d9d5],
+.avh-history__table td[data-v-7cf5d9d5] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.avh-history__table th[data-v-26ddfac9] {
+.avh-history__table th[data-v-7cf5d9d5] {
   padding: 8px;
   text-align: left;
   font-weight: 500;
   color: rgba(var(--v-theme-on-surface), 0.5);
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.12);
 }
-.avh-history__table td[data-v-26ddfac9] {
+.avh-history__table td[data-v-7cf5d9d5] {
   /* 单行定高（正文行约 19px + 上下 9px），矮一行就能多塞几部 */
   height: 38px;
   padding: 9px 8px;
@@ -715,12 +716,12 @@
 }
 
 /* 封面列：整行被 64px 的竖图撑起（唯一不自设高度的一格） */
-.avh-history__table td.avh-history__pic[data-v-26ddfac9] {
+.avh-history__table td.avh-history__pic[data-v-7cf5d9d5] {
   height: auto;
   padding: 6px 8px;
   vertical-align: middle;
 }
-.avh-history__thumb[data-v-26ddfac9] {
+.avh-history__thumb[data-v-7cf5d9d5] {
   width: 48px;
   height: 64px;
   border-radius: 6px;
@@ -728,7 +729,7 @@
 }
 
 /* 番号是扫表的锚点，给它一行里最重的字重（照候选表的`.avh-cand__no`口径） */
-.avh-history__no[data-v-26ddfac9] {
+.avh-history__no[data-v-7cf5d9d5] {
   font-size: 13px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -736,56 +737,72 @@
 
 /* 标题列是唯一的弹性列（`<colgroup>` 里那条不带 class 的 `<col>`）：
    表格剩余宽度都给它，长标题靠下面那条省略号规则兜 */
-.avh-history__title[data-v-26ddfac9] {
+.avh-history__title[data-v-7cf5d9d5] {
   color: rgba(var(--v-theme-on-surface), 0.87);
 }
-.avh-history__act[data-v-26ddfac9] {
+.avh-history__act[data-v-7cf5d9d5] {
   text-align: right;
   white-space: nowrap;
 }
 
 /* 库状态标签：跟表格同一号字（`v-chip` 默认字比表格大一点，会显得突兀） */
-.avh-history__lib[data-v-26ddfac9] {
+.avh-history__lib[data-v-7cf5d9d5] {
   font-size: 11.5px;
 }
 
+/*
+ * 在库行那颗「打开 ↗」：跟着 chip 排在后面，比表格正文小半号、走主色。
+ * 在库那一格本来就是这一行最长的内容（170px 列宽），所以按钮必须能跟着 chip 挤在同一行
+ * —— `nowrap` 交给 `td` 的既有规则，这里只控字号与颜色。
+ */
+.avh-history__embylink[data-v-7cf5d9d5] {
+  margin-left: 6px;
+  font-size: 11.5px;
+  color: rgb(var(--v-theme-primary));
+  text-decoration: none;
+  white-space: nowrap;
+}
+.avh-history__embylink[data-v-7cf5d9d5]:hover {
+  text-decoration: underline;
+}
+
 /* 骨架格：主题前景色 8% 铺一条，按文字高度给高（不引入动画，避免抢注意力） */
-.avh-history__sk[data-v-26ddfac9] {
+.avh-history__sk[data-v-7cf5d9d5] {
   height: 12px;
   border-radius: 3px;
   background: rgba(var(--v-theme-on-surface), 0.08);
 }
-.avh-history__sk--pic[data-v-26ddfac9] {
+.avh-history__sk--pic[data-v-7cf5d9d5] {
   width: 48px;
   height: 64px;
   border-radius: 6px;
 }
 
 /* 末尾哨兵（`usePagedList` 的 `sentinel`）：只画一行进度提示；滚动到底自动追加靠它定位滚动层 */
-.avh-history__more[data-v-26ddfac9] {
+.avh-history__more[data-v-7cf5d9d5] {
   padding: 14px 4px 2px;
   text-align: center;
 }
 
 /* 对齐 `app.css` 的 `.toolbar` / `.hint` / `.spacer` */
-.avh-downloads__toolbar[data-v-04ae18cc] {
+.avh-downloads__toolbar[data-v-4a7a71d3] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 14px;
 }
-.avh-downloads__hint[data-v-04ae18cc] {
+.avh-downloads__hint[data-v-4a7a71d3] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-downloads__spacer[data-v-04ae18cc] {
+.avh-downloads__spacer[data-v-4a7a71d3] {
   flex: 1;
 }
 
 /* 页签：与发现榜单那组 tabs 同一套几何（胶囊容器 + 选中那颗走主色，写法照 `DiscoverView`）。
    两份 scoped CSS 各有各的作用域，抄这一小段比抽公共件划算（本项目的既有做法）。 */
-.avh-tabs[data-v-04ae18cc] {
+.avh-tabs[data-v-4a7a71d3] {
   display: flex;
   gap: 4px;
   padding: 3px;
@@ -793,7 +810,7 @@
   border-radius: 8px;
   background: rgba(var(--v-theme-on-surface), 0.04);
 }
-.avh-tabs button[data-v-04ae18cc] {
+.avh-tabs button[data-v-4a7a71d3] {
   padding: 4px 12px;
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
@@ -802,13 +819,13 @@
   border-radius: 6px;
   cursor: pointer;
 }
-.avh-tabs__on[data-v-04ae18cc] {
+.avh-tabs__on[data-v-4a7a71d3] {
   color: rgb(var(--v-theme-on-primary)) !important;
   background: rgb(var(--v-theme-primary)) !important;
 }
 
 /* 对齐 `app.css` 的 `.secttl`：12px、弱化色、字距 .4px（与 `TasksView` 的小标题同一套口径） */
-.avh-downloads__secttl[data-v-04ae18cc] {
+.avh-downloads__secttl[data-v-4a7a71d3] {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -819,14 +836,14 @@
 }
 
 /* 小节标题右侧那句指路（契约 §5.3）：靠右、不参与标题的字距，免得挤成标题的一部分 */
-.avh-downloads__secttl-note[data-v-04ae18cc] {
+.avh-downloads__secttl-note[data-v-4a7a71d3] {
   margin-left: auto;
   letter-spacing: 0;
 }
 
 /* 对齐 `.q`：卡片底色 + 描边 + 10px 圆角。
    `position: relative` 是给右上角的版本角标（v4.1 §9.2-6）做定位锚点。 */
-.avh-q[data-v-04ae18cc] {
+.avh-q[data-v-4a7a71d3] {
   position: relative;
   padding: 12px;
   margin-bottom: 10px;
@@ -836,13 +853,13 @@
 }
 
 /* 失败行：描边与底色走 error 通道（与"下载中""已完成"一眼分得开） */
-.avh-q--failed[data-v-04ae18cc] {
+.avh-q--failed[data-v-4a7a71d3] {
   border-color: rgba(var(--v-theme-error), 0.4);
   background: rgba(var(--v-theme-error), 0.08);
 }
 
 /* 版本角标（v4.1 §9.2-6）：贴在卡片右上角；没有 version_tags / badge 时整颗不渲染 */
-.avh-vbadge[data-v-04ae18cc] {
+.avh-vbadge[data-v-4a7a71d3] {
   position: absolute;
   top: 8px;
   right: 10px;
@@ -859,12 +876,39 @@
 }
 
 /* 有角标时把右侧那一列（百分比 / 「下载中…」）压下一行，两者不叠在一起 */
-.avh-q--vtag .avh-q__right[data-v-04ae18cc] {
+.avh-q--vtag .avh-q__right[data-v-4a7a71d3] {
   padding-top: 20px;
 }
 
+/*
+ * 已取消行（2026-10-15）：整行压暗一档，与「下载中」一眼分得开。
+ * 不用禁用态灰（那看着像坏掉了），只把底色与描边收淡 —— 它仍然是一张"可操作"的卡
+ * （下面那三个出口等着用户点）。
+ */
+.avh-q--canceled[data-v-4a7a71d3] {
+  background: rgba(var(--v-theme-on-surface), 0.02);
+  border-style: dashed;
+}
+
+/* 行内动作按钮（「取消下载」）：贴着百分比右下，不与进度条抢注意力 */
+.avh-q__act[data-v-4a7a71d3] {
+  margin-top: 2px;
+  padding: 0 4px;
+  min-width: 0;
+  font-size: 11.5px;
+}
+
+/* 已取消行的三个出口：左对齐一排，右留一点空隙免得贴着卡片边 */
+.avh-q__exits[data-v-4a7a71d3] {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding-left: 60px;      /* 与封面右侧的正文对齐（48px 封面 + 12px gap） */
+}
+
 /* 对齐 `.qhd` */
-.avh-q__hd[data-v-04ae18cc] {
+.avh-q__hd[data-v-4a7a71d3] {
   display: flex;
   align-items: flex-start;
   gap: 12px;
@@ -872,7 +916,7 @@
 }
 
 /* 对齐 `.tposter`：48×64 小封面 */
-.avh-q__poster[data-v-04ae18cc] {
+.avh-q__poster[data-v-4a7a71d3] {
   width: 48px;
   height: 64px;
   flex: none;
@@ -881,44 +925,37 @@
 }
 
 /* 老实现的内联 `flex:1;min-width:0` */
-.avh-q__main[data-v-04ae18cc] {
+.avh-q__main[data-v-4a7a71d3] {
   flex: 1;
   min-width: 0;
 }
 
 /* 对齐 `.qhd .qn` */
-.avh-q__no[data-v-04ae18cc] {
+.avh-q__no[data-v-4a7a71d3] {
   font-size: 14px;
   font-weight: 600;
 }
-.avh-q__hint[data-v-04ae18cc] {
+.avh-q__hint[data-v-4a7a71d3] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-q__meta[data-v-04ae18cc] {
+.avh-q__meta[data-v-4a7a71d3] {
   margin-top: 3px;
 }
-.avh-q__path[data-v-04ae18cc] {
+.avh-q__path[data-v-4a7a71d3] {
   margin-top: 2px;
 }
 
 /* 完成行的片名（台账可选字段，见 `DoneRow` 注释）：比 `.hint` 稍亮一档，读起来像"一行记录" */
-.avh-q__ttl[data-v-04ae18cc] {
+.avh-q__ttl[data-v-4a7a71d3] {
   margin-top: 3px;
   font-size: 12.5px;
   line-height: 1.5;
   color: rgba(var(--v-theme-on-surface), 0.7);
 }
 
-/*
- * 完成行没有进度条，`.avh-q__hd` 那 8px 的"给进度条留的"下边距就变成了行尾的空档，收掉。
- */
-.avh-q--done .avh-q__hd[data-v-04ae18cc] {
-  margin-bottom: 0;
-}
-
 /* 对齐 `.qhd .right` */
-.avh-q__right[data-v-04ae18cc] {
+.avh-q__right[data-v-4a7a71d3] {
   margin-left: auto;
   text-align: right;
   white-space: nowrap;
@@ -927,13 +964,13 @@
 /* 对齐 `.bar` / `.bar i`（老实现是 --acc2 → --acc 的渐变）
    只有「下载中」那一节画进度条：完成行是静态历史行，契约 §5.3 明确要去掉进度，
    所以老实现的 `.bar.done i` 换绿那条规则已随之下线（没有使用者了）。 */
-.avh-bar[data-v-04ae18cc] {
+.avh-bar[data-v-4a7a71d3] {
   height: 7px;
   border-radius: 99px;
   overflow: hidden;
   background: rgba(var(--v-theme-on-surface), 0.12);
 }
-.avh-bar i[data-v-04ae18cc] {
+.avh-bar i[data-v-4a7a71d3] {
   display: block;
   width: 0;
   height: 100%;
@@ -946,7 +983,7 @@
 }
 
 /* 对齐 `app.css` 的 `.card`（网格列由父级 `.grid` 提供） */
-.avh-card[data-v-aaa42289] {
+.avh-card[data-v-40465f5e] {
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -956,13 +993,13 @@
   background: rgb(var(--v-theme-surface));
   transition: 0.15s;
 }
-.avh-card[data-v-aaa42289]:hover {
+.avh-card[data-v-40465f5e]:hover {
   border-color: rgb(var(--v-theme-primary));
   transform: translateY(-2px);
 }
 
 /* `.thumb`：3:4 竖版封面 + 渐变底（缺图时不至于一片死黑） */
-.avh-card__thumb[data-v-aaa42289] {
+.avh-card__thumb[data-v-40465f5e] {
   position: relative;
   aspect-ratio: 3 / 4;
   overflow: hidden;
@@ -990,7 +1027,7 @@
  * 只在真有 `cover` 时才收窄：「已入库的番号」栏的行只有 147×200 竖图（比例 0.735，
  * 比 0.7007 宽），照这个盒子会被横向裁掉左边约 9px，没必要为一个不存在的书脊付这个代价。
  */
-.avh-card__thumb.avh-card__thumb--spread[data-v-aaa42289] {
+.avh-card__thumb.avh-card__thumb--spread[data-v-40465f5e] {
   aspect-ratio: 377 / 538;
 }
 
@@ -1005,10 +1042,10 @@
  *   2. 缺图时 `.noimg` 是 `inset:0` 的绝对定位盒，父级零高 → 番号占位**看不见**
  *      （老实现会把番号画在封面位置上）。
  */
-.avh-card__thumb[data-v-aaa42289] .avh-thumb {
+.avh-card__thumb[data-v-40465f5e] .avh-thumb {
   height: 100%;
 }
-.avh-card__badges[data-v-aaa42289] {
+.avh-card__badges[data-v-40465f5e] {
   position: absolute;
   left: 6px;
   top: 6px;
@@ -1018,7 +1055,7 @@
 }
 
 /* `.badge` 系列：底色走主题语义色 + 半透明，不写死深色值 */
-.avh-badge[data-v-aaa42289] {
+.avh-badge[data-v-40465f5e] {
   padding: 1px 6px;
   font-size: 10px;
   border-radius: 4px;
@@ -1026,16 +1063,16 @@
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(0, 0, 0, 0.6);
 }
-.avh-badge--cn[data-v-aaa42289] {
+.avh-badge--cn[data-v-40465f5e] {
   background: rgba(var(--v-theme-success), 0.85);
 }
-.avh-badge--uc[data-v-aaa42289] {
+.avh-badge--uc[data-v-40465f5e] {
   background: rgba(var(--v-theme-secondary), 0.85);
 }
-.avh-badge--new[data-v-aaa42289] {
+.avh-badge--new[data-v-40465f5e] {
   background: rgba(var(--v-theme-warning), 0.85);
 }
-.avh-badge--lib[data-v-aaa42289] {
+.avh-badge--lib[data-v-40465f5e] {
   background: rgba(var(--v-theme-primary), 0.85);
 }
 
@@ -1047,17 +1084,33 @@
  * 取 `info`：与 `primary` 同属冷色、明度接近，落在同一批卡片上既不抢眼又能区分；
  * 其余四颗已占用 success / secondary / warning / primary，`info` 是唯一没被用掉的语义色。
  */
-.avh-badge--dl[data-v-aaa42289] {
+.avh-badge--dl[data-v-40465f5e] {
   background: rgba(var(--v-theme-info), 0.85);
 }
-.avh-card__meta[data-v-aaa42289] {
+
+/*
+ * 「下载中」（2026-10-15）：取 `warning`（暖色）—— 与 `--lib`(primary) / `--dl`(info) 两颗冷色
+ * 一眼分开。"还在下"是个**进行时**状态，用暖色比冷色更符合直觉，也与下载页那根进度条的主色同族。
+ */
+.avh-badge--dlg[data-v-40465f5e] {
+  background: rgba(var(--v-theme-warning), 0.9);
+}
+
+/*
+ * 「未刮」（2026-10-15）：灰底 —— 它是个**质量提示**，不是状态（不是"正在进行"也不是"出错"），
+ * 所以用最低调的中性色：看得见但不抢眼，与前几颗"有明确含义"的徽标区分开。
+ */
+.avh-badge--unscraped[data-v-40465f5e] {
+  background: rgba(var(--v-theme-on-surface), 0.55);
+}
+.avh-card__meta[data-v-40465f5e] {
   padding: 8px 9px 10px;
 }
-.avh-card__num[data-v-aaa42289] {
+.avh-card__num[data-v-40465f5e] {
   font-size: 13px;
   font-weight: 700;
 }
-.avh-card__sub[data-v-aaa42289] {
+.avh-card__sub[data-v-40465f5e] {
   display: flex;
   justify-content: space-between;
   gap: 6px;
@@ -1065,7 +1118,7 @@
   font-size: 11px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-card__sub span[data-v-aaa42289] {
+.avh-card__sub span[data-v-40465f5e] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1076,39 +1129,39 @@
  * 它**不**继承 `.avh-card__sub span` 的省略号（那条只管 `span`）：链接要整体可见、
  * 不许被压缩，所以 `flex: none`；文件名那一格才吃剩余宽度。
  */
-.avh-card__watch[data-v-aaa42289] {
+.avh-card__watch[data-v-40465f5e] {
   flex: none;
   font-size: 11px;
   color: rgb(var(--v-theme-primary));
   text-decoration: none;
   white-space: nowrap;
 }
-.avh-card__watch[data-v-aaa42289]:hover {
+.avh-card__watch[data-v-40465f5e]:hover {
   text-decoration: underline;
 }
 
 /* 工具条：与下载页 / 历史页同款（`.toolbar` + `.hint` + `.spacer`） */
-.avh-library__toolbar[data-v-4ef39de7] {
+.avh-library__toolbar[data-v-438aad50] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 8px;
 }
-.avh-library__hint[data-v-4ef39de7] {
+.avh-library__hint[data-v-438aad50] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-library__spacer[data-v-4ef39de7] {
+.avh-library__spacer[data-v-438aad50] {
   flex: 1;
 }
 
 /* 搜索框宽度固定：不跟着输入内容长短伸缩，工具条高度就不会跳（照历史页） */
-.avh-library__q[data-v-4ef39de7] {
+.avh-library__q[data-v-438aad50] {
   width: 220px;
   flex: none;
 }
-.avh-library__stats[data-v-4ef39de7] {
+.avh-library__stats[data-v-438aad50] {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1117,7 +1170,7 @@
 }
 
 /* 与发现榜单同一句「正在抓取…」的位置与字号 */
-.avh-library__loading[data-v-4ef39de7] {
+.avh-library__loading[data-v-438aad50] {
   padding: 44px 20px;
   text-align: center;
   font-size: 13px;
@@ -1125,30 +1178,30 @@
 }
 
 /* 对齐 `.grid`：`repeat(auto-fill,minmax(172px,1fr))`，卡片本体是 `NumCard`（库模式） */
-.avh-library__grid[data-v-4ef39de7] {
+.avh-library__grid[data-v-438aad50] {
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
 }
 
 /* 卡片定位盒子（版本角标要贴在卡片右上角）：`flex` 列让卡片撑满同一行的高度，观感与原来一致 */
-.avh-library__cell[data-v-4ef39de7] {
+.avh-library__cell[data-v-438aad50] {
   position: relative;
   display: flex;
   flex-direction: column;
 }
 
 /* 末尾哨兵（`usePagedList` 的 `sentinel`）：只画一行进度提示；滚动到底自动追加靠它定位滚动层 */
-.avh-library__more[data-v-4ef39de7] {
+.avh-library__more[data-v-438aad50] {
   padding: 14px 4px 2px;
   text-align: center;
 }
-.avh-library__cell[data-v-4ef39de7] .avh-card {
+.avh-library__cell[data-v-438aad50] .avh-card {
   flex: 1 1 auto;
 }
 
 /* 版本角标（v4.1 §9.2-6）：右上角、小而不抢眼；没有 version_tags / badge 时整个不渲染 */
-.avh-vbadge[data-v-4ef39de7] {
+.avh-vbadge[data-v-438aad50] {
   position: absolute;
   top: 6px;
   right: 6px;
