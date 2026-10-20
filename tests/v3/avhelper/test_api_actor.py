@@ -138,6 +138,16 @@ class FakeStore:
         self.boom = set(boom)
         self.calls = []
         self.kv_writes = []
+        self.init_calls = 0
+        self.backfill_calls = []
+        self.backfill_result = {"created": 3, "updated": 1, "total": 4, "skipped": False}
+
+    def init(self):
+        """启动路径会调 `store.init()`（迁移）；假 store 只记次数。"""
+        self.init_calls += 1
+
+    def cache_all(self, limit=0):
+        return []
 
     # --- kv（`global_rule`）---
     def kv_get(self, key, default=None):
@@ -175,6 +185,13 @@ class FakeStore:
         row = dict(self.person_row)
         row["locked_fields"] = [field] if on else []
         return row
+
+    # --- 存量回填（启动路径）---
+    def actor_backfill(self, actors=None, namemap_mod=None):
+        self.backfill_calls.append({"actors": actors, "namemap_mod": namemap_mod})
+        if "actor_backfill" in self.boom:
+            raise RuntimeError("回填炸了")
+        return dict(self.backfill_result)
 
     # --- 作品史与日志（`/actor/detail` 用）---
     def meta_list(self, limit=0, offset=0, **filters):
@@ -332,6 +349,60 @@ def no_actor_sources(api_mod, monkeypatch):
 
 NEW_ACTOR_PATHS = ["/actor/list", "/actor/detail", "/actor/sources", "/actor/scrape",
                    "/actor/crop-avatar", "/actor/lock", "/actor/gfriends/refresh"]
+
+
+def stub_startup(api_mod, monkeypatch, store, namemap=None):
+    """把 `init_plugin()` 里的重活（限流/引擎/客户端/后台预热）全换成假对象。
+
+    只留真正要验的两步：`store.init()`（迁移）与 `store.actor_backfill()`（存量回填）。
+    """
+    namemap = namemap if namemap is not None else types.SimpleNamespace()
+    monkeypatch.setattr(api_mod, "Store", lambda *args, **kwargs: store)
+    monkeypatch.setattr(api_mod, "RateLimiter", lambda *args, **kwargs: types.SimpleNamespace())
+    monkeypatch.setattr(api_mod, "Notifier", lambda *args, **kwargs: types.SimpleNamespace())
+    monkeypatch.setattr(api_mod, "TaskEngine", lambda *args, **kwargs: types.SimpleNamespace())
+    monkeypatch.setattr(api_mod, "JavdbClient", lambda *args, **kwargs: types.SimpleNamespace())
+    monkeypatch.setattr(api_mod, "reset_javdb_state", lambda: None)
+    monkeypatch.setattr(api_mod.paths, "configure", lambda **kwargs: None)
+    monkeypatch.setattr(api_mod.AVHelper, "_wire_limiter", lambda self: None)
+    monkeypatch.setattr(api_mod.AVHelper, "start_javdb_bootstrap", lambda self: None)
+    monkeypatch.setattr(api_mod.AVHelper, "start_warm_up", lambda self: None)
+    monkeypatch.setattr(api_mod.AVHelper, "namemap_module", lambda self: namemap)
+    return namemap
+
+
+# ---------------------------------------------------------------------------
+# 0. 启动路径：存量演员回填（0.9.0 真机缺口 —— 不回填则 actor 表永远 0 行）
+# ---------------------------------------------------------------------------
+
+
+class TestStartupBackfill:
+    def test_startup_backfills_once_with_namemap(self, api_mod, monkeypatch):
+        store = FakeStore()
+        namemap = stub_startup(api_mod, monkeypatch, store)
+        plugin = api_mod.AVHelper()
+        assert plugin.init_plugin() is None
+        assert store.init_calls == 1                       # 迁移先做完
+        assert store.backfill_calls == [{"actors": None, "namemap_mod": namemap}]
+
+    def test_startup_survives_backfill_failure(self, api_mod, monkeypatch):
+        """回填抛异常只 warning：插件必须照常起来（否则一次聚合失败就打不开界面）。"""
+        store = FakeStore(boom={"actor_backfill"})
+        stub_startup(api_mod, monkeypatch, store)
+        plugin = api_mod.AVHelper()
+        plugin.init_plugin()                               # 不抛就是通过
+        assert len(store.backfill_calls) == 1              # 确实调了，异常被吞
+        assert plugin._store is store
+        assert plugin.actor_opts()["actorBatchSize"] == 20 # 起来之后照样能干活
+
+    def test_startup_without_backfill_api(self, api_mod, monkeypatch):
+        """store 还没这套 API（半截升级）时同样不许把启动打挂。"""
+        store = FakeStore()
+        monkeypatch.delattr(store.__class__, "actor_backfill", raising=False)
+        stub_startup(api_mod, monkeypatch, store)
+        plugin = api_mod.AVHelper()
+        plugin.init_plugin()
+        assert plugin._store is store
 
 
 # ---------------------------------------------------------------------------
@@ -750,13 +821,18 @@ class TestActorRefreshEndpoint:
     def test_refresh_passes_plugin_proxy(self, plugin, api_mod, monkeypatch):
         fake = with_actor_sources(api_mod, monkeypatch, FakeActorSources())
         result = call(plugin.api_actor_gfriends_refresh())
+        assert set(result) == {"success", "index"}       # 信封与 /actor/sources 同一套
         assert result["success"] is True
         assert fake.refresh_calls == [{"proxy": "http://proxy.invalid:7890", "fetch": None}]
-        assert result["count"] == 12873
+        assert result["index"]["count"] == 12873
+        assert result["index"]["stale"] is False
 
     def test_refresh_missing_module(self, plugin, api_mod, monkeypatch):
         no_actor_sources(api_mod, monkeypatch)
-        assert call(plugin.api_actor_gfriends_refresh())["message"] == "演员子系统未就绪"
+        result = call(plugin.api_actor_gfriends_refresh())
+        assert result["message"] == "演员子系统未就绪"
+        assert result["success"] is False
+        assert result["index"] == {"count": 0, "fetched_at": "", "stale": True, "source": ""}
 
     def test_refresh_stale_index_reports_false(self, plugin, api_mod, monkeypatch):
         """拉取失败时 S2 保留旧缓存、只把 `stale` 置真 —— 端点据它回 `success:false`。"""
@@ -765,7 +841,8 @@ class TestActorRefreshEndpoint:
                      "source": "cdn.jsdelivr.net"}))
         result = call(plugin.api_actor_gfriends_refresh())
         assert result["success"] is False
-        assert result["stale"] is True
+        assert result["index"]["stale"] is True
+        assert result["index"]["count"] == 12000
 
     def test_refresh_exception_is_envelope(self, plugin, api_mod, monkeypatch):
         with_actor_sources(api_mod, monkeypatch, FakeActorSources(boom=True))

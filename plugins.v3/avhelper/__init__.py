@@ -559,6 +559,19 @@ class AVHelper(_PluginBase):
             self.namemap_module()
         except Exception as error:
             logger.warning(f"AVHelper 映射表预热失败（端点首次访问会再试一次）：{error}")
+        # 演员表回填（0.9.0 真机缺口）：存量库的 `meta.actors_json` 从来没被聚合成 `actor` 行 ——
+        # 少了这一步，演员卡片墙与批量刮削在真机上永远是 0 行（0.9.0 上线后实测的整条空转）。
+        # `actor_backfill()` 自己按 `schema_meta.actor_backfill_done` 只做一次，所以每次启动都调是
+        # 安全的（这边不要再加标志）。实测：117 部片 0.01s、5200 部片/2000 位演员 0.36s，
+        # 同步做掉更简单，也不占后台线程；异常一律只 warning —— 回填失败不能把插件启动打挂。
+        try:
+            result = self.store.actor_backfill(namemap_mod=self.namemap_module())
+            if isinstance(result, dict) and not result.get("skipped"):
+                logger.info(f"AVHelper 演员表回填完成：新增 {to_int(result.get('created'))} / "
+                            f"更新 {to_int(result.get('updated'))} / "
+                            f"共 {to_int(result.get('total'))}")
+        except Exception as error:                              # noqa: BLE001 - 启动路径不许抛
+            logger.warning(f"AVHelper 演员表回填失败（下轮启动会再试）：{error}")
         self.start_javdb_bootstrap()
         self.start_warm_up()
 
@@ -4042,8 +4055,10 @@ class AVHelper(_PluginBase):
         拉取失败**保留旧缓存**（S2 的口径：`refresh_index()` 返回刷新后的 `index_status()`，
         没有 `ok` 键）—— 所以 `success` 取 `stale` 的反面：拉到了才叫成功，旧缓存照用但界面
         该亮 `index_stale`。`proxy` 用插件配置的那个（raw.githubusercontent.com 基本都要走它）。
+        信封是 `{success, index}` —— 与 `/actor/sources` 的 `index` 键同形状，前端一套读法。
         """
-        extra = {"ok": False, "index": {"count": 0, "fetched_at": "", "stale": True, "source": ""}}
+        empty_index = {"count": 0, "fetched_at": "", "stale": True, "source": ""}
+        extra = {"index": dict(empty_index)}
         mod = self.actor_sources_module()
         fn = getattr(mod, "refresh_index", None) if mod is not None else None
         if not callable(fn):
@@ -4053,9 +4068,11 @@ class AVHelper(_PluginBase):
         except Exception as error:
             logger.error(f"AVHelper 刷新 gFriends 索引失败：{error}")
             return self.api_error(str(error), extra)
-        out = dict(result) if isinstance(result, dict) else {}
-        out["success"] = bool(out.get("ok", not bool(out.get("stale", True))))
-        return out
+        raw = dict(result) if isinstance(result, dict) else {}
+        # 信封与 `/actor/sources` 对齐：状态收进 `index`，不再摊平在顶层（两份形状不许并存）
+        index = dict(empty_index)
+        index.update({key: raw[key] for key in index if key in raw})
+        return {"success": bool(raw.get("ok", not bool(raw.get("stale", True)))), "index": index}
 
     # ---------- API：缓存维护 ----------
 
