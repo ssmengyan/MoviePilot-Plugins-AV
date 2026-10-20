@@ -24,7 +24,7 @@ ensure_namemap(store, opts=None) -> bool
 --------------
 
 - `store`（`store.Store`）、`cli`（`client.JavdbClient`）、`emby_client`（`emby.EmbyClient`）
-  一律由调用方传进来，**本模块不读插件配置**：代理 / MetaTube 地址 / 裁切锚点 / 开关全部经
+  一律由调用方传进来，**本模块不读插件配置**：代理 / 裁切锚点 / 开关全部经
   `opts` 传入（见 `DEFAULT_OPTS`），这样单测能零外网、零配置跑。
 - 只有 `scrape_one` / `scrape_batch` / `rollback_item` 会发写请求，且**写 Emby 前必须过
   `store.item_backup_save()` 闸门**（裁决 D7）；`preview_one` 与 `film_view()` 一行不写。
@@ -111,7 +111,6 @@ IMG_PROXY = f"/api/v1/plugin/{PLUGIN_ID}/img"
 # 数据源名（写进 `scrape_log.source_name`，自检页与排障按它分组）
 SRC_JAVDB = "javdb"
 SRC_JAVTXT = "javtxt"
-SRC_METATUBE = "metatube"
 SRC_LLM = "llm"
 SRC_EMBY_WRITE = "emby_write"
 SRC_IMAGE = "javdb_assets"
@@ -124,14 +123,6 @@ JAVTXT_MIN_INTERVAL = 2.0
 # 403（被拦）/ 404（地址没了）**不重试**。退避 2±1 秒起，不比 `JAVTXT_MIN_INTERVAL` 更密。
 JAVTXT_RETRIES = 2
 
-# MetaTube Server 地址：**代码里不留坐标**（同 `DEFAULT_PROXY` 的公开分发口径，0.7.0 起），
-# 只从插件设置「刮削」栏的 `metatubeBase` 来；留空 = 混合模式不做 MetaTube 兜底，
-# `metatube_lookup()` 会给出「未配置 MetaTube 地址」的显式 error，不炸、不编造。
-METATUBE_BASE = ""
-# MetaTube 单次 search 的 HTTP 超时：**必须 ≥25 秒**（S0b：服务端对 30 个源有硬 10 秒截止，
-# 30 次实测全落在 [10000, 10047] ms；给 10 秒会把"它还在正常等上游"误判成超时）
-METATUBE_TIMEOUT = 30
-
 # 退避序列（契约 §5.3 / v4.1 §5.3）：6h → 24h → 72h → 7d → 14d
 BACKOFF_HOURS: Tuple[int, ...] = (6, 24, 72, 168, 336)
 # Tier1 只处理「缺简介」；`missing_core` 不算退避（等下次手动/定时）。
@@ -139,7 +130,7 @@ TIER1_COMPLETENESS = "missing_plot"
 
 # `meta.raw_json` 总体积上限（v4.1 §5.2：剔掉磁力数组与评论，控制体积 ≤5KB）
 RAW_JSON_LIMIT = 5120
-# 单帧原始 javdb 详情在 raw_json 里的上限（给 javtxt/metatube 留出余量）
+# 单帧原始 javdb 详情在 raw_json 里的上限（给 javtxt 留出余量）
 JAVDB_RAW_LIMIT = 4096
 
 # 中文简介的"占位符"下限：短于这个长度且**同时有日文简介**时，判为不可用并转翻译链。
@@ -165,14 +156,13 @@ _TMP_PREFIX = "avhelper-scrape-"
 
 DEFAULT_OPTS: Dict[str, Any] = {
     "proxy": "",                     # javtxt / javdb 代理；**只从调用方传进来**
-    "metatube_base": METATUBE_BASE,  # 只从设置台 `metatubeBase` 来（见 `scrape_opts()` 的映射）
     "javtxt_hosts": JAVTXT_HOSTS,
     "crop_anchor": "auto",           # auto / left / center / right / raw
     "write_images": True,            # 封面 + 剧照
     "write_samples": True,
     "translate": True,               # 允许调 translator（模块缺失时自动降级）
     "allow_machine": False,          # 「允许机翻兜底」开关（默认关，契约 D6）
-    "plot_sources": ("javtxt", "metatube"),
+    "plot_sources": ("javtxt",),
     "force": False,                  # True = 无视已有 raw_json['javdb']，重抓骨架
     "javdb_assets": True,            # 是否调 `assets list/download`
     "log_sources": True,             # 是否把数据源结果写 scrape_log（film_view 不涉及）
@@ -181,7 +171,6 @@ DEFAULT_OPTS: Dict[str, Any] = {
     "min_plot_zh": MIN_PLOT_ZH,      # 中文简介短于它就当站点占位符（同时有日文时才判无效）
     "javtxt_interval": JAVTXT_MIN_INTERVAL,
     "http_timeout": 30,
-    "metatube_timeout": METATUBE_TIMEOUT,   # ≥25s，见 METATUBE_TIMEOUT 的说明
     "javdb_timeout": 60,
     "now": "",                       # 便于单测固定时间戳（ISO 字符串）
 }
@@ -585,6 +574,7 @@ REASON_HTTP_ERROR = "http_error"                # 其余 4xx
 REASON_TIMEOUT = "timeout"                      # 连上了但没在超时内回话
 REASON_NETWORK = "network"                      # 连不上 / DNS / TLS / 代理
 REASON_EMPTY = "empty_response"                 # 200 但正文是空的
+REASON_LOGIN_REQUIRED = "login_required"        # 站点要求登录 / 登录态过期（0.8.1）
 REASON_CF_CHALLENGE = "cloudflare_challenge"    # "Just a moment" 挑战页
 REASON_CF_BLOCKED = "cloudflare_blocked"        # Ray ID 拦截页（无挑战）
 REASON_IP_BANNED = "ip_banned"
@@ -599,7 +589,7 @@ REASONS = frozenset({
     REASON_NOT_FOUND, REASON_RATE_LIMITED, REASON_SERVER_ERROR, REASON_HTTP_ERROR,
     REASON_TIMEOUT, REASON_NETWORK, REASON_EMPTY, REASON_CF_CHALLENGE, REASON_CF_BLOCKED,
     REASON_IP_BANNED, REASON_GEO, REASON_AGE, REASON_NO_USABLE, REASON_PARSE,
-    REASON_UNEXPECTED,
+    REASON_LOGIN_REQUIRED, REASON_UNEXPECTED,
 })
 
 #: 强特征：**HTTP 200 也认** —— 挑战页/封锁页本来就是 200 回来的，
@@ -677,13 +667,18 @@ def reason_from_text(text: Any, default: str = "") -> str:
     found = re.search(r"\b([45]\d{2})\b", low)
     if found:
         return classify_block("", _to_int(found.group(1))) or default
+    # 登录态问题要单独成一类：javdb 走子进程、只有一句中文说明，以前会被兜成
+    # `unexpected`（界面显示"未知错误"），用户根本看不出该去更新 cookie。
+    if ("未登录" in low or "需要登录" in low or "请先登录" in low or "登录已过期" in low
+            or "login required" in low or "not logged in" in low or "sign in" in low):
+        return REASON_LOGIN_REQUIRED
     if "未找到" in low or "不存在" in low or "not found" in low:
         return REASON_NOT_FOUND
     return default
 
 
 # ---------------------------------------------------------------------------
-# HTTP（javtxt / MetaTube）：一律走调用方给的代理，失败不抛异常
+# HTTP（javtxt）：一律走调用方给的代理，失败不抛异常
 # ---------------------------------------------------------------------------
 
 #: 出站 UA。**全插件唯一一份**（0.8.0 之前 scraper / sitesearch / imgproxy 各写一份，
@@ -1055,7 +1050,7 @@ def javtxt_variants(display_number: str) -> List[str]:
     """搜索变体（契约 §4.2：① 原写法 ② 连字符/大小写变体 ③ 纯数字段）。
 
     实测：`SNOS-380`/`IPOK-025`/`MIDV-946` 有结果，`IPZZ-912`/`CAWB-040` **0 命中** ——
-    那是站点收录缺口，试完所有变体仍为空就**如实返回空**，交给 MetaTube 兜底，不许猜条。
+    那是站点收录缺口，试完所有变体仍为空就**如实返回空**，不许猜条。
     """
     text = str(display_number or "").strip()
     if not text:
@@ -1297,7 +1292,7 @@ def _javdb_from_cache(row: Any) -> Tuple[Optional[Dict[str, Any]], str]:
 # 逐站快照（0.8.0 / P0-3）：只重算不重抓
 #
 # 与 `meta.raw_json` 的分工：那边是**摘要**（URL/vid/长度，受 5KB 上限），这里是**可复用结果**
-# （`javtxt_lookup()` / `metatube_lookup()` 的返回形状，落 `store.site_snapshot`）。
+# （`javtxt_lookup()` 的返回形状，落 `store.site_snapshot`）。
 # 于是"换字段聚合策略时只重算不重抓"能在**单个源**的粒度上成立。
 # ---------------------------------------------------------------------------
 
@@ -1315,7 +1310,7 @@ _SNAPSHOT_KEYS: Tuple[str, ...] = (
 def snapshot_use(options: Dict[str, Any]) -> Set[str]:
     """允许复用哪些源的快照：`opts['use_cache']`。
 
-    接受集合（`("javdb","javtxt","metatube")`）或 `"all"`。**默认空** —— 复用是"只重算不重抓"
+    接受集合（`("javdb","javtxt")`）或 `"all"`。**默认空** —— 复用是"只重算不重抓"
     的显式选择，不是默认行为：站点后来补了简介、改了标题，只有重抓才看得到。
     （`javdb` 那条既有路径不受它管：`meta.raw_json['javdb']` 存在时本来就跳过调用。）
     """
@@ -1378,50 +1373,11 @@ def javtxt_from_snapshot(row: Any) -> Optional[Dict[str, Any]]:
     }
 
 
-def metatube_from_snapshot(row: Any) -> Optional[Dict[str, Any]]:
-    """快照 → `metatube_lookup()` 的返回形状（`from_cache=True`）；不能复用回 `None`。
-
-    只复用 `ok` / `miss` / `mismatch` / `empty`（都是**业务结论**）；`error`（连不上/被拦）
-    必须真重试。`movie` 是**当时已过 `pick_metatube_hit()` 校验**的那条，直接还原即可。
-    """
-    data = dict((row or {}).get("payload") or {}) if isinstance(row, dict) else {}
-    if not data:
-        return None
-    status = str(data.get("status") or "miss")
-    if status not in ("ok", "miss", "mismatch", "empty"):
-        return None
-    movie = data.get("movie") if isinstance(data.get("movie"), dict) else {}
-    if status == "ok" and not movie:
-        return None
-    return {
-        "ok": bool(data.get("ok")), "status": status, "from_cache": True,
-        "movie": dict(movie), "plot_jp": _clean_text(data.get("plot_jp")),
-        "title_jp": _clean_text(data.get("title_jp")),
-        "provider": str(data.get("provider") or ""), "id": str(data.get("id") or ""),
-        "candidates": _to_int(data.get("candidates")), "mismatch": bool(data.get("mismatch")),
-        "latency_ms": 0, "error": str(data.get("error") or ""),
-        "reason": str(data.get("reason") or ""),
-        "http_status": _to_int(data.get("http_status")), "partial_keys": [],
-    }
-
-
-def partial_of(values: Dict[str, Any]) -> Dict[str, Any]:
-    """段间注入的**只读**前序结果（P0-3）：第二段的源能看到第一段已定值的字段。
-
-    今天 MetaTube 在 `metatube_fill()` 里读的就是这些（经 `skeleton`）；这里把它显式化，
-    将来 DMM 那种"必须拿标题去检索"的源才有东西可读。
-    """
-    return {name: values.get(name) for name in
-            ("display_number", "title_jp", "title_zh", "plot_jp", "plot_zh", "cover_url",
-             "actors", "tags")
-            if values.get(name) not in (None, "", [], {})}
-
-
 def replay_run(key: str, store: Any, *, number: str = "", opts: Optional[Dict[str, Any]] = None,
                existing: Any = None) -> Dict[str, Any]:
     """**离线回放**（P0-4）：只用逐站快照重算一遍聚合，**一个站点请求都不发**。
 
-    治的就是"某源静默返回空"这类排查：现场数据（javdb 原始 DTO / javtxt 结果 / MetaTube 命中）
+    治的就是"某源静默返回空"这类排查：现场数据（javdb 原始 DTO / javtxt 结果）
     已经在 `site_snapshot` 里，改聚合规则（字段优先级、黑名单、启用源、链顺序）之后可以
     **反复重算**看结果怎么变，不必为每次试验再抓一遍站点。
 
@@ -1474,250 +1430,6 @@ def _short_plot_zh(plot_zh: str, plot_jp: str, opts: Optional[Dict[str, Any]]) -
         return False
     floor = _to_int(_opt(opts, "min_plot_zh")) or MIN_PLOT_ZH
     return len(text) < floor and bool(str(plot_jp or "").strip())
-
-
-# ---------------------------------------------------------------------------
-# MetaTube（概述兜底；**必须强校验番号**，否则会把随机 DUGA 结果写进你的库）
-# ---------------------------------------------------------------------------
-
-def pick_metatube_hit(items: Any, target_norm: str) -> Tuple[Optional[Dict[str, Any]], int, bool]:
-    """在 MetaTube 返回列表里挑同号条目，返回 `(命中项, 候选数, 是否串号)`。
-
-    实测（2026-10-14，`/v1/movies/search?q=SNOS-380`）返回的是 **DUGA 的 FSDSS 系列**：
-    查 `ZZZZ-999` 也能返回 `FSDSS-666` —— 站点查不到时返回随机结果，**同一条查询三次三个答案**。
-    所以这里**遍历整个列表逐个校验** `parse_av_number(item['number']).norm_key == target_norm`，
-    取第一条命中的；一个都不命中就判 `mismatch`（`mismatch=True`），**绝不退回 `items[0]`**。
-    """
-    want = str(target_norm or "").strip().upper()
-    rows = [it for it in (items if isinstance(items, list) else []) if isinstance(it, dict)]
-    if not want:
-        return None, len(rows), False
-    for item in rows:
-        got = emby.parse_av_number(item.get("number"))
-        if got.matched and str(got.norm_key or "").upper() == want:
-            return item, len(rows), False
-    return None, len(rows), bool(rows)
-
-
-def metatube_movie(item: Any) -> Dict[str, Any]:
-    """把一条 MetaTube 影片记录映射成**骨架字段**（字段真名见下，与 javdb 不同名！）。
-
-    S0b 真机 130 次探测（`_tmp/s0b/REPORT-S0b.md`）给的映射表 —— **别按 javdb 的名字去读它**：
-
-    | 我们的字段 | MetaTube 真名 | 备注 |
-    | --- | --- | --- |
-    | 片商 | `maker` | 不是 `studio` |
-    | 时长（分钟） | `runtime` | 整数；不是 `duration` |
-    | 标签 | `genres` | 字符串数组；不是 `tags` |
-    | 预告片 | `preview_video_url`（+`preview_video_hls_url`） | — |
-    | 简介 | `summary` | **真正命中的条目上 100% 是空串**（7/7）；有值的只有乱返的 DUGA 条目 |
-    | 剧照 | `preview_images` | 是 `[]string`，**不是** `{large_url,thumb_url}` 对象数组 |
-    | 发行日 | `release_date` | `"2024-11-29T00:00:00Z"` 这种 ISO 串（要切掉时间部分） |
-    | 演员 | `actors` | `[]string` 纯名字（**没有头像**） |
-    | 导演 | `director` | — |
-    """
-    data = item if isinstance(item, dict) else {}
-    release = str(data.get("release_date") or "")
-    return {
-        "number": _clean_text(data.get("number")),
-        "title": _clean_text(data.get("title")),
-        "summary": _clean_text(data.get("summary")),
-        "maker": _clean_text(data.get("maker")),
-        "runtime": _to_int(data.get("runtime")),
-        "genres": [_clean_text(g) for g in (data.get("genres") or []) if _clean_text(g)],
-        "director": _clean_text(data.get("director")),
-        "preview_video_url": str(data.get("preview_video_url") or ""),
-        "preview_images": [str(u) for u in (data.get("preview_images") or []) if str(u or "")],
-        "release_date": release[:10] if re.match(r"^\d{4}-\d{2}-\d{2}", release) else "",
-        "cover_url": str(data.get("big_cover_url") or data.get("cover_url") or ""),
-        "thumb_url": str(data.get("big_thumb_url") or data.get("thumb_url") or ""),
-        "actors": [_clean_text(a) for a in (data.get("actors") or []) if _clean_text(a)],
-        "provider": str(data.get("provider") or ""),
-        "id": str(data.get("id") or ""),
-    }
-
-
-def _metatube_fetch(opts: Dict[str, Any], url: str, timeout: int
-                    ) -> Tuple[Optional[bytes], str, int, str]:
-    """打一次 MetaTube search，**带 S0b 定的重试口径**，返回 `(body, error, status, reason)`。
-
-    S0b 实测的三条硬约束（别"优化"掉）：
-
-    1. **`404` 是业务空值，不是错误，绝不重试** —— 它表示"30 个源都没收录这个番号"，
-       重试只会再白等 10 秒；实测并发 5 次搜索还会 **5/5 全 404**。
-    2. **只有 5xx / 超时才退避重试，≤2 次，间隔 1s → 3s**。
-    3. **必须串行**：服务端对 30 源有硬 10 秒截止，并发只会一起失败；而且响应**完全不缓存**
-       （31 个 200 里有 12 个不同 sha）。本模块所有 MetaTube 调用都是同步串行的一次调用。
-
-    0.8.0 的传输层改动：改走 `http_fetch(retries=0)` —— **重试口径仍在本函数里**（上一条 2），
-    只是顺带拿到了结构化 `reason` 与失败正文（拦截判定要用），并**避免双层重试**。
-
-    `timeout` 必须 **≥25 秒**（默认 30）—— 服务端自己在等上游，给 10 秒会把"它还在正常等待"
-    误判成超时。
-    """
-    proxy = str(_opt(opts, "proxy") or "")
-    got = http_fetch(url, proxy=proxy, timeout=timeout, retries=0)
-    if not got.ok and got.status != 404:
-        for wait in (1.0, 3.0):
-            if got.status and 400 <= got.status < 500:          # 其它 4xx：同样是业务结论
-                break
-            _SLEEP(wait)
-            got = http_fetch(url, proxy=proxy, timeout=timeout, retries=0)
-            if got.ok or got.status == 404:
-                break
-    return got.body, got.error, got.status, got.reason
-
-
-def metatube_lookup(opts: Dict[str, Any], number: str, *, store: Any = None,
-                    key: str = "", run_id: str = "",
-                    partial: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """MetaTube 取数：搜索 → **强校验** → 提取（概述兜底 + javdb 挂掉时的骨架兜底）。
-
-    只打 `/v1/movies/search?q=`：**永远用默认 `lazy=true`**（`lazy=false` 对 7 个命中 7/7 全 500）、
-    **永远不用 `provider=` 参数**（`MGS` 403 / `FANZA` 500 / JavBus 查不到时 404）——S0b 实测。
-
-    ⚠️ **别指望它的简介**：真机 7 个命中条目的 `summary` **全是空串**，返回日文简介的只有乱返的
-    DUGA 条目（别人的片子）。所以 `ok=True` 是"拿到了可用字段"而不是"拿到了简介"；
-    `plot_jp` 的正源是 Javtxt 详情页的 `<p class="text-jp">`。
-
-    ⚠️ **成本**：search 恒定 ~10.0 秒（30 次实测全落在 [10000, 10047] ms），全库 108 条就是
-    18 分钟纯等待 —— 调用方（`gather()`）只在「Javtxt 落空」或「javdb 挂了」时才调它。
-
-    整源不可用（全 404 / 连不上）时**返回空 + 记 `scrape_log(status='error')`，不抛异常**：
-    S0b 提醒 JAV321 上游 main 已删目录，将来容器换版本会让这条源突然掉一半命中。
-
-    返回 `{ok, status, movie{…}, plot_jp, title_jp, candidates, mismatch, latency_ms, error,
-    reason, http_status}`；`status` ∈ `ok` / `miss` / `mismatch` / `error` / `empty`
-    （404 = 业务空值）；`reason` 是 `REASON_*`（**HTTP 200 但正文是拦截页/不是 JSON 时，
-    分别记 `cloudflare_challenge` / `parse_error`，不再笼统写成"返回不是合法 JSON"**）。
-    """
-    base = str(_opt(opts, "metatube_base") or "").rstrip("/")
-    timeout = _to_int(_opt(opts, "metatube_timeout")) or METATUBE_TIMEOUT
-    started = time.time()
-    out: Dict[str, Any] = {
-        "ok": False, "status": "miss", "plot_jp": "", "title_jp": "", "movie": {},
-        "provider": "", "id": "", "candidates": 0, "mismatch": False,
-        "latency_ms": 0, "error": "", "reason": "", "http_status": 0,
-        # 段间注入（P0-3）：这次拿到了前序哪些字段（只读；今天只记下来，
-        # 将来 DMM 那类"必须拿标题/番号去检索"的源才会真的用它）
-        "partial_keys": sorted(str(k) for k, v in (partial or {}).items() if v),
-    }
-    if not base:
-        out["status"] = "error"
-        out["error"] = "未配置 MetaTube 地址"
-        out["reason"] = ""                      # 未配置不是请求失败：别算进失败率
-        return out
-    # 被拦过就先别打（冷却按 host 记；MetaTube 在局域网里，冷却一般只在它自己被代理/上游拦时触发）
-    mt_host = urlparse_host(base)
-    if mt_host and limiter().cooling(mt_host) > 0:
-        wait_min = int(limiter().cooling(mt_host) / 60) + 1
-        out.update({"status": "skipped", "error": f"MetaTube 冷却中（约 {wait_min} 分钟后重试）",
-                    "latency_ms": 0})
-        _log_source(store, SRC_METATUBE, "skipped", key or number, 0, out["error"],
-                    reason=limiter().blocked_reason(mt_host), run_id=run_id)
-        return out
-    target = emby.parse_av_number(number)
-    target_norm = target.norm_key if target.matched else emby.canon_key(number)
-    url = f"{base}/v1/movies/search?{urlencode({'q': number})}"      # 只带 q；不要 provider=
-    body, error, status, reason = _metatube_fetch(opts, url, timeout)
-    if body is None:
-        # 404 = 业务空值（30 个源都没收录），记 miss 而不是 error，也不进退避重试
-        out.update({
-            "status": "empty" if status == 404 else "error",
-            "error": "" if status == 404 else (error or "请求失败"),
-            "reason": "" if status == 404 else (reason or REASON_UNEXPECTED),
-            "http_status": 0 if status == 404 else _to_int(status),
-            "latency_ms": int((time.time() - started) * 1000),
-        })
-        if mt_host and out["reason"] in BLOCK_REASONS:
-            limiter().note_blocked(mt_host, reason=out["reason"])
-        _log_source(store, SRC_METATUBE, out["status"], key or number, out["latency_ms"],
-                    out["error"], reason=out["reason"], http_status=out["http_status"],
-                    run_id=run_id)
-        return out
-    text = body.decode("utf-8", "replace")
-    blocked = classify_block(text[:FAILURE_BODY_LIMIT], status)
-    if not blocked and reason in BLOCK_REASONS:
-        blocked = reason                              # 状态码/异常已经判成被拦了
-    if blocked and mt_host:
-        limiter().note_blocked(mt_host, reason=blocked)
-    try:
-        payload = json.loads(text)
-    except ValueError:
-        out.update({
-            "status": "error",
-            "error": (f"命中拦截页（{blocked}）" if blocked else "返回不是合法 JSON"),
-            "reason": blocked or REASON_PARSE,
-            "http_status": _to_int(status),
-            "latency_ms": int((time.time() - started) * 1000),
-        })
-        _log_source(store, SRC_METATUBE, "error", key or number, out["latency_ms"],
-                    out["error"], reason=out["reason"], http_status=out["http_status"],
-                    run_id=run_id)
-        return out
-    items = payload.get("data") if isinstance(payload, dict) else payload
-    hit, count, mismatch = pick_metatube_hit(items, target_norm)
-    out["candidates"] = count
-    out["mismatch"] = mismatch
-    out["http_status"] = _to_int(status)
-    if hit is None:
-        out["status"] = "mismatch" if mismatch else "miss"
-        out["error"] = (f"返回 {count} 条候选全不同号（MetaTube 查不到时会返回随机结果，已拦截）"
-                        if mismatch else "")
-        out["reason"] = REASON_NO_USABLE
-        out["latency_ms"] = int((time.time() - started) * 1000)
-        _log_source(store, SRC_METATUBE, out["status"], key or number, out["latency_ms"],
-                    out["error"], reason=out["reason"], http_status=out["http_status"],
-                    run_id=run_id)
-        return out
-    movie = metatube_movie(hit)
-    out["movie"] = movie
-    out["plot_jp"] = movie["summary"]
-    out["title_jp"] = movie["title"]
-    out["provider"] = movie["provider"]
-    out["id"] = movie["id"]
-    usable = bool(movie["title"] or movie["maker"] or movie["cover_url"] or movie["summary"])
-    out["ok"] = usable
-    out["status"] = "ok" if usable else "miss"
-    if not usable:
-        out["reason"] = REASON_NO_USABLE
-    out["latency_ms"] = int((time.time() - started) * 1000)
-    _log_source(store, SRC_METATUBE, out["status"], key or number, out["latency_ms"],
-                "" if usable else "命中同号条目但所有可用字段都为空",
-                reason=out["reason"], http_status=out["http_status"], run_id=run_id)
-    return out
-
-
-def metatube_fill(skeleton: Dict[str, Any], movie: Dict[str, Any]) -> List[str]:
-    """javdb 挂掉时用 MetaTube 的字段**补空**（只补空，绝不覆盖 javdb 已给的值）。
-
-    契约 §5.2：核心骨架字段第一顺位是 javdb，MetaTube **仅在 javdb 404 时启用**。
-    返回被补上的字段名清单（写进 `warnings`/报告，让"这条数据是谁给的"可追）。
-    """
-    filled: List[str] = []
-    pairs = (
-        ("title_jp", movie.get("title")), ("summary_jp", movie.get("summary")),
-        ("maker", movie.get("maker")), ("director", movie.get("director")),
-        ("release_date", movie.get("release_date")), ("cover_url", movie.get("cover_url")),
-        ("thumb_url", movie.get("thumb_url")),
-        ("preview_video_url", movie.get("preview_video_url")),
-        ("javdb_id", movie.get("id")),
-    )
-    for name, value in pairs:
-        if not _clean_text(skeleton.get(name)) and _clean_text(value):
-            skeleton[name] = _clean_text(value) if name != "javdb_id" else value
-            filled.append(name)
-    if not _to_int(skeleton.get("duration")) and _to_int(movie.get("runtime")):
-        skeleton["duration"] = _to_int(movie["runtime"])
-        filled.append("duration")
-    if not (skeleton.get("actors") or []) and movie.get("actors"):
-        # MetaTube 的 actors 是**纯名字**（没有头像/id），只当"人名兜底"用
-        skeleton["actors"] = [{"name": n} for n in movie["actors"] if n]
-        filled.append("actors")
-    if not (skeleton.get("tags") or []) and movie.get("genres"):
-        skeleton["tags"] = [{"id": "", "name": g} for g in movie["genres"] if g]
-        filled.append("tags")
-    return filled
 
 
 # ---------------------------------------------------------------------------
@@ -1898,12 +1610,12 @@ def _json_dumps(value: Any) -> str:
         return "{}"
 
 
-def pack_raw_json(javdb_raw: Any, javtxt: Any = None, metatube: Any = None,
+def pack_raw_json(javdb_raw: Any, javtxt: Any = None,
                   extra: Any = None, limit: int = RAW_JSON_LIMIT) -> Dict[str, Any]:
     """组装 `meta.raw_json` 并保证总体积 ≤`limit`（默认 5KB）。
 
-    javtxt / metatube 只存**摘要元数据**（URL / vid / 有没有中文 / 候选数），不存正文 ——
-    正文各有自己的列（`plot_zh`/`plot_jp`），再塞进 raw_json 就是重复占体积。
+    javtxt 只存**摘要元数据**（URL / vid / 有没有中文），不存正文 ——
+    正文有自己的列（`plot_zh`/`plot_jp`），再塞进 raw_json 就是重复占体积。
     """
     out: Dict[str, Any] = {}
     if isinstance(javdb_raw, dict) and javdb_raw:
@@ -1916,12 +1628,6 @@ def pack_raw_json(javdb_raw: Any, javtxt: Any = None, metatube: Any = None,
         }
         out["javtxt"]["plot_zh_len"] = len(str(javtxt.get("plot_zh") or ""))
         out["javtxt"]["plot_jp_len"] = len(str(javtxt.get("plot_jp") or ""))
-    if isinstance(metatube, dict):
-        out["metatube"] = {
-            k: metatube.get(k) for k in
-            ("provider", "id", "status", "candidates", "mismatch")
-            if metatube.get(k) not in (None, "")
-        }
     if isinstance(extra, dict):
         out["extra"] = extra
     if len(_json_dumps(out)) <= limit:
@@ -1931,7 +1637,7 @@ def pack_raw_json(javdb_raw: Any, javtxt: Any = None, metatube: Any = None,
         out["javdb"] = trim_javdb_raw(javdb, max(256, limit // 2))
     if len(_json_dumps(out)) <= limit:
         return out
-    for drop in ("extra", "metatube", "javtxt"):
+    for drop in ("extra", "javtxt"):
         out.pop(drop, None)
         if len(_json_dumps(out)) <= limit:
             return out
@@ -2510,14 +2216,6 @@ def translate_fields(*, display_number: str, title_jp: str, plot_jp: str,
 # 取数层总装：三源合并成一份「目标」（写侧与 preview 共用同一份，保证 diff 不会说谎）
 # ---------------------------------------------------------------------------
 
-#: `metatube_fill()` 填的是**骨架的键名**，这张表把它映射到取数图的字段名（只用于溯源）
-_FILL_TO_FIELD: Dict[str, str] = {
-    "summary_jp": "plot_jp", "maker": "studio", "title_jp": "title_jp",
-    "director": "director", "release_date": "release_date", "cover_url": "cover_url",
-    "thumb_url": "thumb_url", "preview_video_url": "preview_video_url",
-    "javdb_id": "javdb_id", "duration": "duration", "actors": "actors", "tags": "tags",
-}
-
 #: `build_overrides()` 的 **Emby 字段 → 取数图字段**（预览里那行"这条是谁给的"）。
 #: 候选**按取值顺序**给（与 `build_overrides()` 里的 `a or b` 一致），取第一个有来源的。
 #: 未登记的覆盖键回空串 —— **不猜**（将来新增字段时要同步这张表，另有一条单测盯着）。
@@ -2540,9 +2238,9 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
            opts: Optional[Dict[str, Any]] = None, existing: Optional[Dict[str, Any]] = None,
            version_tags: Optional[Dict[str, Any]] = None,
            javdb_raw: Any = None) -> Dict[str, Any]:
-    """三源取数 → 目标字段 + 来源状态 + 警告（**不碰 Emby**）。
+    """两源取数 → 目标字段 + 来源状态 + 警告（**不碰 Emby**）。
 
-    顺位严格照契约：骨架 javdb → 简介 Javtxt（中文直出）→ MetaTube（日文 + 翻译）；
+    顺位严格照契约：骨架 javdb → 简介 Javtxt（中文直出）→ 缺中文才走翻译（LLM）；
     标签 `namemap.clean_tags`；演员/导演来自 javdb。
 
     `existing`（`store.meta_get(key)`）里已有 `raw_json['javdb']` 且 `opts['force']` 不为真时
@@ -2570,7 +2268,7 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
         enabled=enabled,
     )
     # 「这个字段最后是谁给的」——**在填值的那一刻打标**（事后按链反推会撒谎：
-    # javtxt 的占位简介要丢弃、MetaTube 只补空、LLM 会覆盖前两者）。
+    # javtxt 的占位简介要丢弃、LLM 会覆盖它）。
     field_sources: Dict[str, str] = {}
 
     def may_fill(field: str, site: str) -> bool:
@@ -2581,7 +2279,7 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
         1. `site` 不在该字段的链里 → **不给**（这就是 `field_blacklist` 与"源被关掉"的执行力：
            以前链算完就放着，填值时一点不看，配置写了等于没写）；
         2. 链上排在 `site` **前面**、但执行顺序上还在它**后面**的源 → 说明"这个字段要优先问它"，
-           于是现在先别填，留给那个源（执行顺序是 javdb → javtxt → MetaTube，见 `EXEC_ORDER`）。
+           于是现在先别填，留给那个源（执行顺序是 javdb → javtxt，见 `EXEC_ORDER`）。
 
         默认链（三种顺序一致）下两条恒真 → 行为与引入取数图之前**逐字一致**。
         """
@@ -2605,7 +2303,7 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
     warnings: List[str] = []
     sources: Dict[str, Any] = {
         SRC_JAVDB: {"status": "skipped"}, SRC_JAVTXT: {"status": "skipped"},
-        SRC_METATUBE: {"status": "skipped"}, SRC_LLM: {"status": "skipped"},
+        SRC_LLM: {"status": "skipped"},
     }
     prev_raw = (existing or {}).get("raw") or {}
     cached_javdb = javdb_raw if javdb_raw is not None else prev_raw.get("javdb")
@@ -2701,7 +2399,6 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
             mark(name, "javdb")
 
     javtxt_meta: Dict[str, Any] = {}
-    metatube_meta: Dict[str, Any] = {}
     # 逐站快照（P0-3）：`use_cache` 点名的源可以**不发请求**直接复用上次的结果
     snapshots: Dict[str, Any] = {}
     if use_snapshots and store is not None and hasattr(store, "snapshot_map"):
@@ -2783,87 +2480,11 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
             if str(javtxt.get("reason") or "") in (REASON_CF_CHALLENGE, REASON_CF_BLOCKED,
                                                   REASON_AGE, REASON_IP_BANNED, REASON_GEO):
                 warnings.append(f"Javtxt 被站点拦截（{javtxt.get('reason')}）："
-                                f"{javtxt.get('error', '')} —— 交 MetaTube 兜底，稍后重试")
+                                f"{javtxt.get('error', '')} —— 稍后重试")
             else:
                 warnings.append(f"Javtxt 请求失败：{javtxt.get('error', '')}")
         else:
-            warnings.append("Javtxt 无同号结果（站点收录缺口，交 MetaTube 兜底）")
-
-    # ★ S0b 的性能纪律：MetaTube search **恒定 ~10 秒**（服务端内部 10s 截止），
-    #   所以「Javtxt 已经拿到简介」时**绝不再打它**。闸门现在写在取数图的源声明里
-    #   （`scrape_graph.SOURCES['metatube'].only_if_missing`），不再是这里的 if：
-    #   缺中文简介、或 javdb 没给标题/封面（`need_core` 的等价物）时才值得那 10 秒。
-    metatube_spec = scrape_graph.SOURCES["metatube"]
-    core = {"plot_zh": plot_zh, "title_jp": title_jp, "cover_url": skeleton.get("cover_url")}
-    # 段间注入（P0-3）：第二段的源读得到第一段**已定值**的字段（只读）
-    partial = partial_of({
-        "display_number": display_number, "title_jp": title_jp, "title_zh": title_zh,
-        "plot_jp": plot_jp, "plot_zh": plot_zh, "cover_url": skeleton.get("cover_url"),
-        "actors": [a.get("name") for a in (skeleton.get("actors") or [])
-                   if isinstance(a, dict)],
-    })
-    if cache_only:
-        # dry-run 不打 MetaTube：它恒定 ~10 秒且**不缓存**，108 条就是 18 分钟纯等待
-        sources[SRC_METATUBE] = {"status": "skipped", "why": "cache_only dry-run"}
-    elif scrape_graph.should_run(metatube_spec, core, enabled=enabled):
-        mt = metatube_from_snapshot(snapshots.get("metatube")) \
-            if "metatube" in use_snapshots else None
-        if mt is None:
-            mt = metatube_lookup(options, display_number, store=logs, key=key, run_id=run_id,
-                                 partial=partial)
-            write_snapshot(logs, key, SRC_METATUBE, mt, run_id=run_id)
-        metatube_meta = mt
-        sources[SRC_METATUBE] = {
-            "status": mt.get("status", "miss"), "latency_ms": mt.get("latency_ms", 0),
-            "provider": mt.get("provider", ""), "id": mt.get("id", ""),
-            "candidates": mt.get("candidates", 0), "error": mt.get("error", ""),
-        }
-        if mt.get("reason"):
-            sources[SRC_METATUBE]["reason"] = mt.get("reason")
-        if mt.get("http_status"):
-            sources[SRC_METATUBE]["http_status"] = _to_int(mt.get("http_status"))
-        if mt.get("from_cache"):
-            # P0-3：这次没发请求，用的是逐站快照（与 javtxt 那条同样的标记）
-            sources[SRC_METATUBE]["from_cache"] = True
-        if mt.get("movie"):
-            plot_before = plot_jp
-            # P0-1 收口：链是**用来裁决的** —— MetaTube 补空之后，把"这个字段的链里不要它"的
-            # 那几项**还原**回去（`metatube_fill()` 是整批写骨架的，所以先记旧值再回滚）。
-            before = {field: skeleton.get(field) for field in set(_FILL_TO_FIELD.values())}
-            filled = metatube_fill(skeleton, mt["movie"])
-            if filled:
-                allowed: List[str] = []
-                for name in filled:
-                    mapped = _FILL_TO_FIELD.get(name)
-                    if mapped and not may_fill(mapped, "metatube"):
-                        skeleton[mapped] = before.get(mapped)
-                        continue
-                    allowed.append(name)
-                filled = allowed
-            if filled:
-                sources[SRC_METATUBE]["filled"] = filled
-                warnings.append(f"MetaTube 补上了 javdb 没给的字段：{'/'.join(filled)}")
-                title_jp = _clean_text(skeleton.get("title_jp") or title_jp)
-                origin_jp = origin_jp or title_jp
-                for name in filled:                     # 溯源：谁补的就记谁
-                    mapped = _FILL_TO_FIELD.get(name)
-                    if mapped:
-                        mark(mapped, "metatube")
-                # 「只补空」：javtxt 已经给的简介不许被 MetaTube 顶掉
-                if not plot_before:
-                    plot_jp = _clean_text(skeleton.get("summary_jp")) or plot_jp
-        if mt.get("plot_jp") and may_fill("plot_jp", "metatube"):
-            plot_jp = mt["plot_jp"]
-            plot_source = plot_source or "metatube"
-            mark("plot_jp", "metatube")
-        if mt.get("title_jp") and not title_jp and may_fill("title_jp", "metatube"):
-            title_jp = mt["title_jp"]
-            mark("title_jp", "metatube")
-        if mt.get("mismatch"):
-            warnings.append(f"MetaTube 串号拦截：返回 {mt.get('candidates')} 条候选无一与 "
-                            f"{display_number} 同号（该站点查不到时会返回随机结果）")
-        elif not mt.get("ok") and mt.get("status") == "miss":
-            warnings.append("MetaTube 命中同号条目但没有可用字段（实测命中条目的 summary 恒空）")
+            warnings.append("Javtxt 无同号结果（站点收录缺口，本次没有中文简介）")
 
     # 翻译：只有确实缺中文、且拿到了日文，才值得花一次 LLM
     need_title = bool(title_jp) and not title_zh
@@ -2940,7 +2561,6 @@ def gather(cli: Any, store: Any, key: str, display_number: str, *,
         "warnings": warnings,
         "javdb_raw": cached_javdb or trim_javdb_raw(skeleton),
         "javtxt_meta": javtxt_meta,
-        "metatube_meta": metatube_meta if isinstance(metatube_meta, dict) else {},
         # P0-0 的分类（路由的键）
         "content_type": shape["content_type"],
         "mosaic": shape["mosaic"],
@@ -3277,7 +2897,7 @@ def _upload_images(emby_client: Any, store: Any, emby_id: str, target: Dict[str,
     **封面取数的两级兜底**（缺陷 5，试点批真机）：
 
     1. javdb `assets list` 挑出来的 cover（优先）；
-    2. 拿不到就退回**取数层给的 `cover_url`**（MetaTube 的 dmm 系封面 / javdb 详情的封面），
+    2. 拿不到就退回**取数层给的 `cover_url`**（javdb 详情的封面 / 剧照），
        走 `imgproxy.fetch(url, proxy)`。真机现象：`12593`(IPOK-025L.iso)/`12596`(CAWB-040.mp4)
        的 javdb 图集是空的（番号查不到 / 该片图集为空），写完 `/img?emby=<id>&type=Primary`
        仍 404 —— 而这两条的 `cover_url` 在 target 里**本来是有的**。
@@ -3542,7 +3162,7 @@ def _persist(store: Any, target: Dict[str, Any], *, item_key: str, key: str, emb
     retry_count, next_retry = apply_backoff(
         completeness if wrote else "", (existing or {}).get("retry_count"), now)
     raw = pack_raw_json(
-        target.get("javdb_raw"), target.get("javtxt_meta"), target.get("metatube_meta"),
+        target.get("javdb_raw"), target.get("javtxt_meta"),
         extra={"version_tags": version_tags, "plot_source": target.get("plot_source", ""),
                "sources": {k: str((v or {}).get("status") or "")
                            for k, v in (target.get("sources") or {}).items()}},
@@ -3809,7 +3429,7 @@ def preview_one(key: Any, *, store: Any, cli: Any, emby_client: Any = None,
     """字段级 diff 预览（REST `/scrape/preview`）：**不发任何写请求**。
 
     产出 `{key, number, item_key, emby_id, fields:[{name,current,target,changed}],
-    sources:{javdb,javtxt,metatube,llm}, warnings:[], images:{…}, completeness}`。
+    sources:{javdb,javtxt,llm}, warnings:[], images:{…}, completeness}`。
 
     `current` 来自 Emby DTO（`get_item` 是**读**，允许）；`target` 来自取数层。
     本函数**不调** `update_item` / `upload_image` / `delete_image`，**不写** meta/media_item
@@ -4272,7 +3892,6 @@ def sources_selfcheck(store: Any, cli: Any, opts: Optional[Dict[str, Any]] = Non
 
     - javdb：`cli.detail('SNOS-380')`（真实存在的老片，1 次子进程）；
     - javtxt：搜索 + 详情（受 2s 站点间隔约束，约 3–5 s）；
-    - metatube：`/v1/movies/search`（本地服务器，毫秒级）；
     - llm：`translator.selfcheck()`（派生源，不在取数图里，**总是探**）。
 
     **探测范围 = 取数图里启用的来源**（P1-3，照 amane 的"探测范围与刮削范围一致"）：
@@ -4295,10 +3914,8 @@ def sources_selfcheck(store: Any, cli: Any, opts: Optional[Dict[str, Any]] = Non
         out.append(_probe_javdb(cli, stamp))
     if "javtxt" in wanted:
         out.append(_probe_javtxt(options, store, stamp))
-    if "metatube" in wanted:
-        out.append(_probe_metatube(options, store, stamp))
     for site in wanted:                                   # 图上将来新增的源：没有探针就如实说
-        if site not in (SRC_JAVDB, SRC_JAVTXT, SRC_METATUBE):
+        if site not in (SRC_JAVDB, SRC_JAVTXT):
             out.append(_skip_row(site, "该来源还没有自检探针", stamp))
 
     started = time.time()
@@ -4387,28 +4004,6 @@ def _probe_javtxt(opts: Dict[str, Any], store: Any, stamp: str) -> Dict[str, Any
     }
 
 
-def _probe_metatube(opts: Dict[str, Any], store: Any, stamp: str) -> Dict[str, Any]:
-    """MetaTube 探针：走一次搜索并**如实回报串号拦截**（这正是它最需要被盯住的行为）。
-
-    没配地址 → `skipped`（P1-3：**未配置 ≠ 不可达**，不该在自检表里挂成一条红行）。
-    """
-    if not str(_opt(opts, "metatube_base") or "").strip():
-        return _skip_row(SRC_METATUBE, "未配置 MetaTube 地址（hybrid 不做它兜底）", stamp)
-    result = metatube_lookup(opts, SELFCHECK_NUMBER, store=None)
-    return {
-        "source": SRC_METATUBE,
-        "status": str(result.get("status") or "miss"),
-        "latency_ms": result.get("latency_ms", 0),
-        "error": result.get("error", ""),
-        "reason": str(result.get("reason") or ""),
-        "http_status": _to_int(result.get("http_status")),
-        "checked_at": stamp,
-        "detail": {"candidates": result.get("candidates", 0),
-                   "mismatch": result.get("mismatch", False),
-                   "provider": result.get("provider", "")},
-    }
-
-
 # ---------------------------------------------------------------------------
 # 公开接口 6：sync_actor_avatars（P0-② 落地版：演员头像写进 Person 实体）
 # ---------------------------------------------------------------------------
@@ -4424,8 +4019,7 @@ def _avatar_index(store: Any, mod: Any) -> Dict[str, Dict[str, Any]]:
     过滤与界面用 —— 0.7.2 真机误报 `person_missing` 就是拿它去匹配实体导致的
     （实体叫 `松本一香（松本いちか）`，简中名 `松本一香` 精确匹配必然落空）。
 
-    同一演员出现在多部片里时合并；**头像取第一条非空的**（javdb 的演员头像是第一顺位，
-    S0b：MetaTube 的 `actors` 只有名字、没有头像）。
+    同一演员出现在多部片里时合并；**头像取第一条非空的**（0.8.1 起头像只有 javdb 一个源）。
     """
     index: Dict[str, Dict[str, Any]] = {}
     if store is None or not hasattr(store, "meta_list"):
@@ -4498,10 +4092,10 @@ def _image_bytes(url: str, opts: Dict[str, Any]) -> Tuple[bytes, str]:
     if not url:
         return b"", "没有头像地址"
     if imgproxy is not None and hasattr(imgproxy, "fetch"):
-        # ★ 重试一次（0.7.4，真机实测）：Gfriends 的大图（1~2 MB）偶尔**传到一半就断**
+        # ★ 重试一次（0.7.4 真机实测，0.8.1 保留）：图床/代理偶发**传到一半就断**
         # （urllib 抛 `IncompleteRead`）→ `imgproxy.fetch()` 回 None。本库批跑 113 张里
-        # 有 2 张这样，其中 `藤咲舞` 重试即成功、`白岩冬萌` 那张 2.1 MB 每次都断
-        # （属图床/代理的传输问题，不是插件逻辑）—— 所以重试一次、仍失败才如实报错。
+        # 有 2 张这样：一张重试即成功、另一张 2.1 MB 每次都断（属图床/代理的传输问题，
+        # 不是插件逻辑）—— 所以重试一次、仍失败才如实报错。
         last = "imgproxy.fetch 返回空"
         for _ in range(2):
             try:
@@ -4536,91 +4130,6 @@ def is_image_bytes(blob: Any) -> bool:
     return data[:4] == b"RIFF" and data[8:12] == b"WEBP"
 
 
-# Gfriends 兜底的 provider 名（MetaTube `/v1/actors/search` 返回的 `provider` 字段）
-GFRIENDS_PROVIDER = "Gfriends"
-
-
-def _same_actor_name(left: Any, right: Any) -> bool:
-    """两个演员名是不是同一个人（Gfriends 命中校验用，见 `_gfriends_avatar()`）。
-
-    宽松口径：`_nfkc()` + 去掉空白与各类中点/括号/标点 + 小写之后，**完全相等**或
-    **互相包含**（短的那个长度 ≥2 且是长的那个的子串）都算对得上 —— 容忍
-    `七ツ森りり` vs `七森莉莉（七ツ森りり）`、全角括号、简繁与标点差异；
-    两个毫不相干的名字一定对不上（那就宁可不要头像，也不挂错人）。
-    """
-    def norm(value: Any) -> str:
-        text = _nfkc(value).strip().lower()
-        return re.sub(r"[\s\u3000·・,，.。/／()（）\[\]【】「」]+", "", text)
-
-    a, b = norm(left), norm(right)
-    if not a or not b:
-        return False
-    if a == b:
-        return True
-    shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
-    return len(shorter) >= 2 and shorter in longer
-
-
-def _gfriends_avatar(opts: Dict[str, Any], jp: Any,
-                     timeout: int = 0) -> Tuple[str, str, str]:
-    """Gfriends 兜底：javdb 没头像时，按**日文原名**去 MetaTube 的 `/v1/actors/search` 找一张。
-
-    返回 `(url, error, reason)`：
-
-    - 命中 → `("https://raw.githubusercontent.com/…", "", "")`（取 `data[].images[0]`，
-      且**必须先过 `_same_actor_name(item['name'], 查询名)`**：挂错人的头像比没有头像糟得多）；
-    - **HTTP 404 / 没有 Gfriends 条目 = "该演员不在 Gfriends" = 没有头像**（`reason='not_found'`），
-      **绝不是错误**，调用方不许把它记进 `errors`；
-    - 有 Gfriends 条目但**名字对不上** → `reason='name_mismatch'`（同样是"没有头像"，不是错误）；
-    - 未配置 `metatube_base` → `reason='unconfigured'`；演员行没有 `jp` → `reason='no_jp_name'`；
-    - 只有真异常（连不上 / 非 JSON）才把文案放进 `error`。
-
-    ⚠️ 地址**只从 `_opt(opts, "metatube_base")` 取，绝不写死**；查询用演员行的 `jp`
-    （日文原名），**不是规范名** `中文（日文）`（实测规范名带全角括号与中文，查不到）。
-    """
-    base = str(_opt(opts, "metatube_base") or "").rstrip("/")
-    if not base:
-        return "", "", "unconfigured"
-    query = _clean_text(jp)
-    if not query:
-        return "", "", "no_jp_name"
-    url = f"{base}/v1/actors/search?{urlencode({'q': query})}"
-    body, error, status = _metatube_fetch(opts, url,
-                                          _to_int(_opt(opts, "metatube_timeout")) or METATUBE_TIMEOUT)
-    if body is None:
-        if status == 404:                       # 业务空值：该演员不在 Gfriends，不重试也不记错误
-            return "", "", "not_found"
-        return "", error or "请求失败", ""
-    try:
-        payload = json.loads(body.decode("utf-8", "replace"))
-    except ValueError:
-        return "", "返回不是合法 JSON", ""
-    items = payload.get("data") if isinstance(payload, dict) else payload
-    if not isinstance(items, list):
-        return "", "", "not_found"
-    mismatch = False
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        if str(item.get("provider") or "").lower() != GFRIENDS_PROVIDER.lower():
-            continue
-        # ★ 认人之后再取自拍：MetaTube 这个端点会**按名字返回条目**，但谁也不能保证上游
-        # 永远只回同名那一条（番号查询那条 `movies/search` 就会回随机结果）。头像挂错人比
-        # 没有头像糟得多 —— 名字对不上就跳过这一条（宽松：包含关系也算对得上，
-        # 容忍 `七ツ森りり` / `七森莉莉（七ツ森りり）` 这类写法差异）。
-        if not _same_actor_name(item.get("name"), query):
-            mismatch = True
-            continue
-        images = item.get("images")
-        if not isinstance(images, list):
-            continue
-        for image in images:
-            text = str(image or "").strip()
-            if text:
-                return text, "", ""
-    return "", "", "name_mismatch" if mismatch else "not_found"
-
-
 def sync_actor_avatars(store: Any, emby_client: Any, *, limit: int = 0, dry_run: bool = True,
                        namemap_mod: Any = None, opts: Optional[Dict[str, Any]] = None,
                        names: Optional[List[str]] = None
@@ -4648,13 +4157,10 @@ def sync_actor_avatars(store: Any, emby_client: Any, *, limit: int = 0, dry_run:
        `None`（本库还有 12 位缺字段）**保守保留**并单独计入 `gender_unknown`（**不混进
        `missing_person`**，也不静默丢掉 —— 0.7.4 改：老代码在这里 `continue`，那 12 位
        ——看名字多数是女演员——一个头像都同步不到）。只有 `gender == 1` 是硬性排除。
-    9. **头像源：Gfriends 优先、javdb 兜底**（0.7.4 换序）：按演员行的 `jp`（**日文原名**）
-       打 `{metatube_base}/v1/actors/search?q=`，命中取 `data[].images[0]`；查不到就用 javdb
-       的 `avatars/**.jpg`。实测 javdb 那张是 100×100 ~ 400×400 的**列表缩略图**，Gfriends
-       命中时是 564×720 ~ 1235×1851 的整图（对照 9 例全胜）—— 老口径「javdb 优先」正是
-       「女优头像很低清」的根因。**404 = 该演员不在 Gfriends = 没有头像，不是错误**；
-       Gfriends 查询报错也**不算失败**（javdb 有图就照用）；两源都没有 → `action='skip'` +
-       `reason='no_avatar'`（另带 `gfriends` 原因码）。
+    9. **头像源只剩 javdb**（0.8.1）：MetaTube 整体下线后，原先经由它转发的 Gfriends
+        `/v1/actors/search` 一并去掉。javdb 的 `avatars/**.jpg` 是 100×100 ~ 400×400 的
+       **列表缩略图**（比 Gfriends 整图小），这是本次下线必须接受的画质代价；javdb 没给头像
+       → `action='skip'` + `reason='no_avatar'`，如实跳过，不拿别的站点猜图、也绝不挂错人。
     10. `names` 给了就**只处理这些名字**（单片刮完只同步本片演员；自动路径绝不走全表）：
         规范名 / 展示名 / 中英日任一写法相等即算点名（`_wanted_slot()`；**只影响挑哪几行**，
         交给 `find_person()` 的仍只有规范名一个精确值）；`None` = 现有的全量行为。
@@ -4744,28 +4250,14 @@ def sync_actor_avatars(store: Any, emby_client: Any, *, limit: int = 0, dry_run:
             entry["reason"] = "has_image"
             planned.append(entry)
             continue
-        # 取图：**Gfriends 优先、javdb 兜底**（0.7.4 换序，修「头像很低清」）。
-        # 实测（2026-10-15，同一批演员两源对照）：javdb 的 `tp.spfcas.com/…/avatars/xx/*.jpg`
-        # 是**列表缩略图** —— 100×100 / 125×125 / 200×200 / 250×250 最常见，最大 400×400；
-        # 而 Gfriends 命中时是 564×720 ~ 1235×1851 的整图，对照 9 例**全部更大，javdb 无一例胜出**。
-        # 老口径「javdb 第一顺位、没有才 Gfriends」正是用户报「很多女优头像非常不清晰、很低清」
-        # 的直接原因：先把 100×100 的缩略图传进 Emby，之后 `has_image` 一挡就再也换不掉。
-        # javdb 无头像或 Gfriends 查不到时按老口径回落，不丢任何一位；Gfriends 报错**不算失败**
-        # （javdb 有图就照用；两个都没有才如实跳过），失败明细照旧只收真正的取图/上传错误。
-        avatar_url = ""
-        source = ""
-        gfriends_url, gfriends_error, gfriends_reason = _gfriends_avatar(options, row.get("jp"))
-        if gfriends_url:
-            avatar_url, source = gfriends_url, "gfriends"
-        javdb_url = str(row.get("avatar") or "")
-        if not avatar_url and javdb_url:
-            avatar_url, source = javdb_url, "javdb"
-        if gfriends_error:
-            entry["gfriends"] = f"Gfriends 查询失败（{gfriends_error}）" + \
-                                ("，已回落 javdb 头像" if avatar_url else "")
+        # 取图：**只剩 javdb**（0.8.1 起 MetaTube 整体下线，原先优先的 Gfriends 源一起去掉）。
+        # javdb 的 `tp.spfcas.com/…/avatars/xx/*.jpg` 是**列表缩略图**（100×100 ~ 400×400），
+        # 比 Gfriends 整图小 —— 这是让 MetaTube 下线必须接受的画质代价；没有图就如实跳过，
+        # 绝不挂错人，也不拿别的站点猜一张。
+        avatar_url = str(row.get("avatar") or "")
+        source = "javdb" if avatar_url else ""
         if not avatar_url:
-            entry["reason"] = "no_avatar"        # 两源都没有：如实跳过（javdb 空 + Gfriends 无）
-            entry["gfriends"] = gfriends_reason
+            entry["reason"] = "no_avatar"        # javdb 没给头像：如实跳过
             planned.append(entry)
             continue
         entry.update({"action": "upload_avatar", "url": avatar_url, "source": source})

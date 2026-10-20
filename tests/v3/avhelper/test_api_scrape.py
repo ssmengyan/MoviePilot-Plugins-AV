@@ -1460,9 +1460,8 @@ class TestScrapeConf:
         assert conf == {
             "scrapeMode": "fill",
             # P1-5：`sources` 是新真值；两个布尔由它派生（老前端仍按布尔读）
-            "sources": ["javdb", "javtxt", "metatube"],
-            "plotJavtxt": True, "plotMetatube": True,
-            "metatubeBase": "",
+            "sources": ["javdb", "javtxt"],
+            "plotJavtxt": True,
             "translateModel": "hy3", "translateModelFallback": "deepseek-v4.1-flash",
             "trailerMode": "off",
             "autoScrapeTier1": True, "autoScrapeTier2": True,
@@ -1474,35 +1473,38 @@ class TestScrapeConf:
         }
 
     def test_legacy_booleans_derive_sources(self, plugin, store):
-        """老规则里只有两个布尔开关（0.7.x）→ `sources` 由它们推；写在 `sources` 上时反过来。"""
+        """老规则里的 `plotJavtxt`（0.7.x）仍能推 `sources`；`plotMetatube` 已下线、不再参与。
+
+        写在 `sources` 上时它是**新真值**，布尔跟着它走。
+        """
         store.kv_set("global_rule", {"plotJavtxt": False, "plotMetatube": True})
         conf = plugin.scrape_conf()
-        assert conf["sources"] == ["javdb", "metatube"]
-        assert conf["plotJavtxt"] is False and conf["plotMetatube"] is True
-        store.kv_set("global_rule", {"sources": ["javtxt"], "plotJavtxt": True,
-                                     "plotMetatube": True})
+        assert conf["sources"] == ["javdb"]          # MetaTube 的旧布尔被忽略
+        assert conf["plotJavtxt"] is False
+        assert "plotMetatube" not in conf
+        store.kv_set("global_rule", {"sources": ["javtxt"], "plotJavtxt": False})
         conf = plugin.scrape_conf()
         assert conf["sources"] == ["javdb", "javtxt"]      # javdb 是骨架，永远在
-        assert conf["plotMetatube"] is False               # 布尔跟着 sources 走
+        assert conf["plotJavtxt"] is True                  # 布尔跟着 sources 走
 
     def test_field_maps_drop_unknown_entries(self, plugin, store):
         store.kv_set("global_rule", {
-            "fieldPriority": {"plot_zh": ["metatube", "dmm"], "不是字段": ["javdb"]},
+            "fieldPriority": {"plot_zh": ["javtxt", "dmm"], "不是字段": ["javdb"]},
             "fieldBlacklist": {"plot_zh": ["javtxt"], "title_jp": "不是数组"},
         })
         conf = plugin.scrape_conf()
-        assert conf["fieldPriority"] == {"plot_zh": ["metatube"]}   # 认不出的站/字段丢掉
+        assert conf["fieldPriority"] == {"plot_zh": ["javtxt"]}    # 认不出的站/字段丢掉
         assert conf["fieldBlacklist"] == {"plot_zh": ["javtxt"]}
 
     def test_scrape_opts_passes_graph_keys(self, plugin, store):
         """三个新键要经 `scrape_opts()` 交给取数图（下划线键名）。"""
         store.kv_set("global_rule", {"sources": ["javtxt"],
-                                     "fieldPriority": {"plot_zh": ["metatube"]},
+                                     "fieldPriority": {"plot_zh": ["javtxt"]},
                                      "fieldBlacklist": {"plot_zh": ["javtxt"]}})
         opts = plugin.scrape_opts()
         assert opts["sources"] == ("javdb", "javtxt")
         assert opts["plot_sources"] == ("javtxt",)                 # 旧键跟着走
-        assert opts["field_priority"] == {"plot_zh": ["metatube"]}
+        assert opts["field_priority"] == {"plot_zh": ["javtxt"]}
         assert opts["field_blacklist"] == {"plot_zh": ["javtxt"]}
 
     def test_rate_limit_keys_are_read_and_clamped(self, plugin, store):
@@ -1531,48 +1533,40 @@ class TestScrapeConf:
         store.kv_set("global_rule", {"scrapeMode": "hybrid", "plotJavtxt": False,
                                      "cropAnchor": "right", "trailerMode": "local",
                                      "translateModel": "hy3-pro", "cleanSuffixes": ["-UC", " "],
-                                     "nameTemplate": "{number}",
-                                     "metatubeBase": " http://metatube.test:8080 "})
+                                     "nameTemplate": "{number}"})
         conf = plugin.scrape_conf()
         assert conf["scrapeMode"] == "hybrid" and conf["plotJavtxt"] is False
         assert conf["trailerMode"] == "local"
         assert conf["translateModel"] == "hy3-pro"
         assert conf["cleanSuffixes"] == ["-UC"]
-        assert conf["metatubeBase"] == "http://metatube.test:8080"
 
     def test_scrape_opts_maps_camel_to_snake(self, plugin, store):
         """★ 0.7.0 集成缺口回归：`scraper._opt()` 按下划线键取值，驼峰开关必须被映射过去，
-        否则界面上的「简介来源」「MetaTube 地址」全部静默失效。
+        否则界面上的「简介来源」开关**静默失效**。
 
         0.7.2：裁切锚点设置项已删，`crop_anchor` **不再**从这里映射 —— 锚点固定 `auto`，
-        由 `scraper.DEFAULT_OPTS["crop_anchor"]` 提供、裁切逻辑自判。老 kv 里残留的
-        `cropAnchor` 既不报错也不再影响 `opts`。"""
-        store.kv_set("global_rule", {"plotJavtxt": True, "plotMetatube": False,
+        由 `scraper.DEFAULT_OPTS["crop_anchor"]` 提供、裁切逻辑自判。0.8.1 起
+        `plotMetatube` / `metatubeBase` 也已下线，opts 里不再出现它们。"""
+        store.kv_set("global_rule", {"plotJavtxt": True, "plotMetatube": True,
                                      "cropAnchor": "right",
                                      "metatubeBase": "http://metatube.test:8080"})
         opts = plugin.scrape_opts()
         assert opts["plot_sources"] == ("javtxt",)
         assert "crop_anchor" not in opts
-        assert opts["metatube_base"] == "http://metatube.test:8080"
-        # 驼峰原样保留（契约里 opts 就是透传形状，别删）
-        assert opts["plotMetatube"] is False
+        assert "metatube_base" not in opts
+        assert "plotMetatube" not in opts
 
     def test_scrape_opts_both_plot_sources_off_gives_empty_tuple(self, plugin, store):
         store.kv_set("global_rule", {"plotJavtxt": False, "plotMetatube": False})
         assert plugin.scrape_opts()["plot_sources"] == ()
 
-    def test_scrape_opts_metatube_base_empty_stays_empty(self, plugin, store):
-        """没配地址 → 传空串而不是缺键：`_opt()` 认空串为"已给"，数据源自检才能回显「未配置」。"""
-        opts = plugin.scrape_opts()
-        assert opts["metatube_base"] == ""
 
     def test_bad_values_fall_back_without_raising(self, plugin, store):
         store.kv_set("global_rule", {"scrapeMode": "随便", "cropAnchor": 7, "trailerMode": None,
-                                     "plotMetatube": "false", "cleanSuffixes": "不是数组"})
+                                     "cleanSuffixes": "不是数组"})
         conf = plugin.scrape_conf()
         assert conf["scrapeMode"] == "fill" and "cropAnchor" not in conf
         assert conf["trailerMode"] == "off"
-        assert conf["plotMetatube"] is False
         assert conf["cleanSuffixes"] == []
 
     def test_scrape_opts_carries_proxy(self, plugin):
@@ -1605,20 +1599,20 @@ class TestScrapeGraphApi:
     def test_graph_endpoint_shape(self, plugin, api_mod, graph_mod):
         result = plugin.api_scrape_graph()
         assert result["success"] is True
-        assert result["route"] == ["javdb", "javtxt", "metatube"]
+        assert result["route"] == ["javdb", "javtxt"]
         assert set(result["fields"]) == set(graph_mod.FIELDS)
         by_id = {row["id"]: row for row in result["all_sources"]}
         assert by_id["javdb"]["always_on"] is True
-        assert by_id["metatube"]["phase"] == 2
+        assert set(by_id) == {"javdb", "javtxt"}
         assert all(isinstance(chain, list) and chain for chain in result["chains"].values())
 
     def test_graph_reflects_sources_and_priority(self, plugin, store):
         store.kv_set("global_rule", {"sources": ["javtxt"],
-                                     "fieldPriority": {"plot_zh": ["metatube"]}})
+                                     "fieldPriority": {"plot_zh": ["javtxt"]}})
         result = plugin.api_scrape_graph()
-        assert result["route"] == ["javdb", "javtxt"]        # metatube 关掉了
+        assert result["route"] == ["javdb", "javtxt"]
         # 关掉的源不在链里（prefer 也无效 —— 与 compile_chain 同一条口径）
-        assert result["chains"]["plot_zh"] == ["javdb", "javtxt"]
+        assert result["chains"]["plot_zh"] == ["javtxt", "javdb"]
 
     def test_write_path_rejects_bad_scrape_values(self, plugin, api_mod, store):
         """写入校验：非法站点/字段/超范围间隔不落库，响应里如实回报。"""

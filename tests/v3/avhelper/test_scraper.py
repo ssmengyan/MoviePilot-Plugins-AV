@@ -787,7 +787,8 @@ class TestFailureReasons:
     def test_reason_enum_is_closed_and_unique(self, scraper):
         assert isinstance(scraper.REASONS, frozenset)
         assert scraper.REASON_CF_CHALLENGE in scraper.REASONS
-        assert len(scraper.REASONS) == 15
+        assert scraper.REASON_LOGIN_REQUIRED in scraper.REASONS
+        assert len(scraper.REASONS) == 16
         assert all(isinstance(v, str) and v for v in scraper.REASONS)
 
     def test_classify_status_fallbacks(self, scraper):
@@ -835,6 +836,14 @@ class TestFailureReasons:
         assert scraper.reason_from_text("javdb 未返回详情") == ""
         assert scraper.reason_from_text("javdb 未返回详情", scraper.REASON_UNEXPECTED) == \
             scraper.REASON_UNEXPECTED
+
+    def test_reason_from_text_login_required(self, scraper):
+        """0.8.1：javdb 子进程说「未登录」时不能再兜成 `unexpected`（界面会显示"未知错误"）。"""
+        for text in ("javdb 未登录", "请先登录后重试", "登录已过期，请重新登录",
+                     "login required", "not logged in", "please sign in"):
+            assert scraper.reason_from_text(text) == scraper.REASON_LOGIN_REQUIRED, text
+        # 别把它做成宽泛关键词：正常失败文本仍然是空的（交给调用方给默认值）
+        assert scraper.reason_from_text("javdb 未返回详情") == ""
 
     def test_backoff_is_jittered_and_growing(self, scraper):
         first = [scraper._backoff_wait(0) for _ in range(20)]      # 第 1 次重试：2±1
@@ -912,113 +921,6 @@ class TestFailureReasons:
 
 # ---------------------------------------------------------------------------
 # 4. MetaTube 串号拦截
-# ---------------------------------------------------------------------------
-
-class TestMetaTube:
-
-    def test_pick_rejects_all_mismatch(self, scraper):
-        hit, count, mismatch = scraper.pick_metatube_hit(METATUBE_MISMATCH["data"], "SNOS380")
-        assert hit is None and count == 2 and mismatch is True
-
-    def test_pick_never_takes_first(self, scraper):
-        """★ 硬性验收：命中项在第 2 位时也必须取命中的那条，绝不退回 `items[0]`。"""
-        items = [{"number": "FSDSS-732", "summary": "别人的"},
-                 {"number": "SNOS-380", "summary": "对的"}]
-        hit, count, mismatch = scraper.pick_metatube_hit(items, "SNOS380")
-        assert hit is not None and hit["summary"] == "对的"
-        assert count == 2 and mismatch is False
-
-    def test_lookup_reports_mismatch(self, scraper, monkeypatch):
-        _patch_fetch(monkeypatch,
-                            lambda url, **k: (json.dumps(METATUBE_MISMATCH).encode(), "", 200))
-        store = FakeStore()
-        got = scraper.metatube_lookup({"metatube_base": "http://mt:8080"}, "SNOS-380",
-                                      store=store, key="SNOS380")
-        assert got["status"] == "mismatch" and got["mismatch"] is True
-        assert got["plot_jp"] == ""                       # 绝不采纳别人的简介
-        assert got["candidates"] == 2
-        assert store.logs[0]["status"] == "mismatch"
-
-    def test_lookup_ok(self, scraper, monkeypatch):
-        payload = {"data": [{"number": "SNOS-380", "provider": "JAV321", "id": "snos00380",
-                             "summary": "日文简介", "title": "日文标题"}]}
-        _patch_fetch(monkeypatch,
-                            lambda url, **k: (json.dumps(payload).encode(), "", 200))
-        got = scraper.metatube_lookup({"metatube_base": "http://mt:8080"}, "SNOS-380")
-        assert got["ok"] and got["plot_jp"] == "日文简介" and got["provider"] == "JAV321"
-
-    def test_empty_result_is_miss_not_error(self, scraper, monkeypatch):
-        _patch_fetch(monkeypatch, lambda url, **k: (b'{"data":[]}', "", 200))
-        got = scraper.metatube_lookup({"metatube_base": "http://mt:8080"}, "SNOS-380")
-        assert got["status"] == "miss" and got["mismatch"] is False
-
-    def test_404_is_business_empty_no_retry(self, scraper, monkeypatch):
-        """★ S0b：`404` 是业务空值（30 个源都没收录），**不许重试**（重试只会再等 10 秒）。"""
-        calls = []
-        sleeps = []
-
-        def fake_get(url, **kwargs):
-            calls.append(url)
-            return None, "HTTP 404", 404
-
-        _patch_fetch(monkeypatch, fake_get)
-        monkeypatch.setattr(scraper, "_SLEEP", lambda s: sleeps.append(s))
-        got = scraper.metatube_lookup({"metatube_base": "http://mt:8080"}, "SNOS-380")
-        assert got["status"] == "empty" and got["error"] == ""
-        assert len(calls) == 1 and sleeps == []              # 一次就是一次
-
-    def test_5xx_retries_with_backoff(self, scraper, monkeypatch):
-        """只有 5xx/超时才退避重试，≤2 次，间隔 1s → 3s。"""
-        calls = []
-        sleeps = []
-
-        def fake_get(url, **kwargs):
-            calls.append(url)
-            if len(calls) < 3:
-                return None, "HTTP 503", 503
-            return b'{"data":[]}', "", 200
-
-        _patch_fetch(monkeypatch, fake_get)
-        monkeypatch.setattr(scraper, "_SLEEP", lambda s: sleeps.append(s))
-        got = scraper.metatube_lookup({"metatube_base": "http://mt:8080"}, "SNOS-380")
-        assert len(calls) == 3 and sleeps == [1.0, 3.0]
-        assert got["status"] == "miss"
-
-    def test_timeout_gives_up_after_two_retries(self, scraper, monkeypatch):
-        calls = []
-
-        def fake_get(url, **kwargs):
-            calls.append(url)
-            return None, "TimeoutError: timed out", 0
-
-        _patch_fetch(monkeypatch, fake_get)
-        monkeypatch.setattr(scraper, "_SLEEP", lambda s: None)
-        got = scraper.metatube_lookup({"metatube_base": "http://mt:8080"}, "SNOS-380")
-        assert got["status"] == "error" and len(calls) == 3
-        assert "TimeoutError" in got["error"]
-
-    def test_default_timeout_is_at_least_25s(self, scraper):
-        """S0b：search 恒定 ~10s，HTTP 超时给 10 秒会把正常等待误判成超时。"""
-        assert scraper.METATUBE_TIMEOUT >= 25
-        assert scraper.DEFAULT_OPTS["metatube_timeout"] >= 25
-
-    def test_whole_source_down_is_tolerated(self, scraper, monkeypatch):
-        """S0b：JAV321 上游已删目录，将来整源不可用要能容忍（空 + 记日志，不抛）。"""
-        store = FakeStore()
-        _patch_fetch(monkeypatch, lambda url, **k: (None, "HTTP 404", 404))
-        got = scraper.metatube_lookup({"metatube_base": "http://mt:8080"}, "SNOS-380",
-                                      store=store, key="SNOS380")
-        assert got["ok"] is False and got["movie"] == {}
-        assert store.logs[0]["status"] == "empty"
-
-    def test_missing_actors_key_is_tolerated(self, scraper):
-        """S0b：`actors` 只有 8/40 条响应才有（omitempty）→ 读的时候必须 `or []`。"""
-        movie = scraper.metatube_movie({"number": "MIDV-946", "title": "x"})
-        assert movie["actors"] == [] and movie["genres"] == [] and movie["preview_images"] == []
-
-
-# ---------------------------------------------------------------------------
-# 5. javdb 骨架 / 资产 / raw_json 瘦身
 # ---------------------------------------------------------------------------
 
 class TestJavdb:
@@ -1491,24 +1393,6 @@ class TestPreview:
         assert report["fields"]
         assert report["emby_id"] == ""
         assert any("Emby 条目" in w for w in report["warnings"])
-
-    def test_preview_warns_on_metatube_mismatch(self, scraper, monkeypatch):
-        def fake_get(url, **kwargs):
-            if "/v1/movies/search" in url:
-                return json.dumps(METATUBE_MISMATCH).encode(), "", 200
-            if "/search" in url:
-                return JAVTXT_SEARCH_EMPTY.encode(), "", 200        # javtxt 0 命中
-            raise AssertionError("0 命中时不该抓 Javtxt 详情")
-
-        _patch_fetch(monkeypatch, fake_get)
-        monkeypatch.setattr(scraper, "javdb_assets", lambda *a, **k: [])
-        report = scraper.preview_one("SNOS-380", store=FakeStore(),
-                                     cli=FakeCli(detail=dict(JAVDB_DETAIL, title="日文标题")),
-                                     emby_client=None, opts=self._opts())
-        assert any("串号拦截" in w for w in report["warnings"])
-        assert report["sources"]["metatube"]["status"] == "mismatch"
-        assert report["sources"]["metatube"]["candidates"] == 2
-        assert report["completeness"] == "missing_plot"      # 有标题没中文简介
 
     def test_preview_degrades_without_translator(self, scraper, monkeypatch):
         """`translator.py` 未落地 → 只用原文，`untranslated`，且不编造中文。"""
@@ -2078,12 +1962,10 @@ class TestFilmView:
 
 class TestSelfcheck:
 
-    def test_four_sources(self, scraper, store_mod, tmp_path, monkeypatch):
+    def test_three_sources(self, scraper, store_mod, tmp_path, monkeypatch):
         store = make_store(store_mod, tmp_path)
 
         def fake_get(url, **kwargs):
-            if "/v1/movies/search" in url:
-                return b'{"data": []}', "", 200
             if "/search" in url:
                 return JAVTXT_SEARCH_HTML.encode(), "", 200
             if "/v/" in url:
@@ -2093,17 +1975,15 @@ class TestSelfcheck:
         _patch_fetch(monkeypatch, fake_get)
         rows = scraper.sources_selfcheck(store, FakeCli(detail=JAVDB_DETAIL),
                                         {"javtxt_interval": 0,
-                                         "javtxt_hosts": ("https://j.test",),
-                                         "metatube_base": "http://mt:8080"})
-        assert [row["source"] for row in rows] == ["javdb", "javtxt", "metatube", "llm"]
+                                         "javtxt_hosts": ("https://j.test",)})
+        assert [row["source"] for row in rows] == ["javdb", "javtxt", "llm"]
         for row in rows:
             assert set(row) >= {"source", "status", "latency_ms", "error", "checked_at"}
         assert rows[0]["status"] == "ok" and rows[0]["latency_ms"] >= 0
         assert rows[1]["status"] == "ok" and rows[1]["detail"]["plot_zh_len"] > 0
-        assert rows[2]["status"] == "miss"
-        assert rows[3]["status"] in ("skipped", "ok", "error")     # translator 未落地=skipped
+        assert rows[2]["status"] in ("skipped", "ok", "error")     # translator 未落地=skipped
         summary = {row["source"]: row for row in store.scrape_log_summary()}
-        assert {"javdb", "javtxt", "metatube", "llm"} <= set(summary)
+        assert {"javdb", "javtxt", "llm"} <= set(summary)
 
     def test_probe_scope_follows_the_graph(self, scraper, store_mod, tmp_path, monkeypatch):
         """P1-3：探测范围 = **取数图里启用的来源** —— 用户关掉的源不探。"""
@@ -2112,22 +1992,8 @@ class TestSelfcheck:
         rows = scraper.sources_selfcheck(store, FakeCli(detail=JAVDB_DETAIL),
                                          {"javtxt_interval": 0,
                                           "javtxt_hosts": ("https://j.test",),
-                                          "metatube_base": "http://mt:8080",
                                           "plot_sources": ("javtxt",)})   # 只开 javtxt
         assert [row["source"] for row in rows] == ["javdb", "javtxt", "llm"]
-
-    def test_unconfigured_metatube_is_skipped_not_failed(self, scraper, store_mod, tmp_path,
-                                                         monkeypatch):
-        """★ 未配置 ≠ 不可达：地址留空时是 `skipped`（零耗时、error 空），不是一条红行。"""
-        store = make_store(store_mod, tmp_path)
-        rows = scraper.sources_selfcheck(store, FakeCli(detail=JAVDB_DETAIL),
-                                         {"javtxt_interval": 0,
-                                          "javtxt_hosts": ("https://j.test",),
-                                          "metatube_base": ""})
-        row = {r["source"]: r for r in rows}["metatube"]
-        assert row["status"] == "skipped"
-        assert row["latency_ms"] == 0 and row["error"] == ""
-        assert "未配置" in row["detail"]["why"]
 
     def test_missing_translator_is_skipped_with_why(self, scraper, store_mod, tmp_path,
                                                     monkeypatch):
@@ -2570,78 +2436,6 @@ class TestSyncActorAvatars:
                                         "images": [url]}]}).encode()
         return lambda *args, **kwargs: (payload, "", 200)
 
-    def test_gfriends_name_must_match(self, scraper, store_mod, tmp_path, monkeypatch, nomap):
-        """★ 上游回了个**别人**：宁可不要头像，也绝不挂错人。
-
-        （真实教训来自番号查询那条端点：MetaTube `/v1/movies/search` 查不到时会回随机结果。
-        Gfriends 这条目前是精确的，但头像挂错人的代价太大，值得一道显式校验。）
-        """
-        store = self._seed_store(store_mod, tmp_path, [
-            {"name": "A", "jp": "A", "avatar": "https://tp.spfcas.com/a.jpg", "gender": 0}])
-        emby = self._persons({"A": {"Id": "9", "ImageTags": {}}})
-        monkeypatch.setattr(scraper, "_metatube_fetch",
-                            self._gfriends_hit(name="完全不相干的别人"))
-        report = scraper.sync_actor_avatars(store, emby, dry_run=True, namemap_mod=nomap,
-                                            opts={"metatube_base": "http://mt:8080"})
-        assert report["planned"][0]["source"] == "javdb"      # 回落 javdb，不用错图
-        assert report["ok"] is True and report["errors"] == []
-
-    def test_gfriends_name_tolerates_wrapping_form(self, scraper):
-        """宽松匹配：括号 / 简体名包住日文原名都算对得上（真机 `七森莉莉（七ツ森りり）` 那种）。"""
-        assert scraper._same_actor_name("七ツ森りり", "七ツ森りり")
-        assert scraper._same_actor_name("七森莉莉（七ツ森りり）", "七ツ森りり")
-        assert scraper._same_actor_name("さくらわかな", "さくらわかな")
-        assert not scraper._same_actor_name("三上悠亜", "松本いちか")
-        assert not scraper._same_actor_name("", "松本いちか")
-
-    def test_gfriends_beats_javdb_thumbnail(self, scraper, store_mod, tmp_path,
-                                            monkeypatch, nomap):
-        """两源都有图时必须挑 **Gfriends**（javdb 那张是列表缩略图）。"""
-        store = self._seed_store(store_mod, tmp_path, [
-            {"name": "A", "jp": "A", "avatar": "https://tp.spfcas.com/small100.jpg",
-             "gender": 0}])
-        emby = self._persons({"A": {"Id": "9", "ImageTags": {}}})
-        monkeypatch.setattr(scraper, "_metatube_fetch", self._gfriends_hit())
-        seen: list = []
-
-        class Proxy:
-            @staticmethod
-            def fetch(url, proxy=""):
-                seen.append(url)
-                return b"\xff\xd8\xffjpeg"
-
-        monkeypatch.setattr(scraper, "imgproxy", Proxy)
-        report = scraper.sync_actor_avatars(store, emby, dry_run=False, namemap_mod=nomap,
-                                            opts={"metatube_base": "http://mt:8080"})
-        assert report["planned"][0]["source"] == "gfriends"
-        assert seen == ["https://raw.githubusercontent.com/x/gfriends/1.jpg"]
-        assert report["ok"] is True and emby.calls["upload_image"] == 1
-
-    def test_gfriends_not_found_falls_back_to_javdb(self, scraper, store_mod, tmp_path,
-                                                    monkeypatch, nomap):
-        """Gfriends 404 = 该演员不在 Gfriends（**不是错误**）→ 回落 javdb。"""
-        store = self._seed_store(store_mod, tmp_path, [
-            {"name": "A", "jp": "A", "avatar": "https://tp.spfcas.com/a.jpg", "gender": 0}])
-        emby = self._persons({"A": {"Id": "9", "ImageTags": {}}})
-        monkeypatch.setattr(scraper, "_metatube_fetch", lambda *a, **k: (None, "nf", 404))
-        report = scraper.sync_actor_avatars(store, emby, dry_run=True, namemap_mod=nomap,
-                                            opts={"metatube_base": "http://mt:8080"})
-        assert report["planned"][0]["source"] == "javdb"
-        assert report["ok"] is True and report["errors"] == []
-
-    def test_gfriends_error_is_not_a_failure(self, scraper, store_mod, tmp_path,
-                                             monkeypatch, nomap):
-        """Gfriends 查询报错也不算失败：javdb 有图就照用，只在 `gfriends` 里留一句实话。"""
-        store = self._seed_store(store_mod, tmp_path, [
-            {"name": "A", "jp": "A", "avatar": "https://tp.spfcas.com/a.jpg", "gender": 0}])
-        emby = self._persons({"A": {"Id": "9", "ImageTags": {}}})
-        monkeypatch.setattr(scraper, "_metatube_fetch", lambda *a, **k: (None, "boom", 400))
-        report = scraper.sync_actor_avatars(store, emby, dry_run=True, namemap_mod=nomap,
-                                            opts={"metatube_base": "http://mt:8080"})
-        assert report["planned"][0]["source"] == "javdb"
-        assert report["ok"] is True and report["errors"] == []
-        assert "Gfriends" in report["planned"][0]["gfriends"]
-
     def test_gender_unknown_still_syncs(self, scraper, store_mod, tmp_path, monkeypatch, nomap):
         """存量行没有 gender 也必须能传头像（老代码在这里整批丢掉）。"""
         store = self._seed_store(store_mod, tmp_path, [
@@ -2694,104 +2488,30 @@ class TestSyncActorAvatars:
 # 16. MetaTube 只读提取器（S0b 字段真名）
 # ---------------------------------------------------------------------------
 
-class TestMetatubeMapping:
-    """S0b 130 次真机探测给的字段真名表 —— 别按 javdb 的名字读 MetaTube。"""
-
-    ITEM = {
-        "id": "midv00946", "number": "MIDV-946", "provider": "JAV321",
-        "title": "日文标题", "summary": "",          # 实测：真正命中的条目 summary 恒为空串
-        "maker": "MOODYZ", "runtime": 118, "genres": ["巨乳", "単体作品"],
-        "director": "監督さん", "preview_video_url": "https://x/t.m3u8",
-        "preview_images": ["https://x/1.jpg", "https://x/2.jpg"],
-        "release_date": "2024-11-29T00:00:00Z",
-        "cover_url": "https://x/c.jpg", "thumb_url": "https://x/t.jpg",
-        "actors": ["石川澪"],
-    }
-
-    def test_field_names(self, scraper):
-        movie = scraper.metatube_movie(self.ITEM)
-        assert movie["maker"] == "MOODYZ"                    # 不是 studio
-        assert movie["runtime"] == 118                       # 不是 duration
-        assert movie["genres"] == ["巨乳", "単体作品"]        # 不是 tags
-        assert movie["preview_images"] == ["https://x/1.jpg", "https://x/2.jpg"]   # []string
-        assert movie["release_date"] == "2024-11-29"          # ISO 串切成日期
-        assert movie["actors"] == ["石川澪"]                  # 纯名字，没有头像
-        assert movie["summary"] == ""
-
-    def test_empty_summary_still_usable(self, scraper, monkeypatch):
-        """`summary` 空不代表这次调用白费：标题/片商/时长/封面都是可用的。"""
-        _patch_fetch(monkeypatch,
-                            lambda url, **k: (json.dumps({"data": [self.ITEM]}).encode(),
-                                              "", 200))
-        got = scraper.metatube_lookup({"metatube_base": "http://mt:8080"}, "MIDV-946")
-        assert got["status"] == "ok" and got["plot_jp"] == ""
-        assert got["movie"]["maker"] == "MOODYZ"
-
-    def test_fill_only_fills_empties(self, scraper):
-        skeleton = {"title_jp": "javdb 的标题", "maker": "", "duration": 0,
-                    "actors": [{"id": "a", "name": "javdb 演员"}],
-                    "tags": [], "cover_url": ""}
-        filled = scraper.metatube_fill(skeleton, scraper.metatube_movie(self.ITEM))
-        assert skeleton["title_jp"] == "javdb 的标题"          # 绝不覆盖
-        assert skeleton["maker"] == "MOODYZ" and skeleton["duration"] == 118
-        assert skeleton["cover_url"] == "https://x/c.jpg"
-        assert skeleton["actors"] == [{"id": "a", "name": "javdb 演员"}]
-        assert "title_jp" not in filled and "maker" in filled and "duration" in filled
-
-    def test_search_only_uses_q_param(self, scraper, monkeypatch):
-        """永远用默认 lazy=true、永远不带 provider 参数（S0b：lazy=false 7/7 全 500）。"""
-        seen = {}
-
-        def fake_get(url, **kwargs):
-            seen["url"] = url
-            return json.dumps({"data": [self.ITEM]}).encode(), "", 200
-
-        _patch_fetch(monkeypatch, fake_get)
-        scraper.metatube_lookup({"metatube_base": "http://mt:8080"}, "MIDV-946")
-        assert seen["url"] == "http://mt:8080/v1/movies/search?q=MIDV-946"
-        assert "lazy" not in seen["url"] and "provider" not in seen["url"]
-
-
 class TestGatherOrder:
-    """S0b 的性能纪律：Javtxt 拿到简介时**不再打 MetaTube**（每次省 10 秒）。"""
+    """0.8.1：取数链只剩 javdb → javtxt，再没有"第二个很贵的源"要跳过了。
 
-    def _count(self, scraper, monkeypatch, javtxt_hits=True):
-        """假 HTTP + MetaTube 调用计数；`javtxt_hits=False` 时 javtxt 落空。"""
-        hits = {"metatube": 0}
+    这条用例守的是**不该出现的请求**：javtxt 命中时，除了 javdb 子进程与 javtxt 的
+    search/detail，一个出站请求都不许有（MetaTube 时代每次省 10 秒，现在是"别偷偷回退"）。
+    """
+
+    def test_javtxt_hit_is_the_final_source(self, scraper, monkeypatch):
+        calls = []
 
         def fake_get(url, **kwargs):
-            if "/v1/movies/search" in url:
-                hits["metatube"] += 1
-                return json.dumps({"data": []}).encode(), "", 200
+            calls.append(url)
             if "/search" in url:
-                return (JAVTXT_SEARCH_HTML if javtxt_hits
-                        else JAVTXT_SEARCH_EMPTY).encode(), "", 200
+                return JAVTXT_SEARCH_HTML.encode(), "", 200
             return JAVTXT_DETAIL_HTML.encode(), "", 200
 
         _patch_fetch(monkeypatch, fake_get)
-        return hits
-
-    def test_javtxt_hit_skips_metatube(self, scraper, monkeypatch):
-        """★ S0b 性能纪律：Javtxt 命中就绝不打 MetaTube（每次省 10 秒）。"""
-        hits = self._count(scraper, monkeypatch, javtxt_hits=True)
-        target = scraper.gather(FakeCli(detail=JAVDB_DETAIL), FakeStore(), "SNOS380",
-                                "SNOS-380",
+        target = scraper.gather(FakeCli(detail=JAVDB_DETAIL), FakeStore(), "SNOS380", "SNOS-380",
                                 opts={"javtxt_interval": 0, "javtxt_hosts": ("https://j.test",),
-                                      "metatube_base": "http://mt:8080", "write_images": False})
+                                      "write_images": False})
         assert target["plot_zh"] and target["plot_jp"]        # 中日简介都来自 Javtxt 详情页
         assert target["sources"]["javtxt"]["status"] == "ok"
-        assert hits["metatube"] == 0
-        assert target["sources"]["metatube"]["status"] == "skipped"
-
-    def test_metatube_called_when_plot_missing(self, scraper, monkeypatch):
-        hits = self._count(scraper, monkeypatch, javtxt_hits=False)
-        target = scraper.gather(FakeCli(detail=dict(JAVDB_DETAIL, title="日文标题")), FakeStore(),
-                                "SNOS380", "SNOS-380",
-                                opts={"javtxt_interval": 0, "javtxt_hosts": ("https://j.test",),
-                                      "metatube_base": "http://mt:8080", "write_images": False})
-        assert hits["metatube"] == 1
-        assert target["sources"]["metatube"]["status"] == "miss"
-        assert target["completeness"] == "missing_plot"
+        assert set(target["sources"]) == {"javdb", "javtxt", "llm"}
+        assert all("/v1/movies" not in url for url in calls)
 
 
 class TestFieldSources:
@@ -2815,12 +2535,7 @@ class TestFieldSources:
         assert set(src) <= set(scraper.scrape_graph.FIELDS)
 
     def test_javtxt_owns_the_chinese_fields(self, scraper, monkeypatch):
-        hits = {"metatube": 0}
-
         def fake_get(url, **kwargs):
-            if "/v1/movies/search" in url:
-                hits["metatube"] += 1
-                return json.dumps({"data": []}).encode(), "", 200
             if "/search" in url:
                 return JAVTXT_SEARCH_HTML.encode(), "", 200
             return JAVTXT_DETAIL_HTML.encode(), "", 200
@@ -2828,37 +2543,11 @@ class TestFieldSources:
         _patch_fetch(monkeypatch, fake_get)
         target = scraper.gather(FakeCli(detail=JAVDB_DETAIL), FakeStore(), "SNOS380", "SNOS-380",
                                 opts={"javtxt_interval": 0, "javtxt_hosts": ("https://j.test",),
-                                      "metatube_base": "http://mt:8080", "write_images": False})
+                                      "write_images": False})
         src = target["field_sources"]
         assert src["title_zh"] == "javtxt" and src["plot_zh"] == "javtxt"
         assert src["plot_jp"] == "javtxt"          # 日文简介也来自它（javdb 那边是空的）
         assert src["title_jp"] == "javdb"          # 中文站不抢骨架字段
-        assert hits["metatube"] == 0               # 已经拿到简介 → 不花那 10 秒
-        assert "metatube" not in src.values()
-
-    def test_metatube_marks_what_it_filled(self, scraper, monkeypatch):
-        item = json.loads(json.dumps(TestMetatubeMapping.ITEM))
-        item["number"] = "SNOS-380"
-
-        def fake_get(url, **kwargs):
-            if "/v1/movies/search" in url:
-                return json.dumps({"data": [item]}).encode(), "", 200
-            if "/search" in url:
-                return JAVTXT_SEARCH_HTML.encode(), "", 200
-            return JAVTXT_DETAIL_HTML.encode(), "", 200
-
-        _patch_fetch(monkeypatch, fake_get)
-        target = scraper.gather(FakeCli(detail=None, error="javdb 挂了"), FakeStore(),
-                                "SNOS380", "SNOS-380",
-                                opts={"javtxt_interval": 0,
-                                      "javtxt_hosts": ("https://j.test",),
-                                      "metatube_base": "http://mt:8080",
-                                      "write_images": False})
-        src = target["field_sources"]
-        assert src["title_jp"] == "metatube"       # javdb 没给标题，MetaTube 补的
-        assert src["studio"] == "metatube"         # `metatube_fill()` 的 filled 清单驱动
-        assert src["duration"] == "metatube"
-        assert src["plot_zh"] == "javtxt"          # 中文简介仍然是 javtxt 的（只补空）
 
     def test_llm_marks_the_translation(self, scraper, monkeypatch):
         def fake_get(url, **kwargs):
@@ -2923,31 +2612,6 @@ class TestFieldSources:
         # 没有 field_sources 的老调用方照常工作（参数可选）
         assert all("source" in row for row in scraper.field_diff({}, overrides))
 
-    def test_javdb_failure_still_triggers_metatube_core_fallback(self, scraper, monkeypatch):
-        """契约 §5.2：核心骨架第二顺位是 MetaTube，**仅在 javdb 失败时启用**。"""
-        item = json.loads(json.dumps(TestMetatubeMapping.ITEM))
-        item["number"] = "SNOS-380"
-
-        def fake_get(url, **kwargs):
-            if "/v1/movies/search" in url:
-                return json.dumps({"data": [item]}).encode(), "", 200
-            if "/search" in url:
-                return JAVTXT_SEARCH_HTML.encode(), "", 200
-            return JAVTXT_DETAIL_HTML.encode(), "", 200
-
-        _patch_fetch(monkeypatch, fake_get)
-        target = scraper.gather(FakeCli(detail=None, error="javdb 挂了"), FakeStore(),
-                                "SNOS380", "SNOS-380",
-                                opts={"javtxt_interval": 0,
-                                      "javtxt_hosts": ("https://j.test",),
-                                      "metatube_base": "http://mt:8080",
-                                      "write_images": False})
-        assert target["sources"]["javdb"]["status"] == "error"
-        assert target["studio"] == "MOODYZ"                 # 从 MetaTube 的 maker 补上
-        assert target["duration"] == 118
-        assert "MetaTube 补上了" in " ".join(target["warnings"])
-
-
 class TestSiteSnapshot:
     """P0-3：逐站快照 + 只重算不重抓 + 段间注入。
 
@@ -2998,35 +2662,6 @@ class TestSiteSnapshot:
         assert second["sources"]["javtxt"]["from_cache"] is True
         assert second["field_sources"]["plot_zh"] == "javtxt"
 
-    def test_metatube_snapshot_reused(self, scraper, store_mod, tmp_path, monkeypatch):
-        store = make_store(store_mod, tmp_path)
-        item = json.loads(json.dumps(TestMetatubeMapping.ITEM))
-        item["number"] = "SNOS-380"
-        calls = {"mt": 0}
-
-        def fake_get(url, **kwargs):
-            if "/v1/movies/search" in url:
-                calls["mt"] += 1
-                return json.dumps({"data": [item]}).encode(), "", 200
-            return JAVTXT_SEARCH_EMPTY.encode(), "", 200     # javtxt 落空 → 走 MetaTube
-
-        _patch_fetch(monkeypatch, fake_get)
-        # javdb 故意失败：这样 MetaTube 的 `studio`/`duration` 才填得进来（它只补空）
-        first = scraper.gather(FakeCli(detail=None, error="javdb 挂了"), store, "SNOS380",
-                               "SNOS-380", opts=self._opts())
-        assert calls["mt"] == 1
-        assert first["studio"] == "MOODYZ"
-        assert store.snapshot_get("SNOS380", "metatube")["status"] == "ok"
-
-        _patch_fetch(monkeypatch, self._boom)
-        second = scraper.gather(FakeCli(detail=None, error="javdb 挂了"), store, "SNOS380",
-                                "SNOS-380",
-                                opts=self._opts(use_cache=("javtxt", "metatube")))
-        assert calls["mt"] == 1                     # 没有第二次调用
-        assert second["sources"]["metatube"]["from_cache"] is True
-        assert second["studio"] == "MOODYZ" and second["duration"] == 118
-        assert second["field_sources"]["studio"] == "metatube"
-
     def test_failed_snapshot_is_not_reused(self, scraper, store_mod, tmp_path, monkeypatch):
         """被拦/超时那次的快照**不复用**（它只说明"当时不行"，下次要真重试）。"""
         store = make_store(store_mod, tmp_path)
@@ -3070,56 +2705,19 @@ class TestSiteSnapshot:
         assert store.snapshot_stats()["rows"] == 0
         assert store.scrape_log_recent(limit=5) == []
 
-    def test_partial_injection_lists_phase_one_fields(self, scraper, monkeypatch):
-        """段间注入：第二段的源能读到第一段**已定值**的字段（只读，今天记在 `partial_keys`）。"""
-        _patch_fetch(monkeypatch, lambda url, **k: (
-            JAVTXT_SEARCH_EMPTY.encode() if "/search" in url
-            else json.dumps({"data": []}).encode(), "", 200))
-        target = scraper.gather(FakeCli(detail=JAVDB_DETAIL), FakeStore(), "SNOS380", "SNOS-380",
-                                opts=self._opts())
-        keys = target["metatube_meta"]["partial_keys"]
-        assert "display_number" in keys and "title_jp" in keys and "cover_url" in keys
-        assert "plot_zh" not in keys                 # 第一段没拿到中文简介（javtxt 落空）
-
-
 class TestChainEnforcement:
-    """P0-1 收口：**链是用来裁决的** —— 字段黑名单/优先级必须真的改到取数结果。
+    """P0-1 收口：**链是用来裁决的** —— 字段黑名单必须真的改到取数结果。
 
     之前 `compile_chain()` 的结果只在 `describe()`/自检里用，填值的代码一点不看；
     于是设置台上那两块"字段择优"写了等于没写（P0-4 写回放用例时才发现）。
+    0.8.1 只剩两个源，优先级（"留给执行顺序更晚的源"）没有可表达的场合，只留黑名单路径。
     """
 
     def _opts(self, **extra):
         base = {"javtxt_interval": 0, "javtxt_hosts": ("https://j.test",),
-                "metatube_base": "http://mt:8080", "write_images": False}
+                "write_images": False}
         base.update(extra)
         return base
-
-    def _javdb_fails(self, monkeypatch, item=None):
-        item = item or json.loads(json.dumps(TestMetatubeMapping.ITEM))
-        item["number"] = "SNOS-380"
-        item["maker"] = "MetaTube 片商"
-
-        def fake_get(url, **kwargs):
-            if "/v1/movies/search" in url:
-                return json.dumps({"data": [item]}).encode(), "", 200
-            if "/search" in url:
-                return JAVTXT_SEARCH_EMPTY.encode(), "", 200
-            return b"", "", 404
-
-        _patch_fetch(monkeypatch, fake_get)
-        return item
-
-    def test_blacklist_keeps_javdb_out_of_a_field(self, scraper, monkeypatch):
-        """`field_blacklist={"studio":["javdb"]}` → studio 改由 MetaTube 给。"""
-        self._javdb_fails(monkeypatch)
-        plain = scraper.gather(FakeCli(detail=None, error="javdb 挂了"), FakeStore(),
-                               "SNOS380", "SNOS-380", opts=self._opts())
-        assert plain["field_sources"]["studio"] == "metatube"
-        # javdb 正常时默认由 javdb 给 studio；把它拉黑后才轮得到 MetaTube
-        blocked = scraper.gather(FakeCli(detail=JAVDB_DETAIL), FakeStore(), "SNOS380", "SNOS-380",
-                                 opts=self._opts(field_blacklist={"studio": ["javdb"]}))
-        assert blocked["field_sources"]["studio"] == "metatube"
 
     def test_blacklist_removes_a_field_from_javtxt(self, scraper, monkeypatch):
         """`field_blacklist={"plot_zh":["javtxt"]}` → 中文简介不再由 javtxt 给（宁可空着）。"""
@@ -3133,15 +2731,6 @@ class TestChainEnforcement:
                                  opts=self._opts(field_blacklist={"plot_zh": ["javtxt"]}))
         assert blocked["field_sources"].get("plot_zh") != "javtxt"
         assert blocked["plot_zh"] == ""
-
-    def test_priority_defers_to_the_later_source(self, scraper, monkeypatch):
-        """`field_priority={"plot_zh":["metatube"]}` → javtxt 这次先别填（留给 MetaTube）。"""
-        _patch_fetch(monkeypatch, lambda url, **k: (
-            JAVTXT_SEARCH_HTML.encode() if "/search" in url else JAVTXT_DETAIL_HTML.encode(),
-            "", 200))
-        view = scraper.gather(FakeCli(detail=JAVDB_DETAIL), FakeStore(), "SNOS380", "SNOS-380",
-                              opts=self._opts(field_priority={"plot_zh": ["metatube"]}))
-        assert view["field_sources"].get("plot_zh") != "javtxt"
 
     def test_default_chain_changes_nothing(self, scraper, monkeypatch):
         """默认链（链顺序 == 执行顺序）下 `may_fill()` 恒真 —— 行为与引入取数图之前一致。"""
@@ -3160,18 +2749,16 @@ class TestReplayRun:
 
     def _opts(self, **extra):
         base = {"javtxt_interval": 0, "javtxt_hosts": ("https://j.test",),
-                "metatube_base": "http://mt:8080", "write_images": False}
+                "write_images": False}
         base.update(extra)
         return base
 
     def _record(self, scraper, store, monkeypatch):
-        """真抓一轮（javdecode + javtxt + MetaTube），把现场落进快照。"""
+        """真抓一轮（javdb + javtxt），把现场落进快照。"""
         calls = []
 
         def fake_get(url, **kwargs):
             calls.append(url)
-            if "/v1/movies/search" in url:
-                return json.dumps({"data": []}).encode(), "", 200
             if "/search" in url:
                 return JAVTXT_SEARCH_HTML.encode(), "", 200
             return JAVTXT_DETAIL_HTML.encode(), "", 200
@@ -3197,9 +2784,8 @@ class TestReplayRun:
             AssertionError(f"回放不该发请求：{url}")))
         view = scraper.replay_run("SNOS380", store, number="SNOS-380", opts=self._opts())
         assert view["ok"] is True
-        # javdb 骨架够全 → 第一轮根本没问 MetaTube，所以回放里它"没有现场"。
-        # `missing` 就是这个意思：**它在这次回放里不可信**，不是"回放失败"。
-        assert view["missing"] == ["metatube"]
+        # 两个源都有现场 → 回放没有"不可信"的源
+        assert view["missing"] == []
         assert set(view["snapshots"]) == {"javdb", "javtxt"}
         assert view["target"]["plot_zh"] == first["plot_zh"]
         assert view["target"]["title_jp"] == first["title_jp"]
@@ -3218,28 +2804,11 @@ class TestReplayRun:
     def test_replay_reflects_rule_changes(self, scraper, store_mod, tmp_path, monkeypatch):
         """回放的意义就在这条：**同一份现场数据、改规则 → 结果跟着变**。"""
         store = make_store(store_mod, tmp_path)
-        # 现场：javtxt 有中文简介、MetaTube 有日文（两者都落进快照）
-        item = json.loads(json.dumps(TestMetatubeMapping.ITEM))
-        item["number"] = "SNOS-380"
-        item["summary"] = "MetaTube 的日文简介"
-
-        def fake_get(url, **kwargs):
-            if "/v1/movies/search" in url:
-                return json.dumps({"data": [item]}).encode(), "", 200
-            if "/search" in url:
-                return JAVTXT_SEARCH_HTML.encode(), "", 200
-            return JAVTXT_DETAIL_HTML.encode(), "", 200
-
-        _patch_fetch(monkeypatch, fake_get)
-        first = scraper.gather(FakeCli(detail=JAVDB_DETAIL), store, "SNOS380", "SNOS-380",
-                               opts=self._opts())
+        first, _calls = self._record(scraper, store, monkeypatch)
         assert first["field_sources"]["plot_zh"] == "javtxt"
-        # 改规则：中文简介先问 MetaTube（它的中文要经 LLM，但回放里 LLM 不在链上）
         view = scraper.replay_run(
             "SNOS380", store, number="SNOS-380",
-            opts=self._opts(field_priority={"plot_zh": ["metatube"]},
-                            field_blacklist={"plot_zh": ["javtxt"]}))
-        assert "javtxt" not in view["sources"]["javtxt"].get("status", "")  # 源记录还在
+            opts=self._opts(field_blacklist={"plot_zh": ["javtxt"]}))
         assert view["field_sources"].get("plot_zh") != "javtxt"
 
     def test_replay_without_snapshots_says_so(self, scraper, store_mod, tmp_path):
@@ -3301,17 +2870,6 @@ class TestBlockCooldown:
             {"javtxt_interval": 0, "javtxt_hosts": ("https://a.test", "https://b.test")},
             "SNOS-380", store=FakeStore(), key="SNOS380")
         assert seen and all("a.test" not in url for url in seen)
-
-    def test_metatube_cooling(self, scraper, monkeypatch):
-        """MetaTube 同样：200 的拦截页 → 记冷却 → 下一次跳过。"""
-        _patch_fetch(monkeypatch, lambda url, **k: (self.CHALLENGE.encode(), "", 200))
-        opts = {"metatube_base": "http://mt.test:8080"}
-        first = scraper.metatube_lookup(opts, "SNOS-380", store=FakeStore(), key="SNOS380")
-        assert first["status"] == "error" and first["reason"] == scraper.REASON_CF_CHALLENGE
-        assert scraper.host_cooling("mt.test") > 0
-        _patch_fetch(monkeypatch, self_boom())
-        second = scraper.metatube_lookup(opts, "SNOS-380", store=FakeStore(), key="SNOS380")
-        assert second["status"] == "skipped" and "冷却" in second["error"]
 
     def test_gather_warns_when_javtxt_cooling(self, scraper, monkeypatch):
         """冷却时 `gather` 的告警要说清"是冷却，不是站点没收录"。"""
@@ -3675,11 +3233,9 @@ class TestCacheOnly:
         cli = self._boom(scraper, monkeypatch)
         target = scraper.gather(cli, FakeStore(), "SNOS380", "SNOS-380",
                                 opts={"fetch_cache": cache, "cache_only": True,
-                                      "metatube_base": "http://mt:8080",
                                       "write_images": False})
         assert target["sources"]["javdb"]["status"] == "cache_miss"
         assert target["sources"]["javtxt"]["status"] == "miss"
-        assert target["sources"]["metatube"]["status"] == "skipped"
         assert target["sources"]["llm"]["status"] == "skipped"
         assert target["completeness"] == "missing_core"
 

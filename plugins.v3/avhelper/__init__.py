@@ -411,8 +411,6 @@ def _source_list(rule: Dict[str, Any]) -> List[str]:
     out = set(scrape_graph.ALWAYS_ON)
     if pick_bool(rule.get("plotJavtxt"), True):
         out.add("javtxt")
-    if pick_bool(rule.get("plotMetatube"), True):
-        out.add("metatube")
     return sorted(out)
 
 
@@ -438,16 +436,13 @@ class AVHelper(_PluginBase):
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
     plugin_icon = ("https://raw.githubusercontent.com/ssmengyan/"
                    "MoviePilot-Plugins-AV/main/icons/avhelper.png")
-    # 版本：0.8.0 = 两条并行的 0.7.4 线汇合 + 后台按 amane 的运维纪律重构
+    # 版本：0.8.1 = MetaTube 整体下线（取数链只剩 javdb → javtxt，Gfriends 头像源一并去掉）
+    # + 图片缓存原子写（并发刮削不再留半截图）+ 失败原因补「需要登录」+ SQLite 慢盘韧性
+    # （busy_timeout 30s / locked 退避重试 / 慢 SQL 日志）
+    # 0.8.0 = 两条并行的 0.7.4 线汇合 + 后台按 amane 的运维纪律重构
     # （失败原因闭枚举 + 单一记账点 + 单一出站函数、声明式取数图、逐站快照、限流单一执行点、
     #  /img ETag、迁移与索引纪律）
-    # + 0.7.4 刮削线：手动刮削改「点开影片自己挑字段」、修「未刮削」恒空、头像换高清源
-    # + 0.7.4 下载线：下载页三出口（取消下载 / 换资源 / 不要了）+ 读侧统一落地到下载页
-    # （队列行挂影片标题、速度与剩余时间；「下载中」徽标）+ 界面减负（删永远为空的「已完成」节、
-    #  去掉重复的小节标题与工具条说明句）
-    # + 0.7.3/0.7.2 基座：自建刮削层（0.7.0 起：番号解析/中文简介/翻译/封面裁切/Emby 安全写入与回滚）、
-    # 演员三显示项、列表翻页、刮削台去裁切锚点与回滚入口、设置台去裁切锚点
-    plugin_version = "0.8.0"
+    plugin_version = "0.8.1"
     plugin_label = "发现"
     plugin_author = "ssmengyan"
     plugin_config_prefix = "avhelper_"
@@ -517,7 +512,7 @@ class AVHelper(_PluginBase):
         self._store = Store()
         self._store.init()
         self._limiter = RateLimiter(self._store)
-        # P1-2：把限流器交给刮削线 —— 元数据取数（javtxt / MetaTube）与 PT 搜索**共用同一个
+        # P1-2：把限流器交给刮削线 —— 元数据取数（javtxt）与 PT 搜索**共用同一个
         # 执行点**（每 host 漏桶 + 被拦后的 host 冷却），不再是两套互不知道的节流。
         self._wire_limiter()
         self._notifier = Notifier(self, self._store)
@@ -1087,15 +1082,17 @@ class AVHelper(_PluginBase):
         老用户在 0.6.3 存下的规则里没有这些键，照样不能报错。`merge_rule()` 不认识也会
         原样透传（它只补默认 + 夹限流两项），所以 `/rule` POST 写进来的这些键能存住。
 
-        键名一个字母都不许改（前端按这套读）：`scrapeMode` / `plotJavtxt` / `plotMetatube` /
+        键名一个字母都不许改（前端按这套读）：`scrapeMode` / `plotJavtxt` /
         `translateModel` / `translateModelFallback` / `trailerMode` /
         `autoScrapeTier1` / `autoScrapeTier2` / `cleanSuffixes` / `nameTemplate` /
-        `metatubeBase`（0.7.0 加：MetaTube 服务地址，**代码里不写死**，留空 = 不做 MetaTube 兜底）/
         `defaultRateLimit` + `rateLimits`（0.8.0 加，P1-2：每 host 请求间隔与逐 host/站点覆盖）。
+
+        ⚠️ 0.8.1：`plotMetatube` / `metatubeBase` 两个键**已下线**（MetaTube 整体停用）；
+        老规则里还留着它们也不报错，只是不再参与任何决策。
 
         ⚠️ **这两个限流键只改"调用方没显式给间隔"的那条路**：javtxt 的调用点仍固定传
         `JAVTXT_MIN_INTERVAL=2.0`（政策硬要求 ≥2s），所以用户把默认间隔调到 0.5 也不会
-        让 javtxt 变快 —— 只影响新增源与 MetaTube 这类没写死间隔的调用。
+        让 javtxt 变快 —— 只影响没写死间隔的调用。
         """
         rule = self.global_rule() or {}
         suffixes = rule.get("cleanSuffixes")
@@ -1105,8 +1102,6 @@ class AVHelper(_PluginBase):
             # P1-5：`sources` 是启用源的新真值；两个布尔是 0.7.x 的旧键，**由它派生**（兼容老前端）
             "sources": sources,
             "plotJavtxt": "javtxt" in sources,
-            "plotMetatube": "metatube" in sources,
-            "metatubeBase": str(rule.get("metatubeBase") or "").strip(),
             "translateModel": str(rule.get("translateModel") or "").strip() or "hy3",
             "translateModelFallback": (str(rule.get("translateModelFallback") or "").strip()
                                        or "deepseek-v4.1-flash"),
@@ -2894,9 +2889,8 @@ class AVHelper(_PluginBase):
         并把驼峰键**映射成 scraper 认的下划线键**。
 
         ★ 0.7.0 修的集成缺口：`scraper._opt()` 按**字面键名**取值，而设置台存的是驼峰
-        （`plotJavtxt` / `plotMetatube` / `metatubeBase`），scraper 读的是下划线
-        （`plot_sources` / `metatube_base`）。没有这层映射，界面上的开关与
-        地址**全部静默失效**（永远走 `DEFAULT_OPTS`）。驼峰键原样保留无害，别删 ——
+        （`plotJavtxt`），scraper 读的是下划线（`plot_sources`）。没有这层映射，界面上的
+        开关**静默失效**（永远走 `DEFAULT_OPTS`）。驼峰键原样保留无害，别删 ——
         契约里 `opts` 的形状就是这样透传的。
         ★ 0.7.2：`crop_anchor` **不再**从这里映射（设置台的裁切锚点项已删）—— 锚点固定 `auto`，
         由 `scraper.DEFAULT_OPTS["crop_anchor"]` 提供，裁切逻辑自判。
@@ -2919,19 +2913,12 @@ class AVHelper(_PluginBase):
         """
         conf = self.scrape_conf()
         opts = dict(conf)
-        # 驼峰 → 下划线：两个开关合成 `plot_sources`（顺序即回落优先级，契约 §4.2）
-        sources = []
-        if conf["plotJavtxt"]:
-            sources.append("javtxt")
-        if conf["plotMetatube"]:
-            sources.append("metatube")
-        opts["plot_sources"] = tuple(sources)
+        # 驼峰 → 下划线：开关合成 `plot_sources`（顺序即回落优先级，契约 §4.2）
+        opts["plot_sources"] = ("javtxt",) if conf["plotJavtxt"] else ()
         # P1-5：启用源（新真值）与字段级择优 —— 取数图直接读这三个键
         opts["sources"] = tuple(conf["sources"])
         opts["field_priority"] = dict(conf["fieldPriority"])
         opts["field_blacklist"] = dict(conf["fieldBlacklist"])
-        # MetaTube 地址：留空就传空串（`_opt()` 认空串为"已给"→ 数据源自检回显"未配置"）
-        opts["metatube_base"] = conf["metatubeBase"]
         # 限流（P1-2）：驼峰 → 下划线，并**顺手把当前配置推给限流器** —— 那个实例是长命的
         # （`init_plugin` 建一次），配置改了不必重载插件，也不为它造第二个执行点。
         opts["default_rate_limit"] = conf["defaultRateLimit"]
@@ -3047,7 +3034,6 @@ class AVHelper(_PluginBase):
         conf = self.scrape_conf()
         options = {"sources": tuple(conf["sources"]), "plot_sources": (
             *(("javtxt",) if conf["plotJavtxt"] else ()),
-            *(("metatube",) if conf["plotMetatube"] else ()),
         )}
         enabled = scrape_graph.enabled_sources(options)
         content_type = ""
@@ -3095,7 +3081,7 @@ class AVHelper(_PluginBase):
 
         **默认廉价**（`/scrape/status` 与 `/scrape/log` 用）：`store.scrape_log_summary()`
         —— 一条 SQL、零网络。这两个端点会被工作台轮询，**绝不能在这里打站点**：
-        S7 的 `sources_selfcheck()` 是真探针（javdb 子进程 + javtxt + MetaTube + LLM 自检，
+        S7 的 `sources_selfcheck()` 是真探针（javdb 子进程 + javtxt + LLM 自检，
         3~5 秒，还会吃掉站点限流与 javdb 的 1 小时冷却）。
 
         `deep=True`（只由 `/scrape/selfcheck` 的「数据源自检」按钮触发）才跑那套探针，
@@ -3322,7 +3308,7 @@ class AVHelper(_PluginBase):
         """`/scrape/preview?key=`：单条字段级 diff（`scraper.preview_one()`，**只算不写**）。
 
         出参照契约：`{key, number, fields:[{name,current,target,changed}],
-        sources:{javdb,javtxt,metatube}, warnings:[]}`。
+        sources:{javdb,javtxt,llm}, warnings:[]}`。
         """
         target = str(key or "").strip()
         if not target:
@@ -3519,8 +3505,8 @@ class AVHelper(_PluginBase):
 
         入参全可选：`dry_run`（默认 true：只 `find_person` + 出动作清单，零写请求）、
         `limit`（只处理前 N 位）、`names`（只处理这几个规范名，单片用）、
-        `force`（0.7.4：**覆盖已有头像**——存量头像多是 MetaTube/javdb 时代 100×100 的缩略图，
-        不覆盖就没法换成 Gfriends 的整图）。
+        `force`（0.7.4：**覆盖已有头像**——存量头像多是历史刮削时代 100×100 的缩略图，
+        不覆盖就换不掉；0.8.1 起头像源只剩 javdb，覆盖换来的也是 javdb 那张）。
         `emby_client` 为 None **不在这里特判** —— 干活的 `sync_actor_avatars()` 自己会回
         `errors:["未配置 Emby…"]`；返回体原样透传
         （`{ok, dry_run, actors, planned, applied, errors, missing_person, gender_unknown}`）。

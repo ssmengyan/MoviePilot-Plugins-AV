@@ -49,7 +49,7 @@ def test_every_site_has_an_empty_result_case():
     """★ 每个站点至少一条 `expected_none` 用例（照 amane 的硬规矩）。
 
     空结果用例防的是"筛选 bug 被首页/推广链接掩盖"：站点查不到时**必须**回空 ——
-    javtxt 的空搜索页是 0 张卡片，MetaTube 查不到时会返回**随机**结果（必须被串号拦截挡住）。
+    javtxt 的空搜索页是 0 张卡片，必须被判成 miss 而不是"抓到第一条广告"。
     """
     if not CASES:
         pytest.skip("夹具不在")

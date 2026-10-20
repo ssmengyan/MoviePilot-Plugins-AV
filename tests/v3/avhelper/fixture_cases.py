@@ -26,8 +26,10 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[4]
 FIXTURE_ROOT = REPO_ROOT / "fixtures" / "avhelper"
 
-SITES = ("javtxt", "metatube")
-PARSERS = {"javtxt": ("search", "detail"), "metatube": ("search",)}
+# 0.8.1：MetaTube 下线，夹具只对 javtxt 跑；`fixtures/avhelper/metatube/` 留档不删，
+# 但不再进收集（里面是第三方响应，公开仓本来就不发布）。
+SITES = ("javtxt",)
+PARSERS = {"javtxt": ("search", "detail")}
 
 #: 认得的 `expect` 键（`hit_*` / `*_sha256` / `*_len` 与 movie/detail 字段另行放行）
 _CASE_KEYS = {"site", "parser", "number", "response", "expected_none", "captured", "capture"}
@@ -76,7 +78,7 @@ def load_toml(path: Path) -> dict[str, Any]:
             "path": path}
 
 def _norm_key(emby_mod: Any, number: str) -> str:
-    """与 `javtxt_lookup()` / `metatube_lookup()` 同一套归一（复刻调用点，别自己发明）。"""
+    """与 `javtxt_lookup()` 同一套归一（复刻调用点，别自己发明）。"""
     parsed = emby_mod.parse_av_number(number)
     return parsed.norm_key if parsed.matched else emby_mod.canon_key(number)
 
@@ -113,25 +115,8 @@ def observed(module: Any, emby_mod: Any, case: dict[str, Any]) -> dict[str, Any]
                       if (title_zh or title_jp) else None)
         return out
 
-    payload = json.loads(text)
-    items = payload.get("data") if isinstance(payload, dict) else payload
-    if not isinstance(items, list):
-        raise FixtureError(f"{case['path'].name}：响应不是 {{data:[…]}} 也不是数组")
-    hit, count, mismatch = module.pick_metatube_hit(items, _norm_key(emby_mod,
-                                                                    str(info["number"])))
-    movie = module.metatube_movie(hit) if hit else None
-    out["candidates"] = count
-    out["mismatch"] = mismatch
-    out["items"] = len(items)
-    out["hit"] = movie
-    out["hit_id"] = str((movie or {}).get("id") or "")
-    out["hit_number"] = str((movie or {}).get("number") or "")
-    for key in ("title", "summary", "maker", "runtime", "director", "release_date",
-                "cover_url", "thumb_url", "preview_video_url", "provider"):
-        out[key] = (movie or {}).get(key, "")
-    out["actor_names"] = list((movie or {}).get("actors") or [])
-    out["genres"] = list((movie or {}).get("genres") or [])
-    return out
+    raise FixtureError(f"{case['path'].name}：0.8.1 起只支持 javtxt 夹具"
+                       f"（site={site!r} parser={parser!r}）")
 
 
 def _resolve(key: str, obs: dict[str, Any]) -> tuple[bool, Any]:

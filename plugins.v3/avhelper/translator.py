@@ -1,6 +1,6 @@
 """日文 → 简体中文翻译链路（v4 刮削线 S4，v4.1 §7 全文 + 契约 §3.4）。
 
-职责：把 JavDB / MetaTube / Javtxt 拿到的**日文标题与简介**翻成简体中文，供 `scraper.py`
+职责：把 JavDB / Javtxt 拿到的**日文标题与简介**翻成简体中文，供 `scraper.py`
 写进 `meta.title_zh` / `meta.plot_zh` 与 Emby 的 `Name` / `Overview`。
 
 设计口径（每条都有实测依据，别改）：

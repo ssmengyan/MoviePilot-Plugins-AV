@@ -1,6 +1,6 @@
 """取数图：**字段 × 站点链**（声明式多源择优）。
 
-借 `sqzw-x/amane` `aggregate/engine.py` 的模型（GPL-3.0），落到我们那 3 个元数据源上：
+借 `sqzw-x/amane` `aggregate/engine.py` 的模型（GPL-3.0），落到我们那 2 个元数据源上：
 
 - `FIELDS` —— 我们真正会写进 Emby / 界面的字段名（与 `gather()` 返回的键同名）；
 - `SOURCES` —— 每个源的声明：**提供哪些字段**、第几段跑、什么条件下才值得跑、由哪个开关控制；
@@ -10,20 +10,19 @@
 - `should_run()` —— 第二段的闸门；
 - `describe()` —— 把编译结果摊平成可下发/可排障的形状（设置台与自检页读它）。
 
-**为什么今天只有一条链**：我们只有 3 个源（javdb 出骨架 / javtxt 出中文简介 / MetaTube 兜底），
+**为什么今天只有一条链**：我们只有 2 个源（javdb 出骨架 / javtxt 出中文简介），
 7 种内容类型各自的链会长得一模一样 —— 造 7 张相同的表是过度设计（`最终方案` §13.4 自己也问过）。
 所以类型 → 链这张表**留在这里**（`DEFAULT_CHAIN` 每个类型一行），今天全指向同一条；
 将来加 DMM / r18.dev（最终方案 D10）只是**填一行数据**，不用改 `gather()` 的流程。
 
-**与上游的两处有意差异**：
-1. 上游第二段的节点"不因标量已满足而跳过"；我们**要跳** —— MetaTube search 恒定 ~10 秒，
-   已经拿到中文简介就不该再打它。闸门写在源自己的 `only_if_missing` 里（`should_run()`），
-   而不是散在 `gather()` 的 if 里。
-2. 上游只有"字段级提前/排除"两个旋钮；我们多一层**站点启停**（`enabled_sources()`），
-   因为界面上的开关是"这个源用不用"，与"这个字段要不要优先问它"是两件事。
+**MetaTube 已于 0.8.1 整体下线**（上游项目停更、结果不可信），取数链只剩 javdb → javtxt；
+`only_if_missing` / `phase` 这套闸门留给将来新增的源，不在本次改造里删掉。
+
+**与上游的一处有意差异**：上游只有"字段级提前/排除"两个旋钮；我们多一层**站点启停**
+（`enabled_sources()`），因为界面上的开关是"这个源用不用"，与"这个字段要不要优先问它"是两件事。
 
 **溯源（`field_sources`）在 `gather()` 里按"谁真的填了这个字段"打标**，不在这里反推：
-填值规则有特例（javtxt 的占位简介要丢弃、MetaTube 只补空、LLM 覆盖前两者），事后按链反推会撒谎。
+填值规则有特例（javtxt 的占位简介要丢弃、LLM 覆盖前两者），事后按链反推会撒谎。
 """
 
 from __future__ import annotations
@@ -85,29 +84,20 @@ SOURCES: Dict[str, SourceSpec] = {
         phase=1, option="javtxt",
         note="中文直出（站点机翻）：概述与中文标题的第一顺位",
     ),
-    "metatube": SourceSpec(
-        id="metatube", label="MetaTube",
-        provides=("title_jp", "plot_jp", "cover_url", "thumb_url", "preview_video_url",
-                  "actors", "tags", "studio", "release_date", "duration", "javdb_id"),
-        # ★ S0b 的性能纪律：这一次请求恒定 ~10 秒，所以放第二段、并只在"确实还缺"时跑
-        phase=2, option="metatube",
-        only_if_missing=("plot_zh", "title_jp", "cover_url"),
-        note="概述第二顺位；**只在缺中文简介或 javdb 没给核心字段时**才值得那 10 秒",
-    ),
 }
 
 #: 每类型的默认链。今天全指向同一条（见模块 docstring）；将来分链只改这一张表。
-_DEFAULT_SOURCES: Tuple[str, ...] = ("javdb", "javtxt", "metatube")
+_DEFAULT_SOURCES: Tuple[str, ...] = ("javdb", "javtxt")
 DEFAULT_CHAIN: Dict[str, Tuple[str, ...]] = {
     **{kind: _DEFAULT_SOURCES for kind in CONTENT_TYPES},
     "_default": _DEFAULT_SOURCES,
 }
 
 #: `javdb` 是骨架：任何链里都必须在，且不允许被开关关掉
-#: 源的实际**执行顺序**（`gather()` 里就是按这个顺序依次问的：javdb 骨架 → javtxt → MetaTube）。
+#: 源的实际**执行顺序**（`gather()` 里就是按这个顺序依次问的：javdb 骨架 → javtxt）。
 #: `may_fill()` 用它判断"链上排在前面的源是不是还没轮到执行" —— 是就先别填，留给那个优先源。
 #: **改了 `gather()` 的执行顺序，这里必须同步改**（有一条单测盯着它与 `SOURCES` 的 phase 一致）。
-EXEC_ORDER: Tuple[str, ...] = ("javdb", "javtxt", "metatube")
+EXEC_ORDER: Tuple[str, ...] = ("javdb", "javtxt")
 
 #: 默认链（`DEFAULT_CHAIN`）里每个字段的落点；由 `compile_chain()` 使用
 ALWAYS_ON: FrozenSet[str] = frozenset({"javdb"})

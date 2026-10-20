@@ -18,6 +18,8 @@ import threading
 import types
 from pathlib import Path
 
+import pytest
+
 
 def make_store(store_mod, tmp_path, name="avhelper.db"):
     """在临时目录上建一个干净的库。"""
@@ -71,7 +73,7 @@ class TestConnectionUpgrade:
         store = make_store(store_mod, tmp_path)
         conn = store._connect()
         assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
-        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 10000
+        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 30000
         assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1        # NORMAL
         assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
@@ -1165,3 +1167,67 @@ class TestLegacyBehaviourKept:
         for thread in threads:
             thread.join(20)
         assert len(store.known_all()) == 60
+
+
+class TestSlowDiskResilience:
+    """0.8.1：慢盘韧性（busy_timeout 30s / locked 退避一次 / 慢 SQL 日志）。"""
+
+    def test_busy_timeout_is_raised_to_30s(self, store_mod, tmp_path):
+        store = make_store(store_mod, tmp_path)
+        conn = store._connect()
+        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == store_mod.BUSY_TIMEOUT_MS
+        assert store_mod.BUSY_TIMEOUT_MS == 30000
+
+    def test_locked_write_is_retried_once(self, store_mod, monkeypatch):
+        """`database is locked` → 睡 200ms 重试一次；其它 OperationalError 立刻抛。"""
+        waits: list = []
+        monkeypatch.setattr(store_mod.time, "sleep", lambda sec: waits.append(sec))
+
+        class _Cur:
+            @staticmethod
+            def fetchall():
+                return [(1,)]
+
+        class _Flaky:
+            def __init__(self):
+                self.calls = 0
+
+            def execute(self, sql, args):
+                self.calls += 1
+                if self.calls == 1:
+                    raise sqlite3.OperationalError("database is locked")
+                return _Cur()
+
+        conn = _Flaky()
+        assert store_mod._run(conn, "UPDATE t SET a=1", (), False) is None
+        assert conn.calls == 2 and waits == [store_mod.LOCK_RETRY_SLEEP]
+
+    def test_other_operational_errors_are_not_retried(self, store_mod):
+        class _Bad:
+            calls = 0
+
+            def execute(self, sql, args):
+                _Bad.calls += 1
+                raise sqlite3.OperationalError("no such column: x")
+
+        with pytest.raises(sqlite3.OperationalError):
+            store_mod._run(_Bad(), "UPDATE t SET x=1", (), False)
+        assert _Bad.calls == 1
+
+    def test_slow_sql_is_logged_once_per_window(self, store_mod, monkeypatch):
+        rows: list = []
+        monkeypatch.setattr(store_mod, "logger", types.SimpleNamespace(
+            warning=lambda msg: rows.append(msg), error=lambda msg: rows.append(msg)))
+        monkeypatch.setattr(store_mod, "_slow_last", 0.0)
+        store_mod._log_slow("SELECT * FROM meta WHERE key=?", 500)
+        store_mod._log_slow("SELECT * FROM meta WHERE key=?", 500)    # 60 秒内不再记
+        assert len(rows) == 1
+        assert "慢查询" in rows[0]
+
+    def test_fast_sql_is_not_logged(self, store_mod, monkeypatch):
+        rows: list = []
+        monkeypatch.setattr(store_mod, "logger", types.SimpleNamespace(
+            warning=lambda msg: rows.append(msg), error=lambda msg: rows.append(msg)))
+        monkeypatch.setattr(store_mod, "_slow_last", 0.0)
+        store_mod._log_slow("SELECT 1", store_mod.SLOW_SQL_MS - 1)
+        assert rows == []

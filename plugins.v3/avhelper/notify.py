@@ -95,7 +95,7 @@ class Notifier:
         """已入库。"""
         where = f" {save_path}" if save_path else ""
         return self._emit(KIND_OK, "已入库",
-                          f"{number} 已入库{where}，Emby 已扫描，MetaTube 已刮削",
+                          f"{number} 已入库{where}，Emby 已扫描",
                           push=push)
 
     def candidate_ready(self, number: str, count: int, push: bool = True) -> Dict[str, Any]:

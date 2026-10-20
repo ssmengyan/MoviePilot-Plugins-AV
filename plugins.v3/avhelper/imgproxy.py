@@ -23,6 +23,7 @@ import hashlib
 import io
 import os
 import re
+import threading
 import urllib.parse
 import urllib.request
 from typing import Any, Dict, Optional, Tuple
@@ -271,13 +272,26 @@ def cached_emby(item_id: str, img_type: str = "Primary") -> bool:
 
 
 def _store(path: str, data: bytes) -> None:
-    """写缓存；失败不影响本次返回（缓存只是加速，不是正确性的一部分）。"""
+    """写缓存；失败不影响本次返回（缓存只是加速，不是正确性的一部分）。
+
+    ★ 0.8.1：**先写同目录临时文件，再 `os.replace()` 原子替换**。旧写法直接写目标文件，
+    两个线程同时抓同一张图时（预热 + 详情 / 批量刮削撞车）会互相截断；而 `cached()` 只判
+    「文件存在」，半截图会被永久当成有效缓存，之后一直返回坏图，只能手工清 cache/images。
+    `fsync` 是给慢盘（NAS 上的 HDD / SMB）留的：不 fsync 就 rename，断电后可能留下空文件。
+    """
+    tmp = "%s.%d.%d.tmp" % (path, os.getpid(), threading.get_ident())
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "wb") as f:
+        with open(tmp, "wb") as f:
             f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
     except Exception:
-        pass
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -400,8 +414,8 @@ def emby_image(host: str, apikey: str, item_id: str, img_type: str = "Primary"
             data = resp.read()
     except Exception:
         return None
-    if not data or media_type(data) == "application/octet-stream":
-        return None                       # 404 页面 / 空响应：别把 HTML 当图缓存下来
+    if not data or not str(media_type(data)).startswith("image/"):
+        return None                       # 404 页面 / 空响应 / HTML：别把非图片缓存下来
     _store(path, data)
     return data
 

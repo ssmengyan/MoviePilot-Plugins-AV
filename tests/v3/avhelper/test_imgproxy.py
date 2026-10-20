@@ -8,6 +8,7 @@ import importlib.util
 import io
 import os
 import sys
+import threading
 import types
 from pathlib import Path
 
@@ -588,3 +589,46 @@ def test_crop_poster_output_is_decodable_at_real_poster_ratio(imgproxy):
     assert meta["source_size"] == [800, 538]
     assert _decoded_size(out) == tuple(meta["size"])
     assert out[:2] == b"\xff\xd8"
+
+
+# ---------------------------------------------------------------------------
+# 七、缓存写入（0.8.1）：原子替换，绝不留半截图
+# ---------------------------------------------------------------------------
+
+def test_store_is_atomic_and_leaves_no_tmp_file(imgproxy, cache_root):
+    """写缓存 → 目标文件完整、目录里不留 `.tmp`。"""
+    path = str(cache_root / "images" / "a.jpg")
+    payload = b"\xff\xd8\xff\xe0" + b"x" * 4096
+    imgproxy._store(path, payload)
+    assert Path(path).read_bytes() == payload
+    leftovers = [p.name for p in Path(path).parent.iterdir() if p.name.endswith(".tmp")]
+    assert leftovers == []
+
+
+def test_store_keeps_old_file_when_write_fails(imgproxy, cache_root, monkeypatch):
+    """写失败（磁盘满 / 权限）时目标文件仍是**旧的那份完整图**，不会被截断成空文件。"""
+    path = str(cache_root / "images" / "b.jpg")
+    old = b"\xff\xd8\xff\xe0" + b"old" * 100
+    imgproxy._store(path, old)
+
+    def boom(*args, **kwargs):
+        raise OSError("no space left")
+
+    monkeypatch.setattr(imgproxy.os, "fsync", boom)
+    imgproxy._store(path, b"\xff\xd8\xff\xe0" + b"new" * 100)
+    assert Path(path).read_bytes() == old
+    assert [p.name for p in Path(path).parent.iterdir() if p.name.endswith(".tmp")] == []
+
+
+def test_concurrent_writers_never_leave_a_truncated_file(imgproxy, cache_root):
+    """8 个线程抢写同一个缓存路径 → 最终文件必定是**某一次完整写入**，不是交错截断。"""
+    path = str(cache_root / "images" / "c.jpg")
+    payloads = [b"\xff\xd8\xff\xe0" + bytes([i]) * 20000 for i in range(8)]
+    threads = [threading.Thread(target=imgproxy._store, args=(path, data)) for data in payloads]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(20)
+    got = Path(path).read_bytes()
+    assert got in payloads
+    assert [p.name for p in Path(path).parent.iterdir() if p.name.endswith(".tmp")] == []

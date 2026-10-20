@@ -32,11 +32,64 @@ except Exception:                           # pragma: no cover - 独立加载分
     logger = logging.getLogger("AVHelper")
 
 
+#: 写锁等待上限（0.8.1，照 amane v0.22 的 NAS 实测）：10 秒在慢盘 + Emby 扫描时不够，
+#: 一次 `database is locked` 会让整条刮削结果丢掉；30 秒仍失败才算真失败。
+BUSY_TIMEOUT_MS = 30000
+#: `database is locked` 的一次退避重试（秒）：先让出时间片，别把瞬时争用当失败。
+LOCK_RETRY_SLEEP = 0.2
+#: 慢 SQL 阈值与日志节流（同一进程内最多 60 秒一条，避免刷屏）。
+SLOW_SQL_MS = 300
+_SLOW_LOG_GAP = 60.0
+_slow_lock = threading.Lock()
+_slow_last = 0.0
+
+
+def _log_slow(sql: Any, cost_ms: float) -> None:
+    """记一条慢 SQL（阈值 300ms，60 秒节流）；只记语句首 160 字，不记参数（可能带密钥）。"""
+    global _slow_last
+    if cost_ms < SLOW_SQL_MS:
+        return
+    now = time.monotonic()
+    with _slow_lock:
+        if now - _slow_last < _SLOW_LOG_GAP:
+            return
+        _slow_last = now
+    text = " ".join(str(sql or "").split())[:160]
+    logger.warning(f"AVHelper SQL 慢查询 {cost_ms:.0f}ms：{text}")
+
+
+def _run(conn: sqlite3.Connection, sql: str, args: tuple, fetch: bool) -> Any:
+    """执行一条语句；`database is locked` 退避重试一次（0.8.1）。
+
+    只对**锁冲突**重试：语句根本没开始执行，重试是安全的；语法/约束错误照旧立刻抛。
+    """
+    try:
+        cur = conn.execute(sql, args)
+    except sqlite3.OperationalError as error:
+        if "locked" not in str(error).lower():
+            raise
+        time.sleep(LOCK_RETRY_SLEEP)
+        cur = conn.execute(sql, args)
+    return cur.fetchall() if fetch else None
+
+
+def _run_count(conn: sqlite3.Connection, sql: str, args: tuple) -> int:
+    """同 `_run` 的锁重试口径，但回受影响行数（`_exec_count` 的条件写要用）。"""
+    try:
+        cur = conn.execute(sql, args)
+    except sqlite3.OperationalError as error:
+        if "locked" not in str(error).lower():
+            raise
+        time.sleep(LOCK_RETRY_SLEEP)
+        cur = conn.execute(sql, args)
+    return int(cur.rowcount or 0)
+
+
 def _norm_key(text: Any) -> str:
     """番号归一化：借用 `emby.norm_key()`，延迟导入以便本模块在无宿主环境下被单测直接加载。
 
     台账的 key 与番号归一化必须共用同一份规则（`emby.norm_key`）：同一个番号在 javdb 番号、
-    Emby 文件名、MetaTube 刮削 id 里写法不同，两边各写一份迟早会漂。`emby.py` 依赖 `app.sdk`，
+    Emby 文件名、历史刮削 id 里写法不同，两边各写一份迟早会漂。`emby.py` 依赖 `app.sdk`，
     模块级导入会让 `store` 无法脱离宿主被单测加载，所以放到调用点再导。
     """
     from . import emby
@@ -206,7 +259,7 @@ CREATE TABLE IF NOT EXISTS scrape_log(
 
 -- 0.8.0 / P0-3：**逐站快照**（"只重算不重抓"的凭据）。
 -- 与 `meta.raw_json` 的分工：那边是给人看的**摘要**（URL/vid/长度，且受 5KB 上限），
--- 这里是给机器**复用**的完整结果（`javtxt_lookup()` / `metatube_lookup()` 的返回形状），
+-- 这里是给机器**复用**的完整结果（`javtxt_lookup()` 的返回形状），
 -- 于是"换字段聚合策略时只重算不重抓"才能在**单个源**的粒度上成立。
 CREATE TABLE IF NOT EXISTS site_snapshot(
     key TEXT NOT NULL,
@@ -837,7 +890,7 @@ class Store:
         conn = sqlite3.connect(db_text)
         # PRAGMA 是 per-connection 的：只在建库时设一次不够，每条新连接都要重设。
         # `journal_mode` 是**库级且持久化**的（写进库头），所以只在 init() 里设一次。
-        conn.execute("PRAGMA busy_timeout=10000")
+        conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA foreign_keys=ON")
         self._local.conn = conn
@@ -860,7 +913,7 @@ class Store:
             # journal_mode 持久化在库头：这里设一次，之后每条新连接读到的都还是 wal。
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute("PRAGMA busy_timeout=10000")
+            conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
             conn.execute("PRAGMA foreign_keys=ON")
             self._bootstrap(conn)
             # v4.1 §4.2 末条：用户手工备注（actor_alias）同步进 name_map，且拥有最高优先级
@@ -1045,14 +1098,16 @@ class Store:
         写统一 `with self._lock:`，与升级前同样的互斥语义；出错回滚，绝不把半截事务留给下一条语句。
         """
         conn = self._connect()
+        started = time.perf_counter()
         if _is_read_sql(sql):
-            cur = conn.execute(sql, args)
-            return cur.fetchall() if fetch else None
+            rows = _run(conn, sql, args, fetch)
+            _log_slow(sql, (time.perf_counter() - started) * 1000)
+            return rows
         with self._lock:
             try:
-                cur = conn.execute(sql, args)
-                rows = cur.fetchall() if fetch else None
+                rows = _run(conn, sql, args, fetch)
                 conn.commit()
+                _log_slow(sql, (time.perf_counter() - started) * 1000)
                 return rows
             except Exception:
                 try:
@@ -1068,11 +1123,12 @@ class Store:
         `_exec` 对所有写都返回 `None`（那是个被几十处调用的原语，不为一处需求改它的返回值）。
         """
         conn = self._connect()
+        started = time.perf_counter()
         with self._lock:
             try:
-                cur = conn.execute(sql, args)
-                count = int(cur.rowcount or 0)
+                count = _run_count(conn, sql, args)
                 conn.commit()
+                _log_slow(sql, (time.perf_counter() - started) * 1000)
                 return count
             except Exception:
                 try:
@@ -2323,7 +2379,7 @@ class Store:
                      run_id: str = "", fetched_at: str = "") -> None:
         """写/覆盖一个源的快照（`PRIMARY KEY(key, site)`：同一部片同一源只留最新一份）。
 
-        `payload` 是该源**可复用的返回形状**（`javtxt_lookup()` / `metatube_lookup()` 的 dict）——
+        `payload` 是该源**可复用的返回形状**（`javtxt_lookup()` 的 dict）——
         不是给人看的摘要（摘要仍在 `meta.raw_json`）。体积上限 64KB：超了就不写（快照是加速器，
         坏了只该"变慢"，不该把库撑爆）。
         """
