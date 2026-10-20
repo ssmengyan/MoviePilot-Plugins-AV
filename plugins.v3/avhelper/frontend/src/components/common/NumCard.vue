@@ -66,6 +66,23 @@ export interface CardMovie {
    */
   downloaded?: boolean
   /**
+   * 这个番号**此刻正在下载**（后端 `_movie()` 的 `downloading`，2026-10-15 加）。
+   *
+   * 与 `downloaded` 的区别：`downloading` = 队列里有活跃条目（还没下完）；
+   * `downloaded` = 台账里已完成。两者互斥（下完那一刻队列条目就被摘走、台账接手），
+   * 所以徽标可以按 `downloading → downloaded` 的顺序各画一颗、不会同时出现。
+   */
+  downloading?: boolean
+  /**
+   * 读侧统一投影的演员数组（2026-10-15 加）：`{name, jp, zh, avatar}`，`name` 已是中文名。
+   * 优先于上面那个单串 `actor`（见 `actorLine()`）。
+   */
+  actors?: Array<{ name?: string; jp?: string; zh?: string; avatar?: string }>
+  /** 三段状态（投影口径：`{download, library, scrape}`）；库卡片可用它画「未刮」角标。 */
+  states?: { download?: string; library?: string; scrape?: string }
+  /** 版本角标（投影口径，字符串数组）。 */
+  versionTags?: string[]
+  /**
    * 入库时间（Emby 的 `DateCreated`，本地时间写法；`/library` 的 `addedAt`）。
    * 只有库模式会画它，其它来源的卡片没有这个字段。
    */
@@ -135,6 +152,28 @@ const addedText = () => {
 /** 库内文件名：`/media/9kg/avi/IPZZ-961.mp4` → `IPZZ-961.mp4`（两种斜杠都认）。 */
 const fileName = () => String(props.movie.lib?.path || '').replace(/\\/g, '/').split('/').pop() || ''
 
+/**
+ * 演员那一行（2026-10-15 改）：读侧统一投影的 `actors[]` **优先**，没有才退回单个 `actor` 串。
+ *
+ * 为什么要改：用户诉求「既然从 Emby 库获取资源，应同步获取并显示正确的演员名字」。
+ * `actors[]` 是投影口径（`name` 已是中文名，且同一部片能列出多位演员），而老的 `movie.actor`
+ * 只是本地「番号→演员」索引里的一个字符串（榜单场景下通常只有第一位、库场景下常常是空的）。
+ * 两个都没有就画 `—`，不猜。
+ */
+const actorLine = () => {
+  const list = props.movie.actors
+  if (Array.isArray(list)) {
+    const names = list
+      .map(row => String((row || {}).name || (row || {}).zh || '').trim())
+      .filter(Boolean)
+    if (names.length) return names.join(' / ')
+  }
+  return String(props.movie.actor || '') || '—'
+}
+
+/** 库卡片正文：影片标题优先，取不到才退回库内文件名（见模板里的说明）。 */
+const libBodyText = () => String(props.movie.title || '') || fileName()
+
 /** Emby 观看地址（`lib.url`）；没有就整颗「观看」不画。 */
 const watchUrl = () => String(props.movie.lib?.url || '')
 </script>
@@ -154,24 +193,48 @@ const watchUrl = () => String(props.movie.lib?.url || '')
         <span v-if="actorFavorited" class="avh-badge avh-badge--new">⭐已收藏演员</span>
         <span v-if="movie.lib" class="avh-badge avh-badge--lib">✔已入库</span>
         <!--
+          「下载中」（2026-10-15 加，后端 `_movie().downloading`）：队列里有这个番号的活跃条目。
+          为什么必须有：以前只有"下载完成之后"才有徽标，**正在下**的片子在榜单/详情上毫无标记，
+          用户很容易对同一个番号再点一次下载（重复下单）。
+          顺序：排在「已下载」之前（"还在下"比"下过"更该被看见）。
+        -->
+        <span v-if="movie.downloading && !movie.lib && !movie.downloaded"
+              class="avh-badge avh-badge--dlg">⏬下载中</span>
+        <!--
           「已下载」（契约 §5.2）：`downloaded && !lib` 才画 —— 在库的片子上面那颗已经说明白了，
           重复标记只会让用户以为自己漏看了什么。徽标顺序：前四颗保持老实现原样，这颗排最末。
         -->
         <span v-if="movie.downloaded && !movie.lib" class="avh-badge avh-badge--dl">✔已下载</span>
+        <!--
+          「未刮」（2026-10-15 加，只给库模式）：投影说这个条目还没刮到元数据
+          （`states.scrape === 'unscraped'`）。用户诉求里「Emby 未刮削出数据时显示异常」的
+          另一半 —— 现在标题/演员会退回弱信息，所以必须**明说**这一条是没刮过的，
+          否则用户会以为插件抓错了信息。（已刮到一半 `scraped_partial` 不画：能看就行，别到处打标。）
+        -->
+        <span v-if="library() && movie.states?.scrape === 'unscraped'"
+              class="avh-badge avh-badge--unscraped">未刮</span>
       </div>
     </div>
     <div class="avh-card__meta">
       <div class="avh-card__num">{{ number() }}</div>
       <div class="avh-card__sub">
-        <span>{{ movie.actor || '—' }}</span>
+        <span>{{ actorLine() }}</span>
         <!-- 库模式第二行右侧是入库时间；榜单模式下仍是磁力条数（老实现口径，一颗都不改） -->
         <span v-if="library()">{{ addedText() }}</span>
         <span v-else>🧲 {{ movie.magnets || 0 }}</span>
       </div>
       <div class="avh-card__sub">
         <template v-if="library()">
-          <!-- 库内文件名：`title` 给完整路径，判断"是不是同一部片"时不用点进去 -->
-          <span :title="String(movie.lib?.path || '')">{{ fileName() }}</span>
+          <!--
+            库模式正文行（2026-10-15 改）：**显示影片标题**，不再显示库内文件名。
+            用户原话：「标题和封面显示有问题：当前似乎套用了 Emby 数据，但 Emby 未刮削出数据时
+            显示异常」。根因是这一格画的是 Emby 的 `Name` 派生的文件名（没刮削时就是
+            `ipzz00961.mp4` 这种），而标题只在悬停 tooltip 里。现在 `title` 由读侧统一投影
+            给出（与榜单/历史/下载页同一个值），文件名退到 tooltip —— 判"是不是同一部片"
+            照样不用点进去（`lib.path` 全文仍在 `title` 属性里）。
+            取不到标题才退回文件名（宁可显示得朴素，也不要空一行）。
+          -->
+          <span :title="String(movie.lib?.path || '')">{{ libBodyText() }}</span>
           <!--
             「▶ 观看」：直达 Emby 观看地址（`lib.url`，详情页那颗「在 Emby 中打开」同一个地址）。
             用 `<a target="_blank">` 而不是 `window.open`：中键/右键新标签页、悬停看地址、
@@ -307,6 +370,22 @@ const watchUrl = () => String(props.movie.lib?.url || '')
  */
 .avh-badge--dl {
   background: rgba(var(--v-theme-info), 0.85);
+}
+
+/*
+ * 「下载中」（2026-10-15）：取 `warning`（暖色）—— 与 `--lib`(primary) / `--dl`(info) 两颗冷色
+ * 一眼分开。"还在下"是个**进行时**状态，用暖色比冷色更符合直觉，也与下载页那根进度条的主色同族。
+ */
+.avh-badge--dlg {
+  background: rgba(var(--v-theme-warning), 0.9);
+}
+
+/*
+ * 「未刮」（2026-10-15）：灰底 —— 它是个**质量提示**，不是状态（不是"正在进行"也不是"出错"），
+ * 所以用最低调的中性色：看得见但不抢眼，与前几颗"有明确含义"的徽标区分开。
+ */
+.avh-badge--unscraped {
+  background: rgba(var(--v-theme-on-surface), 0.55);
 }
 
 .avh-card__meta {

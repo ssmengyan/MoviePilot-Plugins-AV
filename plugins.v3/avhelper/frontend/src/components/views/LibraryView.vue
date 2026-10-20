@@ -265,9 +265,8 @@ void load(false, false)
 
 <template>
   <div class="avh-library">
+    <!-- 工具条：**不画说明句**（用户 2026-10-15 要求），只留搜索 + 刷新 -->
     <div class="avh-library__toolbar">
-      <span class="avh-library__hint">媒体库里现在的番号，点卡片看详情、点「▶ 观看」直接播放</span>
-
       <div class="avh-library__spacer" />
 
       <v-text-field

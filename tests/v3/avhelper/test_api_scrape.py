@@ -1128,6 +1128,96 @@ class TestLibraryReadSide:
         assert len(fake.calls["view"]) == first        # 30 秒 TTL 内不再重算
 
 
+class TestTaskRowsCarryFilmFields:
+    """`fill_posters()` 顺带把读侧投影的影片字段挂到任务/队列行上（2026-10-15）。
+
+    用户诉求是"同一个影片在四个界面显示要一致"：以前这条路**只补 `poster`**，
+    于是下载页那一行只有番号、没有片名，而同一部片在榜单/历史/库页各有各的写法。
+    现在把 `title` / `actors[]` / `cover` / `badge` / `version_tags[]` / `states{}` 一起挂上。
+
+    两条纪律必须守住（本类逐条钉）：
+    1. **只追加、不改写**：行里已有的键一个不动；
+    2. **拿不到就不写**：投影里没这部片时，不拿种子名/番号顶上。
+    """
+
+    def test_film_fields_are_attached(self, plugin, api_mod, monkeypatch):
+        view = {"key": "SNOS380", "number": "SNOS-380", "title": "中文标题",
+                "cover": "/api/v1/plugin/AVHelper/img?emby=12598&type=Primary",
+                "badge": "中字", "version_tags": ["中字"],
+                "actors": [{"name": "上原", "jp": "上原亜衣", "avatar": ""}],
+                "states": {"download": "downloading", "library": "in_library",
+                           "scrape": "scraped_full"}}
+        with_scraper(api_mod, monkeypatch, FakeScraper(view=view))
+        rows = [{"id": "q1", "number": "SNOS-380", "thumb": "/old.jpg", "state": "down"}]
+        plugin.fill_posters(rows)
+        row = rows[0]
+        assert row["title"] == "中文标题"
+        assert row["actors"][0]["name"] == "上原"
+        assert row["version_tags"] == ["中字"]
+        assert row["badge"] == "中字"
+        assert row["states"]["scrape"] == "scraped_full"
+        assert row["poster"] == view["cover"]
+        # 原有键一个不动
+        assert row["thumb"] == "/old.jpg"
+        assert row["state"] == "down"
+
+    def test_existing_values_are_not_overwritten(self, plugin, api_mod, monkeypatch):
+        """行自带的 `title` 优先（它更贴近上下文），投影值不许顶掉。"""
+        with_scraper(api_mod, monkeypatch,
+                     FakeScraper(view={"key": "S", "number": "SNOS-380", "title": "投影标题",
+                                       "actors": [{"name": "A"}]}))
+        rows = [{"id": "q1", "number": "SNOS-380", "title": "行里自己的标题",
+                 "actors": [{"name": "B"}]},
+                {"id": "q2", "number": "SNOS-380"}]
+        plugin.fill_posters(rows)
+        assert rows[0]["title"] == "行里自己的标题"
+        assert rows[0]["actors"][0]["name"] == "B"
+        assert rows[1]["title"] == "投影标题"      # 没有的那一行才补
+
+    def test_missing_view_leaves_row_untouched(self, plugin, api_mod, monkeypatch):
+        """投影拿不到这个番号 → 行保持原样（不编造片名）。"""
+        with_scraper(api_mod, monkeypatch, FakeScraper(view=None))
+        rows = [{"id": "q1", "number": "SNOS-380", "thumb": "/old.jpg"}]
+        plugin.fill_posters(rows)
+        assert "title" not in rows[0]
+        assert rows[0]["poster"] == "/old.jpg"     # poster 退回行里的 thumb
+
+
+class TestDownloadingBadgeKeys:
+    """`_downloading_keys()`：队列里"还在下"的番号集合（「下载中」徽标用，2026-10-15）。"""
+
+    def test_only_active_entries_count(self, plugin, store):
+        store.kv_set("queue", [
+            {"id": "q1", "number": "IPZZ-961", "state": "down"},
+            {"id": "q2", "number": "SNOS-380", "state": "done"},
+            {"id": "q3", "number": "MIDA-762", "state": "failed"},
+            {"id": "q4", "number": "CAWB-040", "state": "canceled"},
+        ])
+        plugin._downloading_keys_cache = (0.0, set())
+        keys = plugin._downloading_keys()
+        assert "IPZZ961" in keys
+        assert "SNOS380" not in keys        # 下完了：由「已下载」徽标接手
+        assert "MIDA762" not in keys        # 失败
+        assert "CAWB40" not in keys         # 用户取消的
+
+    def test_movie_exposes_downloading_flag(self, plugin, store, api_mod, monkeypatch):
+        no_scraper(api_mod, monkeypatch)
+        store.kv_set("queue", [{"id": "q1", "number": "SNOS-380", "state": "down"}])
+        plugin._downloading_keys_cache = (0.0, set())
+        plugin._download_keys = (0.0, set())
+        movie = plugin._movie({"number": "SNOS-380", "title": "片名"})
+        assert movie.get("downloading") is True
+        assert "downloaded" not in movie
+
+    def test_cache_holds_for_the_short_window(self, plugin, store):
+        store.kv_set("queue", [{"id": "q1", "number": "SNOS-380", "state": "down"}])
+        plugin._downloading_keys_cache = (0.0, set())
+        assert "SNOS380" in plugin._downloading_keys()
+        # 台账/队列在缓存窗口内又变了：5 秒内仍按旧结论（省掉每条电影的库读）
+        store.kv_set("queue", [])
+        assert "SNOS380" in plugin._downloading_keys()
+
+
 class TestDownloadsReadSide:
     def _seed(self, store):
         store.download_upsert("SNOS-380", state="downloaded",
@@ -1166,6 +1256,30 @@ class TestDownloadsReadSide:
         payload = plugin.api_bootstrap()
         assert "downloader_offline" not in payload
         assert "downloader_error" not in payload
+
+    def test_projection_title_wins_over_legacy_title(self, plugin, api_mod, monkeypatch, store):
+        """`_film_extra` 的 `title` 例外（2026-10-15）：投影的中文标题**顶掉**行里原有的标题。
+
+        为什么必须顶：`/downloads` 的行自带 `title` = 下载那一刻的**种子名**、
+        `/library` 的行自带 `title` = Emby 的 `Name`（没刮削时是文件名）—— 同一个字段两处两个意思，
+        用户看到的正是"同一个影片五花八门"。投影的 `title` 才是唯一权威。
+        """
+        self._seed(store)          # 台账里 title = "标题"（模拟种子名/机翻名）
+        with_scraper(api_mod, monkeypatch,
+                     FakeScraper(view={"key": "SNOS380", "number": "SNOS-380",
+                                       "title": "投影中文标题"}))
+        plugin._emby_lib = FakeEmbyLib(_lib_index())
+        row = plugin.api_downloads(FakeRequest(method="GET"))["items"][0]
+        assert row["title"] == "投影中文标题"
+
+    def test_projection_without_title_keeps_legacy_value(self, plugin, api_mod, monkeypatch, store):
+        """投影没有标题时**保留原值**，不许清空（宁可显示弱信息，也不要一片空白）。"""
+        self._seed(store)
+        with_scraper(api_mod, monkeypatch,
+                     FakeScraper(view={"key": "SNOS380", "number": "SNOS-380"}))
+        plugin._emby_lib = FakeEmbyLib(_lib_index())
+        row = plugin.api_downloads(FakeRequest(method="GET"))["items"][0]
+        assert row["title"] == "标题"
 
 
 class TestCancelLinkage:

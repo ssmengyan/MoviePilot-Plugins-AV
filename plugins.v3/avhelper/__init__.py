@@ -99,6 +99,9 @@ WARM_KV_KEY = "warmup_at"  # 上次预热完成时间（防抖用）
 # 台账「已下载番号」的内存缓存时长（秒）：`_movie()` **每条电影**都要问一次（榜单一次 60 条），
 # 直查库等于把一次请求放大成几十次 SQLite 读；台账只在下载完成时变，晚 30 秒打徽标没有影响
 DOWNLOAD_KEYS_TTL = 30
+# 「下载中番号」的内存缓存时长（秒，2026-10-15 加）：与上面同一套写法。为什么更短 ——
+# 用户点完「下载」马上切到榜单就是想看到那颗标记，30 秒嫌钝；而 5 秒也足够省掉每条电影的库读。
+DOWNLOADING_KEYS_TTL = 5
 # 刮削线 v4（契约 §3.7 / §4）：读侧统一投影 `film_view` 的进程内缓存时长（秒）。
 # 与 `DOWNLOAD_KEYS_TTL` 同一套写法：`/library` 一次上百行、界面又是 15 秒轮询，
 # 投影要么走 S7 的 `scraper.film_view()`、要么走本模块的**一次** meta/item/台账批量读，
@@ -120,9 +123,13 @@ TRAILER_MODES = ("off", "remote", "local")
 DOWNLOAD_STATES = ("downloading", "paused", "completed", "failed", "cancelled", "none")
 LIBRARY_STATES = ("in_library", "pending_import", "not_in_library")
 SCRAPE_STATES = ("scraped_full", "scraped_partial", "unscraped")
-# 台账 `state` → `film_view().states.download`（契约 §4 的取值集）
+# 台账 `state` → `film_view().states.download`（契约 §4 的取值集）。
+# `canceled`（单 l）是**队列行**的拼写（用户在下载页点了取消，见 `tasks.QUEUE_CANCELED_STATE`），
+# 投影的取值集是双 l 的 `cancelled` —— 两边各按自己的历史口径写，映射就在这里做，
+# 免得日后有人把队列状态直接喂进来时被兜底成 `none`。
 _DOWNLOAD_STATE_MAP = {"downloaded": "completed", "downloading": "downloading",
-                       "paused": "paused", "failed": "failed", "cancelled": "cancelled"}
+                       "paused": "paused", "failed": "failed", "cancelled": "cancelled",
+                       "canceled": "cancelled"}
 # `meta.completeness` → `states.scrape`（老行没有 media_item 时按作品级完整度兜底）
 _SCRAPE_STATE_MAP = {"full": "scraped_full", "missing_plot": "scraped_partial",
                      "missing_core": "unscraped"}
@@ -431,9 +438,15 @@ class AVHelper(_PluginBase):
     plugin_desc = "JAV 榜单/演员/详情浏览，番号与演员订阅，PT 选种下载与 Telegram 通知"
     plugin_icon = ("https://raw.githubusercontent.com/ssmengyan/"
                    "MoviePilot-Plugins-AV/main/icons/avhelper.png")
-    # 版本：0.7.3 = 修头像同步误报 person_missing（匹配名与写入名走同一条链，存量 actors_json 建索引时复算）
-    # + 0.7.2 基座：自建刮削层（0.7.0 起：番号解析/中文简介/翻译/封面裁切/Emby 安全写入与回滚）
-    # + 界面减负：手动刮削改搜索式、演员三显示项、列表翻页、刮削台去裁切锚点与回滚入口、设置台去裁切锚点
+    # 版本：0.8.0 = 两条并行的 0.7.4 线汇合 + 后台按 amane 的运维纪律重构
+    # （失败原因闭枚举 + 单一记账点 + 单一出站函数、声明式取数图、逐站快照、限流单一执行点、
+    #  /img ETag、迁移与索引纪律）
+    # + 0.7.4 刮削线：手动刮削改「点开影片自己挑字段」、修「未刮削」恒空、头像换高清源
+    # + 0.7.4 下载线：下载页三出口（取消下载 / 换资源 / 不要了）+ 读侧统一落地到下载页
+    # （队列行挂影片标题、速度与剩余时间；「下载中」徽标）+ 界面减负（删永远为空的「已完成」节、
+    #  去掉重复的小节标题与工具条说明句）
+    # + 0.7.3/0.7.2 基座：自建刮削层（0.7.0 起：番号解析/中文简介/翻译/封面裁切/Emby 安全写入与回滚）、
+    # 演员三显示项、列表翻页、刮削台去裁切锚点与回滚入口、设置台去裁切锚点
     plugin_version = "0.8.0"
     plugin_label = "发现"
     plugin_author = "ssmengyan"
@@ -462,6 +475,8 @@ class AVHelper(_PluginBase):
     _cache_size_cache: Tuple[float, int] = (0.0, 0)   # (取样时间, 字节数)：缓存体积的内存缓存
     # (取样时间, 已下载番号键)：台账「已下载」徽标的 30 秒内存缓存，见 _downloaded_keys()
     _download_keys: Tuple[float, Set[str]] = (0.0, set())
+    # (取样时间, 下载中番号键)：队列「下载中」徽标的 5 秒内存缓存，见 _downloading_keys()
+    _downloading_keys_cache: Tuple[float, Set[str]] = (0.0, set())
     _warm_thread: Optional[threading.Thread] = None   # 启动预热线程（守护线程，见 warm_up）
     _warm_stop: Optional[threading.Event] = None      # 当前这次预热的停机信号（每次新建一份）
     # 刮削线 v4 的 11 项配置**存在 kv 的 `global_rule` 里**（前端设置台 S9 已在用这套 camelCase
@@ -807,6 +822,22 @@ class AVHelper(_PluginBase):
              "auth": "bear", "summary": "取消任务／不要了",
              "description": "{id} = 老行为，只取消待确认任务；{number|key, cancel_sub:true} = "
                             "三出口联动（删种子/台账/订阅/known），cancel_sub 默认 false，结果在 steps"},
+            # ---- 下载页那一行的三个出口（2026-10-15）：全部按队列行 id，行留在原位由用户选出口 ----
+            {"path": "/queue/cancel", "endpoint": self.api_queue_cancel, "methods": ["POST"],
+             "auth": "bear", "summary": "取消下载(删种子含文件, 条目留在原位)",
+             "description": "POST {id}：删下载器里的种子与已下载的部分文件 → 队列行 state=canceled "
+                            "留在原位（不消失）→ 台账打墓碑。已完成的不许取消"},
+            {"path": "/queue/return", "endpoint": self.api_queue_return, "methods": ["POST"],
+             "auth": "bear", "summary": "换资源(回到任务页重挑)",
+             "description": "POST {id}：摘掉这条下载 + 把对应任务置回 await（候选与规则原样保留）"},
+            {"path": "/queue/discard", "endpoint": self.api_queue_discard, "methods": ["POST"],
+             "auth": "bear", "summary": "不要了(彻底取消)",
+             "description": "POST {id, unsubscribe?:true}：摘行 + 台账墓碑 + 任务 canceled + "
+                            "（默认）取消该番号的订阅；unsubscribe 默认 true"},
+            {"path": "/queue", "endpoint": self.api_queue_drop, "methods": ["DELETE"],
+             "auth": "bear", "summary": "移除已取消的灰行",
+             "description": "DELETE ?id=：只把一条 state=canceled 的行从下载列表去掉，"
+                            "不动下载器、不动台账、不动订阅"},
             {"path": "/downloads", "endpoint": self.api_downloads, "methods": ["GET", "DELETE"],
              "auth": "bear", "summary": "下载台账(下载历史)",
              "description": "GET 列出**本插件下载过**的台账条目并迁移老队列；DELETE ?key= 移除一条记录后回最新列表"
@@ -1378,9 +1409,46 @@ class AVHelper(_PluginBase):
         # 「已下载」徽标：走插件内存缓存（30 秒），本方法每条电影都跑一次也不碰库
         if emby.norm_key(number) in self._downloaded_keys():
             movie["downloaded"] = True
+        # 「下载中」徽标（2026-10-15 加）：队列里有这个番号的活跃条目 → 卡片上打一颗标记。
+        # 以前只有"下载完成之后"才有徽标，于是**正在下**的片子在榜单/详情上毫无标记，
+        # 用户很容易对同一个番号再点一次下载（重复下单）。
+        # 走 `_downloading_keys()` 的 5 秒内存缓存：`_movie()` 每条都要问一次，不能查库。
+        if emby.norm_key(number) in self._downloading_keys():
+            movie["downloading"] = True
         return movie
 
     # ---------- 下载台账（下载历史）：徽标缓存 / 补种 / API ----------
+
+    def _downloading_keys(self) -> Set[str]:
+        """队列里**还在下**的番号键集合（5 秒内存缓存）。
+
+        「还在下」= 队列条目的 `state` 不在 `done` / `failed` / `canceled` 里（与前端
+        `store.downloading` 的口径逐字一致，别在这里另立一套）：
+        - `done` 会被 `_flush_done` 立刻摘走并写进台账，那一刻起由「已下载」徽标接手；
+        - `failed` / `canceled` 都不该说成"下载中"（前者种子报错、后者用户自己取消的）。
+
+        TTL 比「已下载」那份（30 秒）短得多：用户点完下载马上切到榜单看就是想要这个标记，
+        5 秒足够省掉每条的库读，又不至于让刚下的片子迟迟不亮。
+        """
+        now = time.time()
+        stamp, keys = self._downloading_keys_cache
+        if stamp and now - stamp < DOWNLOADING_KEYS_TTL:
+            return keys
+        found: Set[str] = set()
+        try:
+            for entry in (self.store.kv_get("queue", []) or []):
+                if not isinstance(entry, dict):
+                    continue
+                if str(entry.get("state") or "") in ("done", "failed", "canceled"):
+                    continue
+                key = emby.norm_key(entry.get("number"))
+                if key:
+                    found.add(key)
+        except Exception as error:
+            logger.error(f"AVHelper 读取下载队列失败（下载中徽标跳过）：{error}")
+            return keys
+        self._downloading_keys_cache = (now, found)
+        return found
 
     def _downloaded_keys(self) -> Set[str]:
         """台账里 `state=='downloaded'` **且是本插件下载的**番号键集合（30 秒内存缓存，契约 §4）。
@@ -1804,6 +1872,14 @@ class AVHelper(_PluginBase):
         只给点名的键（`key`/`display_number`/`original_title`/`actors`/`cover`/`version_tags`/
         `states`），原有字段一个都不碰；`emby_id` 传进来时封面一律走 Emby 原图
         （`?emby={id}&type=Primary`），否则回落投影里的远程图。
+
+        **`title` 是唯一一处例外（2026-10-15，用户诉求"四个界面显示要一致"）**：
+        投影里有中文标题时就**顶掉行里原有的** `title`，投影没有才保留原值。
+        为什么必须顶：`/library` 的行自带 `title` = Emby 的 `Name`（没刮削时是**文件名**、
+        刮到了也是 Google 机翻），而 `/downloads` 的行自带 `title` = 下载那一刻的种子名 ——
+        同一个字段在两处是两个东西，用户看到的正是"同一个影片五花八门"。
+        投影的 `title` 是**唯一权威**（javdb 中文标题 / 日文原名），所以这里让它说话；
+        拿不到时**保留原值而不是清空**（宁可显示 Emby 的弱信息，也不要一片空白）。
         """
         data = view if isinstance(view, dict) else {}
         states = dict(data.get("states") or {}) if isinstance(data.get("states"), dict) else {}
@@ -1816,7 +1892,7 @@ class AVHelper(_PluginBase):
             states["download"] = download_state_name(download_state)
         if emby_id:
             states["library"] = "in_library"
-        return {
+        out = {
             "key": str(data.get("key") or "") or canon_of(number),
             "display_number": str(data.get("number") or "") or shown_of(number),
             "original_title": str(data.get("original_title") or ""),
@@ -1825,6 +1901,10 @@ class AVHelper(_PluginBase):
             "version_tags": list(data.get("version_tags") or []),
             "states": states,
         }
+        title = str(data.get("title") or "").strip()
+        if title:
+            out["title"] = title
+        return out
 
     def actor_zh(self, name: Any) -> str:
         """演员名的中文写法：`namemap.actor_display()` 优先，缺失退回 `name_map` 表。
@@ -2366,12 +2446,21 @@ class AVHelper(_PluginBase):
         return {"success": True, "subs": self.store.sub_list()}
 
     def fill_posters(self, *groups: Any) -> bool:
-        """给任务 / 下载队列行补 `poster`（契约 §3.7：`/tasks` 行额外带它）。
+        """给任务 / 下载队列行补 `poster`，并**顺带把读侧统一投影的影片字段挂上去**。
 
         已入库的番号用 Emby 原图（`/img?emby={id}`），没入库的沿用行里那个 thumb 代理地址
         —— 与 `fill_thumbs()` 一样全程不发网络请求，只批量读一次投影。
 
-        :return: 是否有条目被改
+        2026-10-15 起这里多做一件事（用户诉求"四个界面同一个影片显示要一致"）：
+        把 `film_view()` 的 **`title` / `actors[]` / `cover` / `badge` / `version_tags[]` /
+        `states{}`** 追加到每一行上。原来这条路只补 `poster`，于是下载页那一行只有番号、
+        没有片名 —— 而同一部片在榜单/历史/库页各有各的写法，用户看到的正是"五花八门"。
+
+        两条纪律：
+        - **只追加、不改写**：行里已有的键一个不动（`number`/`thumb`/`size` 等保持原样），
+          前端拿不到这些新键时按"没有就不画"降级；
+        - **`title` 只在行里还没有的时候写**（`title` 是投影的中文标题；队列行本来没有这个键，
+          但历史/任务行可能有自己那一份更贴近上下文的值，别顶掉）。
         """
         items = [x for group in groups for x in (group or []) if isinstance(x, dict)]
         missing = [str(x.get("number") or "") for x in items if x.get("number")]
@@ -2388,6 +2477,28 @@ class AVHelper(_PluginBase):
             poster = str(view.get("cover") or "") or str(item.get("thumb") or "")
             if poster and item.get("poster") != poster:
                 item["poster"] = poster
+                changed = True
+            # 影片级字段：缺哪个补哪个，已有的不覆盖
+            title = str(view.get("title") or "")
+            if title and not str(item.get("title") or ""):
+                item["title"] = title
+                changed = True
+            for key in ("cover", "badge"):
+                value = view.get(key)
+                if value and item.get(key) != value:
+                    item[key] = value
+                    changed = True
+            actors = view.get("actors")
+            if isinstance(actors, list) and actors and not item.get("actors"):
+                item["actors"] = actors
+                changed = True
+            tags = view.get("version_tags")
+            if isinstance(tags, list) and tags and not item.get("version_tags"):
+                item["version_tags"] = tags
+                changed = True
+            states = view.get("states")
+            if isinstance(states, dict) and states and not item.get("states"):
+                item["states"] = states
                 changed = True
         return changed
 
@@ -2543,6 +2654,86 @@ class AVHelper(_PluginBase):
         if not failed:
             return f"已取消 {number}"
         return f"已取消 {number}（{len(failed)} 步未完成：{'；'.join(failed)}）"
+
+    # ---------- API：下载页那一行的三个出口（2026-10-15） ----------
+    #
+    # 三条路都按**队列行 id**（`payload.id`），返回形状统一为
+    # `{success, message, details?, tasks, queue}`：前端一收到就把这两份快照换上，
+    # 不必再打一次 `/tasks`（与 `/tasks/cancel` 的返回形状保持一致）。
+    #
+    # 收尾一律用 `queue(fresh=False)`：这一刻刚把种子删掉，同步去问下载器既慢（0.6 秒）
+    # 又会得到"查不到"——`/tasks` 那条 5 秒轮询自会带着真实进度回来。
+
+    async def api_queue_cancel(self, request: Request) -> Dict[str, Any]:
+        """「取消下载」：删下载器里的种子（**含已下载的部分文件**）→ 行改 `canceled` 留在原位。
+
+        条目**不消失**（用户明确要求）：留在原位用户才能接着点「换资源」或「不要了」，
+        这两条见 `/queue/return` 与 `/queue/discard`。
+        已完成（`state=='done'`）的条目拒绝取消 —— 那可能已经入库，删文件是破坏性动作。
+        """
+        payload = await self._json_body(request)
+        tid = str(payload.get("id") or "").strip()
+        if not tid:
+            return {"success": False, "message": "缺少 id",
+                    "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+        result = await asyncio.to_thread(self.engine.cancel_entry, tid)
+        return {"success": bool(result.get("ok")),
+                "message": str(result.get("message") or ""),
+                "details": str(result.get("detail") or ""),
+                "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+
+    async def api_queue_return(self, request: Request) -> Dict[str, Any]:
+        """「换资源」：摘掉这条下载 + 把对应任务置回 `await`（候选与规则原样保留）。
+
+        用户点错站点、或下到一半发现版本不对时走这条：回到「任务」页立刻能挑别的种子，
+        不必重新搜一遍站点（重搜受限流约束、还要等好几秒）。
+        """
+        payload = await self._json_body(request)
+        tid = str(payload.get("id") or "").strip()
+        if not tid:
+            return {"success": False, "message": "缺少 id",
+                    "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+        result = await asyncio.to_thread(self.engine.return_entry, tid)
+        return {"success": bool(result.get("ok")),
+                "message": str(result.get("message") or ""),
+                "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+
+    async def api_queue_discard(self, request: Request) -> Dict[str, Any]:
+        """「不要了」：彻底取消 —— 摘行 + 台账墓碑 + 任务 `canceled` +（默认）取消该番号的订阅。
+
+        `unsubscribe` 默认 **true**（界面上的勾选框默认勾上）：不取消订阅的话，下一次订阅检查
+        还会把同一个番号重新搜出来落成任务，"不要了"就成了假话。
+        """
+        payload = await self._json_body(request)
+        tid = str(payload.get("id") or "").strip()
+        if not tid:
+            return {"success": False, "message": "缺少 id",
+                    "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+        unsubscribe = pick_bool(payload.get("unsubscribe")
+                                if payload.get("unsubscribe") is not None
+                                else request.query_params.get("unsubscribe"), True)
+        result = await asyncio.to_thread(self.engine.discard_entry, tid, unsubscribe)
+        return {"success": bool(result.get("ok")),
+                "message": str(result.get("message") or ""),
+                "steps": result.get("steps") or {}, "error": str(result.get("error") or ""),
+                "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+
+    async def api_queue_drop(self, request: Request) -> Dict[str, Any]:
+        """把一条**已取消**的灰行从下载列表去掉（不动下载器/台账/订阅）。
+
+        走 `DELETE /queue?id=`：语义是"清掉这条已经处理完的记录"，不是"删除下载"。
+        """
+        tid = str(request.query_params.get("id") or "").strip()
+        if not tid:
+            payload = await self._json_body(request)
+            tid = str(payload.get("id") or "").strip()
+        if not tid:
+            return {"success": False, "message": "缺少 id",
+                    "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+        result = await asyncio.to_thread(self.engine.drop_entry, tid)
+        return {"success": bool(result.get("ok")),
+                "message": str(result.get("message") or ""),
+                "tasks": self.engine.task_list(), "queue": self.engine.queue()}
 
     async def api_magnet_download(self, request: Request) -> Dict[str, Any]:
         """把详情页某条磁力直接推给下载器（界面上的「下载」按钮）。

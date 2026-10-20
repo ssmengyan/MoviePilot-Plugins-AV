@@ -78,6 +78,25 @@ QUEUE_DONE_STATE = "completed"
 # 进度数字只作兜底：原生读数就是百分比口径时 ≥ 99.5 也算下完（状态万一没归一到 completed）。
 QUEUE_DONE_RAW = 99.5
 
+# 「用户主动取消，条目留在原位」的队列状态（2026-10-15 加的取消三出口，用户明确要求
+# 「取消后条目不要立即消失，应保留在原位置，再让用户选『换资源』还是『不要了』」）。
+#
+# 三条与它配套的硬口径（少一条这条状态就会自己变回去）：
+#   ① `_merge_queue()` **整条跳过** canceled 条目 —— 否则下载器里还查得到那个 hash 时，
+#      它会被翻回 `down`/`done`（取消白点了）；
+#   ② `queue()` 的 active/done 分桶**不含** canceled —— 否则每 5 秒都去问一个已经删掉的 hash，
+#      而且 `_flush_gone()` 会把它当「查不到 → 没了」处理；
+#   ③ `_flush_done()` / `_flush_failed()` / `_flush_gone()` / `migrate_queue_to_ledger()`
+#      一律不碰 canceled —— 尤其是 `_flush_gone()` 那条「Emby 库里已有 → 补记成已下载」的路径，
+#      它会把一条刚被取消的记录改写成「已下载」。
+#
+# ⚠️ 拼写：队列行与任务 (`task.state`) 用 `canceled`（单 l），而**读侧投影 `states.download`
+# 的取值集是 `cancelled`（双 l）**（`__init__.py` 的 `DOWNLOAD_STATES` / `_DOWNLOAD_STATE_MAP`）。
+# 两边各按自己的口径写，映射在 `__init__.py` 的 `_download_state_name()` 附近做 —— 别在这里改成双 l。
+QUEUE_CANCELED_STATE = "canceled"
+# 队列状态里「不需要再问下载器」的那几种（`_merge_queue` 与 `queue()` 都用它）。
+QUEUE_FROZEN_STATES = frozenset({QUEUE_CANCELED_STATE})
+
 # 「这颗种子是失败的」（v4.1 §9.2 第 1 条）。qBittorrent 的原始状态里这三类是明确的失败态：
 #   error        —— 种子出错（tracker / 磁盘 / 权限）
 #   missingFiles —— 文件已经不在磁盘上了
@@ -335,6 +354,21 @@ def _queue_fingerprint(entry: Dict[str, Any]) -> Tuple[str, str, str, str]:
     """
     return (str(entry.get("id") or ""), str(entry.get("number") or ""),
             str(entry.get("hash") or "").lower(), str(entry.get("added") or ""))
+
+
+def _queue_state(entry: Any) -> str:
+    """队列条目的状态串（非 dict / 缺字段一律空串）。"""
+    return str(entry.get("state") or "") if isinstance(entry, dict) else ""
+
+
+def _is_frozen(entry: Any) -> bool:
+    """这条队列条目是不是"冻结"状态（`canceled`）—— 冻结的条目不再被下载器读数改写。
+
+    为什么要一个专门的判据而不是各处写 `!= "canceled"`：`state` 的等值比较在 `tasks.py` 里
+    有十几处（分桶、摘除、迁移、判缺失），漏一处就会出现「取消之后条目自己变回下载中/已完成」
+    这种最难查的 bug。凡是"按状态筛条目"的地方都要过它。
+    """
+    return _queue_state(entry) in QUEUE_FROZEN_STATES
 
 
 class TaskEngine:
@@ -893,21 +927,251 @@ class TaskEngine:
                     + "；".join(f"{name}={step['detail'] or 'ok'}" for name, step in steps.items()))
         return {"ok": not failed, "steps": steps, "error": "；".join(failed)}
 
-    def _remove_torrents(self, hashes: List[str]) -> Tuple[bool, str]:
-        """让下载器删掉这些种子（不删文件），返回 `(成功?, 说明)`。"""
+    # ---------- 队列行的三个出口：取消 / 换资源 / 不要了（2026-10-15） ----------
+    #
+    # 与上面 `cancel_all()` 的分工（别混，两者是**粒度不同**的两件事）：
+    # - `cancel_all(number_or_key)`：**按番号**把三处（种子/台账/订阅）一次清干净，界面入口是
+    #   下载历史那行 / 详情页的「不要了」；
+    # - 本节的四个方法：**按队列行 id**，服务下载页那一行上的三颗按钮 ——
+    #   取消（删种子 + 行留在原位）、换资源（回任务页重挑）、不要了（清干净后把行摘掉）。
+
+    def _find_queue_entry(self, tid: str) -> Optional[Dict[str, Any]]:
+        """按队列行 id 取一条（找不到返回 None）。
+
+        `_queue_fingerprint` 的第一个字段就是 `id`（提交下载时生成 `q` + 8 位十六进制），
+        所以按 id 找天然唯一；老数据里 id 缺失的条目按 hash 兜一层。
+        """
+        target = str(tid or "").strip()
+        if not target:
+            return None
+        for entry in (self.store.kv_get(QUEUE_KEY, []) or []):
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("id") or "") == target:
+                return entry
+            if target and str(entry.get("hash") or "").lower() == target.lower():
+                return entry
+        return None
+
+    def _same_queue_row(self, entry: Any, tid: str) -> bool:
+        """这条队列行是不是 `tid` 指的那一条（按 id 优先，老数据没有 id 时按 hash 兜底）。
+
+        三个方法（取消/换资源/不要了）与摘行都用同一个判据，否则会出现"找到了但摘不掉"
+        ——队列里 `id` 是提交下载时生成的，只有升级前的老快照可能缺它。
+        """
+        if not isinstance(entry, dict):
+            return False
+        target = str(tid or "").strip()
+        if not target:
+            return False
+        if str(entry.get("id") or "") == target:
+            return True
+        digest = str(entry.get("hash") or "").lower()
+        return bool(digest) and digest == target.lower()
+
+    def _remove_queue_row(self, tid: str) -> bool:
+        """按 id 把一条队列行摘掉（就地、按指纹；返回是否真的摘掉了）。
+
+        为什么必须走 `kv_update` 的读改写：取快照与摘除之间「提交下载」还会插入新条目，
+        整份写回会把那条冲掉（`_flush_done` 里同样的老毛病）。
+        """
+        target = str(tid or "").strip()
+        if not target:
+            return False
+        removed = {"ok": False}
+
+        def keep(cur: Any) -> List[Dict[str, Any]]:
+            out: List[Dict[str, Any]] = []
+            for item in (cur or []):
+                if self._same_queue_row(item, target):
+                    removed["ok"] = True
+                    continue
+                out.append(item)
+            return out
+
+        try:
+            self.store.kv_update(QUEUE_KEY, keep)
+        except Exception as error:
+            logger.error(f"AVHelper 从队列摘除条目失败（{target}）：{error}")
+            return False
+        return bool(removed["ok"])
+
+    def cancel_entry(self, tid: str, delete_file: bool = True) -> Dict[str, Any]:
+        """「取消下载」：删下载器里的种子（默认连已下载的部分文件）→ 队列行改 `canceled` 留在原位。
+
+        **行不摘**（用户 2026-10-15 明确要求"条目不要立即消失，应保留在原位置"）：留在原位
+        用户才能接着点「换资源」或「不要了」；这两个出口见 `return_entry()` / `discard_entry()`。
+
+        纪律三条：
+        1. **先删种子、成功了才改状态**：删失败（下载器失联/拒绝）就什么都不改并返回失败 ——
+           否则条目会一边写着"已取消"、一边还在下载，下一轮 `_merge_queue` 还会把它翻回 `down`；
+        2. 种子本来就不在下载器里 → 算成功（目标状态已经达到，见 `_remove_torrents()`）；
+        3. 台账那条「提交下载时写的 `downloading`」**打墓碑** —— 这次下载没发生，
+           历史页不该多一行"不在库"。用户真要重下时 `download_upsert` 会自动解除墓碑。
+        """
+        entry = self._find_queue_entry(tid)
+        if not entry:
+            return {"ok": False, "message": "这条下载记录已经不在了"}
+        state = _queue_state(entry)
+        if state == QUEUE_CANCELED_STATE:
+            return {"ok": True, "message": "这条已经在取消状态"}
+        if state == "done":
+            return {"ok": False,
+                    "message": "这一条已经下载完成，不能在这里取消；要删请到下载器里操作"}
+
+        number = str(entry.get("number") or "")
+        digest = str(entry.get("hash") or "").strip()
+        if digest:
+            ok, detail = self._remove_torrents([digest], delete_file=delete_file)
+            if not ok:
+                return {"ok": False, "message": detail or "下载器没有接受删除请求"}
+        else:
+            detail = "这条记录没有种子 Hash，只改了界面状态"
+            logger.info(f"AVHelper 取消下载（无 hash）：{number or tid}")
+        if number:
+            try:
+                self.store.download_delete(number)
+            except Exception as error:
+                logger.error(f"AVHelper 取消下载时写台账墓碑失败（{number}）：{error}")
+
+        def mark(cur: Any) -> List[Dict[str, Any]]:
+            out: List[Dict[str, Any]] = []
+            for item in (cur or []):
+                if self._same_queue_row(item, tid):
+                    row = dict(item)
+                    row["state"] = QUEUE_CANCELED_STATE
+                    row["canceled_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                    row["canceled_detail"] = str(detail)[:200]
+                    row.pop("miss", None)          # 冻结条目不再累计"查不到"
+                    out.append(row)
+                else:
+                    out.append(item)
+            return out
+
+        try:
+            self.store.kv_update(QUEUE_KEY, mark)
+        except Exception as error:
+            logger.error(f"AVHelper 标记取消状态失败（{tid}）：{error}")
+        logger.info(f"AVHelper 取消下载：{number or tid} —— {detail}")
+        self.notifier.info("已取消下载", f"{number or tid} 的下载已取消，条目留在原位，"
+                                          "可以『换资源』或『不要了』")
+        return {"ok": True, "message": f"已取消 {number or tid} 的下载", "detail": detail}
+
+    def return_entry(self, tid: str) -> Dict[str, Any]:
+        """「换资源」：把这条下载摘掉，并让它对应的任务回到「任务」页待确认。
+
+        任务从 `pushed` 置回 `await` 时**候选与规则原样保留**（`build_task` 当初就整份落库了），
+        所以用户点一下就能立刻挑别的种子，不必重搜一遍站点（重搜要走限流、还慢）。
+
+        找不到任务（任务表被清理过 / 番号改了写法）时**不重搜**：这条路只回答"换资源"，
+        重搜会让按钮变成几秒钟的等待，而用户完全可以在任务页或详情页自己搜。
+        """
+        entry = self._find_queue_entry(tid)
+        if not entry:
+            return {"ok": False, "message": "这条下载记录已经不在了"}
+        number = str(entry.get("number") or "")
+        key = emby.norm_key(number) if number else ""
+        reopened = ""
+        try:
+            for task in (self.store.task_list(limit=200) or []):
+                if not isinstance(task, dict) or str(task.get("state") or "") != "pushed":
+                    continue
+                same = (str(task.get("id") or "") == str(tid)) or (
+                    key and emby.norm_key(str(task.get("number") or "")) == key)
+                if not same:
+                    continue
+                self.store.task_set_state(str(task.get("id") or ""), "await")
+                reopened = str(task.get("id") or "")
+                break
+        except Exception as error:
+            logger.error(f"AVHelper 换资源时把任务置回待确认失败：{error}")
+        if not self._remove_queue_row(str(tid)):
+            # 行没摘掉也别谎称成功：重新读一次队列再看它在不在
+            if self._find_queue_entry(tid):
+                return {"ok": False, "message": "没能把这条从下载列表移除，请重试"}
+        logger.info(f"AVHelper 换资源：{number or tid}（任务 {reopened or '未找到'}）")
+        if reopened:
+            self.notifier.info("已回到任务列表", f"{number or tid} 可以重新挑一个资源下载")
+            return {"ok": True, "message": f"已把 {number or tid} 放回「任务」页，去那里挑别的资源"}
+        self.notifier.info("已从下载列表移除", f"{number or tid} 已移出下载列表")
+        return {"ok": True,
+                "message": f"{number or tid} 已移出下载列表（没找到对应的待确认任务，"
+                           "可在任务页或详情页重新搜种子）"}
+
+    def discard_entry(self, tid: str, unsubscribe: bool = True) -> Dict[str, Any]:
+        """「不要了」：彻底取消 —— 摘行 + 台账墓碑 + 任务置 `canceled`（+ 可选删订阅 + 写 known）。
+
+        与 `cancel_all()` 的关系：那一个**按番号**清三处（种子/台账/订阅），这一个**按队列行 id**，
+        并且多做两件"这条下载不再回来"的事 —— 摘掉这一行、把它对应的任务标成已取消。
+
+        **种子那一步不在这里做**：直接复用 `cancel_all()` 的（它会同时收队列行与台账里的 hash，
+        比只删这一行的 hash 更彻底）。这里再删一次就是同一个请求发两遍 —— 实测过，
+        `_remove_torrents` 每次都会真的打一次下载器。
+        """
+        entry = self._find_queue_entry(tid)
+        number = str(entry.get("number") or "") if entry else ""
+        if not number:
+            if entry:
+                return {"ok": False, "message": "这条记录没有番号，无法彻底取消"}
+            return {"ok": False, "message": "这条下载记录已经不在了"}
+        # 台账墓碑 / 删订阅 / 写 known 忽略表 —— 都由 `cancel_all()` 一次做完（种子也在它那一步）
+        result = self.cancel_all(number, cancel_sub=bool(unsubscribe))
+        self._remove_queue_row(str(tid))
+        key = emby.norm_key(number)
+        try:
+            for task in (self.store.task_list(limit=200) or []):
+                if not isinstance(task, dict) or str(task.get("state") or "") == "canceled":
+                    continue
+                if key and emby.norm_key(str(task.get("number") or "")) == key:
+                    self.store.task_set_state(str(task.get("id") or ""), "canceled")
+        except Exception as error:
+            logger.error(f"AVHelper「不要了」置任务取消失败：{error}")
+        logger.info(f"AVHelper「不要了」：{number}（unsubscribe={bool(unsubscribe)}）")
+        self.notifier.info("已取消", f"{number} 已从下载列表移除"
+                                    + ("，订阅也一并取消" if unsubscribe else ""))
+        return {"ok": True, "message": f"已彻底取消 {number}", "steps": result.get("steps") or {},
+                "error": str(result.get("error") or "")}
+
+    def drop_entry(self, tid: str) -> Dict[str, Any]:
+        """只把这一行从下载列表去掉（不动下载器、不动台账、不动订阅）。
+
+        只允许对**已经停在原位的 `canceled` 行**做：`down` 的行要走 `cancel_entry`（先删种子），
+        否则用户会以为"取消了"，而下载器里那颗种子还在跑。
+        """
+        entry = self._find_queue_entry(tid)
+        if not entry:
+            return {"ok": False, "message": "这条下载记录已经不在了"}
+        if _queue_state(entry) != QUEUE_CANCELED_STATE:
+            return {"ok": False, "message": "这条还在下载中，请先「取消下载」"}
+        if not self._remove_queue_row(str(tid)):
+            return {"ok": False, "message": "没能把这条从下载列表移除，请重试"}
+        logger.info(f"AVHelper 移除已取消的下载行：{entry.get('number') or tid}")
+        return {"ok": True, "message": "已从下载列表移除"}
+
+    def _remove_torrents(self, hashes: List[str], delete_file: bool = False) -> Tuple[bool, str]:
+        """让下载器删掉这些种子，返回 `(成功?, 说明)`。
+
+        :param delete_file: `True` = 连磁盘上已下载的部分一起删；`False`（默认）= 只摘任务。
+            **两个调用方的口径是不同的，别统一**：
+            - 「不要了」(`cancel_all`) 走 `False`：那是"我不要这个下载了"，已经下好的正片可能
+              就在媒体库里，顺手删文件是破坏性动作（见 `cancel_all` 的说明）；
+            - 「取消下载」(队列行上那颗按钮) 走 `True`：取消的是**还没下完**的任务，
+              留着的半截文件既占地方、又会让下一次下同一个种子时 qB 拿旧数据去校验。
+        """
         chain = getattr(self.plugin, "chain", None)
         if chain is None:
             return False, "宿主没有可用的下载链，删不了种子"
         try:
             try:
-                result = chain.remove_torrents(hashs=list(hashes), delete_file=False)
+                result = chain.remove_torrents(hashs=list(hashes), delete_file=bool(delete_file))
             except TypeError:               # 老宿主的形参表不同
                 result = chain.remove_torrents(hashs=list(hashes))
         except Exception as error:
             logger.error(f"AVHelper 删除下载器种子失败：{error}")
             return False, f"删除下载器种子失败：{str(error)[:120]}"
         if result:
-            return True, f"已从下载器删除 {len(hashes)} 个种子（不动磁盘文件）"
+            tail = "（含已下载的部分文件）" if delete_file else "（不动磁盘文件）"
+            return True, f"已从下载器删除 {len(hashes)} 个种子{tail}"
         # 删返回 False 也可能是「这些 hash 本来就不在下载器里」（qB 对不存在的 id 就回 False）：
         # 复查一遍再下结论 —— 目标状态是"下载器里没有它"，已经达到就算成功。
         try:
@@ -982,6 +1246,10 @@ class TaskEngine:
             `_flush_gone` 收尾；用户手动在下载器里取消下载就是这么被发现的。
         """
         for entry in queue:
+            # 冻结条目（`canceled`）**整条跳过**：下载器里可能还查得到那个 hash（删种子失败、
+            # 或用户是在别处删的），照常合并就会把它翻回 `down`/`done` —— 用户刚点的取消白点了。
+            if _is_frozen(entry):
+                continue
             tid = str(entry.get("id") or "")
             if tid and tid in thumbs and thumbs[tid] != entry.get("thumb"):
                 entry["thumb"] = thumbs[tid]
@@ -996,6 +1264,21 @@ class TaskEngine:
                 continue
             entry["miss"] = 0
             name = str(getattr(torrent, "downloader", "") or entry.get("downloader") or "")
+            # 速度与剩余时间（2026-10-15 加）：宿主早就给了这两个字段
+            # （`app/schemas/transfer.py` 的 `DownloaderTorrent.dlspeed` / `left_time`，
+            # qB 模块已经排好成 "1.2 MB"/"8m" 这类可读串），插件以前白白丢掉，
+            # 界面上只有一根进度条 —— 用户看不出"还在动没有"。
+            # 拿不到就写空串（界面按"没有就不画"处理），**不编造**。
+            for attr, key in (("dlspeed", "speed"), ("left_time", "eta")):
+                try:
+                    value = str(getattr(torrent, attr, "") or "").strip()
+                except Exception:
+                    value = ""
+                if value:
+                    entry[key] = value
+                else:
+                    entry.pop(key, None)
+            entry["state_detail"] = str(getattr(torrent, "state", "") or "").strip().lower()
             try:
                 raw = float(getattr(torrent, "progress", 0) or 0)
             except (TypeError, ValueError):
@@ -1063,10 +1346,14 @@ class TaskEngine:
         if self.plugin.fill_thumbs(queue):     # 旧队列项没封面：补到就落库，省得每次重算
             thumbs = {str(x.get("id")): str(x.get("thumb") or "") for x in queue if x.get("id")}
 
+        # 分桶：冻结条目（`canceled`）两边都不进 —— 它们的种子已经被我们删掉了，再去问一次
+        # 只会得到一个"查不到"，把 `missing` 撑大（虽然 `_flush_gone` 那边也拦了一道）。
         active = [str(q.get("hash")) for q in queue
-                  if q.get("hash") and str(q.get("state") or "") != "done"]
+                  if q.get("hash") and not _is_frozen(q)
+                  and str(q.get("state") or "") != "done"]
         done = [str(q.get("hash")) for q in queue
-                if q.get("hash") and str(q.get("state") or "") == "done"]
+                if q.get("hash") and not _is_frozen(q)
+                and str(q.get("state") or "") == "done"]
         by_hash: Dict[str, Any] = {}
         missing: Optional[Set[str]] = None
         if fresh:
@@ -1206,8 +1493,13 @@ class TaskEngine:
           真下好的记录比留一行噪音糟得多。
 
         一句话：**队列按事实说话（没了就摘），台账只往上补、不往下删。**
+
+        **冻结条目（`canceled`）不在此列**（2026-10-15）：它们是我们自己删掉种子的，当然查不到，
+        但既不该被摘行（用户还要在原位点「换资源 / 不要了」），更不该走下面那条
+        「Emby 库里已有 → 按已完成补记」——那会把一条刚被取消的记录改写成「已下载」。
         """
         gone = [e for e in (queue or []) if isinstance(e, dict)
+                and not _is_frozen(e)
                 and str(e.get("state") or "") != "done"
                 and int(e.get("miss") or 0) >= QUEUE_MISS_LIMIT]
         if not gone:

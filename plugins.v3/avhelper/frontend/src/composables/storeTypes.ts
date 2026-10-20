@@ -148,7 +148,7 @@ export interface SearchTask {
   pending?: string
 }
 
-/** 下载队列项（`store.kv_get(QUEUE_KEY)` + 下载器进度回填）。 */
+/** 下载队列项（`store.kv_get(QUEUE_KEY)` + 下载器进度回填 + 读侧投影追加的字段）。 */
 export interface QueueItem {
   id?: string
   number?: string
@@ -160,12 +160,46 @@ export interface QueueItem {
   downloader?: string
   category?: string
   savePath?: string
-  /** `down` = 下载中，`done` = 已完成（`progress >= 100` 或下载器说在 做种/upload）。 */
+  /**
+   * 队列行状态：
+   * - `down` = 下载中；
+   * - `done` = 已完成（进度到 100 或下载器说在 做种/upload）——随即入台账并摘行；
+   * - `failed` = 种子自己报的失败态（error / missingFiles / unknown，见后端 `_failure_reason()`）；
+   * - `canceled` = **用户点了「取消下载」**，种子已从下载器删掉、**行留在原位**等用户选出口
+   *   （换资源 / 不要了 / 移除）。这个状态的条目对下载器读数免疫（后端 `_merge_queue` 整条跳过）。
+   */
   state?: string
   /** 百分比整数（0–100）。 */
   progress?: number
   added?: string
+  /** —— 以下都是**后端给了才画**的可选字段（老后端没有就整行不画，绝不编造）。 */
+  /** 失败原因（`state === 'failed'` 时后端记的）。 */
+  failed_reason?: string
+  /** 版本角标（数组或字典，两种写法都认）。 */
+  version_tags?: unknown
+  /** 版本角标（后端拼好的字符串，优先于 `version_tags`）。 */
+  badge?: string
+  version_count?: number
+  /** 取消时间（`state === 'canceled'` 时后端记的）。 */
+  canceled_at?: string
+  /** 取消时那一步的说明（例如"已从下载器删除 1 个种子（含已下载的部分文件）"）。 */
+  canceled_detail?: string
+  /** 影片标题（读侧统一投影追加；队列行拿不到时不画）。 */
+  title?: string
+  /** 影片封面/海报（投影口径；`thumb` 仍是小竖图）。 */
+  poster?: string
+  cover?: string
+  /** 演员数组（投影口径；队列行一般用不到，留给密度更高的用法）。 */
+  actors?: unknown
+  /** 三段状态（投影口径：`{download, library, scrape}`）。 */
+  states?: Record<string, string>
+  /** 下载速度（`12.3 MB` 这类可读串，后端从下载器读数里抄的 `dlspeed`）。 */
+  speed?: string
+  /** 剩余时间（`8m` 这类可读串，后端抄的 `left_time`）。 */
+  eta?: string
 }
+
+/** `GET plugin/bootstrap` 的返回（已实测可用，S6 的单一数据源）。 */
 
 /** `GET plugin/bootstrap` 的返回（已实测可用，S6 的单一数据源）。 */
 export interface BootstrapPayload {

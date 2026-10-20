@@ -179,8 +179,17 @@ export function usePluginStore(api: PluginApi) {
   // ---------- 派生值（角标与空态） ----------
   /** 待确认任务数（老 `renderPills` 的 `pillTasks`）。 */
   const awaitTasks = computed(() => tasks.value.filter(item => item.state === 'await').length)
-  /** 未完成的下载数（老 `renderPills` 的 `pillQueue`）。 */
-  const downloading = computed(() => queue.value.filter(item => item.state !== 'done').length)
+  /**
+   * 未完成的下载数（左栏「下载」角标）。
+   *
+   * 口径 2026-10-15 收紧：只数**真的还在下**的那些 —— `failed`（种子报错）与 `canceled`
+   * （用户点了取消）都不该再算"下载中"，否则页面上的「下载中（N）」与角标对不上
+   * （用户看到的数字与列表里的行数不一致，会被当成 bug）。
+   */
+  const downloading = computed(
+    () => queue.value.filter(item => item.state !== 'done' && item.state !== 'failed'
+      && item.state !== 'canceled').length,
+  )
 
   async function guarded<T>(
     key: string,
@@ -697,6 +706,114 @@ export function usePluginStore(api: PluginApi) {
     })
   }
 
+  /**
+   * `POST plugin/queue/cancel`：**取消下载**（下载页那一行左边那颗按钮）。
+   *
+   * 后端做的事：删下载器里的种子（**含已下载的部分文件**）→ 队列行改 `state='canceled'`
+   * 且**留在原位**（用户明确要求"条目不要立即消失"）→ 台账打墓碑。
+   *
+   * 闸门按行分（`qcancel:<id>`）：连点几行的取消互不阻塞 —— 与 0.6.2 的下载按钮同一口径
+   * （`docs/AVHelper-下载流程交互设计.md` §4.5）。
+   */
+  function cancelDownload(
+    rowId: string | number,
+  ): Promise<ActionResult<{ queue?: QueueItem[]; tasks?: SearchTask[] }>> {
+    const id = String(rowId ?? '').trim()
+    return guarded(`qcancel:${id}`, async () => {
+      if (!id) return { ok: false, kind: 'error' as ActionResultKind, message: '这条下载缺少 id，无法取消' }
+      const outcome = await send('post', 'queue/cancel', { id })
+      if (!outcome.ok) return { ok: false, kind: 'error' as ActionResultKind, message: outcome.message }
+      if (outcome.res.success !== true) {
+        return { ok: false, kind: 'error' as ActionResultKind, message: textOf(outcome.res) || '请稍后重试' }
+      }
+      syncLists(outcome.res)
+      return {
+        ok: true,
+        kind: 'ok' as ActionResultKind,
+        message: textOf(outcome.res) || '已取消下载',
+        data: outcome.res as { queue?: QueueItem[]; tasks?: SearchTask[] },
+      }
+    })
+  }
+
+  /**
+   * `POST plugin/queue/return`：**换资源** —— 摘掉这一行，并让它对应的任务回到「任务」页。
+   *
+   * 后端的口径：任务从 `pushed` 置回 `await`，**候选与规则原样保留**（当初就整份落库了），
+   * 所以用户一点就能立刻挑别的种子，不必重搜站点。
+   */
+  function returnDownload(
+    rowId: string | number,
+  ): Promise<ActionResult<{ queue?: QueueItem[]; tasks?: SearchTask[] }>> {
+    const id = String(rowId ?? '').trim()
+    return guarded(`qreturn:${id}`, async () => {
+      if (!id) return { ok: false, kind: 'error' as ActionResultKind, message: '这条下载缺少 id' }
+      const outcome = await send('post', 'queue/return', { id })
+      if (!outcome.ok) return { ok: false, kind: 'error' as ActionResultKind, message: outcome.message }
+      if (outcome.res.success !== true) {
+        return { ok: false, kind: 'error' as ActionResultKind, message: textOf(outcome.res) || '请稍后重试' }
+      }
+      syncLists(outcome.res)
+      return {
+        ok: true,
+        kind: 'ok' as ActionResultKind,
+        message: textOf(outcome.res) || '已放回任务列表',
+        data: outcome.res as { queue?: QueueItem[]; tasks?: SearchTask[] },
+      }
+    })
+  }
+
+  /**
+   * `POST plugin/queue/discard`：**不要了** —— 彻底取消（摘行 + 台账墓碑 + 任务取消 +
+   * 可选取消该番号的订阅）。
+   *
+   * :param unsubscribe: 默认 `true`（弹窗里的勾选框默认勾上）。不取消订阅的话，下一次订阅检查
+   *     还会把同一个番号重新搜出来落成任务，"不要了"就成了假话。
+   */
+  function discardDownload(
+    rowId: string | number,
+    unsubscribe = true,
+  ): Promise<ActionResult<{ queue?: QueueItem[]; tasks?: SearchTask[] }>> {
+    const id = String(rowId ?? '').trim()
+    return guarded(`qdiscard:${id}`, async () => {
+      if (!id) return { ok: false, kind: 'error' as ActionResultKind, message: '这条下载缺少 id' }
+      const outcome = await send('post', 'queue/discard', { id, unsubscribe: !!unsubscribe })
+      if (!outcome.ok) return { ok: false, kind: 'error' as ActionResultKind, message: outcome.message }
+      if (outcome.res.success !== true) {
+        return { ok: false, kind: 'error' as ActionResultKind, message: textOf(outcome.res) || '请稍后重试' }
+      }
+      syncLists(outcome.res)
+      return {
+        ok: true,
+        kind: 'ok' as ActionResultKind,
+        message: textOf(outcome.res) || '已彻底取消',
+        data: outcome.res as { queue?: QueueItem[]; tasks?: SearchTask[] },
+      }
+    })
+  }
+
+  /** `DELETE plugin/queue?id=`：把一条**已取消**的灰行从下载列表去掉（不动下载器/台账）。 */
+  function dropDownloadRow(
+    rowId: string | number,
+  ): Promise<ActionResult<{ queue?: QueueItem[]; tasks?: SearchTask[] }>> {
+    const id = String(rowId ?? '').trim()
+    return guarded(`qdrop:${id}`, async () => {
+      if (!id) return { ok: false, kind: 'error' as ActionResultKind, message: '这条下载缺少 id' }
+      const outcome = await send('delete', 'queue', undefined, { id })
+      if (!outcome.ok) return { ok: false, kind: 'error' as ActionResultKind, message: outcome.message }
+      if (outcome.res.success !== true) {
+        return { ok: false, kind: 'error' as ActionResultKind, message: textOf(outcome.res) || '请稍后重试' }
+      }
+      syncLists(outcome.res)
+      return {
+        ok: true,
+        kind: 'ok' as ActionResultKind,
+        message: textOf(outcome.res) || '已移出下载列表',
+        data: outcome.res as { queue?: QueueItem[]; tasks?: SearchTask[] },
+      }
+    })
+  }
+
   /** `DELETE plugin/notices`：清空通知（不可恢复，界面自己先确认）。 */
   function clearNotices(): Promise<ActionResult> {
     return guarded('clearNotices', async () => {
@@ -788,6 +905,10 @@ export function usePluginStore(api: PluginApi) {
     acquireMovie,
     startDownload,
     cancelTask,
+    cancelDownload,
+    returnDownload,
+    discardDownload,
+    dropDownloadRow,
     downloadMagnet,
     clearNotices,
     saveRule,

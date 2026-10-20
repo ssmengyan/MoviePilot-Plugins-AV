@@ -146,14 +146,93 @@ const counts = computed<Required<DownloadCounts>>(() => {
   }
 })
 
-/** 工具条那句概况：`共 n 条 · 在库 x · 不在库 y`（「不在库」就是被删/没入库的那批）。 */
+/**
+ * 入库状态的**三档**（2026-10-15 加，用户诉求"新下载影片时，若刮削未完成或已入库，
+ * 当前逻辑不清晰，需明确整体逻辑"）。
+ *
+ * 原来只有两档：Emby 命中=「在库」，没命中=「不在库（可能已删除）」。问题是**刚下完的片子**
+ * 也会落进第二档 —— 文件刚落盘、Emby 还没扫到/刮削还没跑完，界面就说"可能已删除"，
+ * 用户会以为片子丢了。所以插一档「待入库」：
+ *
+ * | 档 | 判据 | 给用户的话 |
+ * | --- | --- | --- |
+ * | `in` | 此刻 Emby 索引里有这个番号 | 在库 |
+ * | `pending` | 没有，但完成时间在 `IMPORT_GRACE_H` 小时内 | 待入库（Emby 还没扫到 / 还没刮削） |
+ * | `gone` | 没有，且完成时间已超过宽限期 | 不在库（文件可能已删） |
+ *
+ * 宽限期取 48 小时（方案 §4.2 的取值）：Emby 实时监控 + MetaTube 通常几分钟到几小时入库，
+ * 48 小时足够覆盖"片子大、扫描慢、刮削排队"的正常情况。**注意它不等于"一定会入库"** ——
+ * MetaTube 有它压根没有的源（本库实测 4 条永远刮不到），所以文案里说"可能"，不承诺。
+ */
+const IMPORT_GRACE_H = 48
+
+type LibTier = 'in' | 'pending' | 'gone'
+
+/** 完成时间是否还在宽限期内（解析不出来按"不在宽限期"处理，宁可说"可能已删"也不谎称"待入库"）。 */
+function withinGrace(completedAt: unknown): boolean {
+  const text = String(completedAt || '').trim()
+  if (!text) return false
+  const stamp = Date.parse(text.replace(/-/g, '/'))
+  if (Number.isNaN(stamp)) return false
+  return Date.now() - stamp < IMPORT_GRACE_H * 3600 * 1000
+}
+
+/** 一条记录的入库档位。 */
+function libTier(item: DownloadRecord): LibTier {
+  if (inLibrary(item)) return 'in'
+  return withinGrace(item.completedAt || item.createdAt) ? 'pending' : 'gone'
+}
+
+/** 库状态文案（三档）。 */
+function libraryText(item: DownloadRecord): string {
+  const tier = libTier(item)
+  if (tier === 'in') return '在库'
+  return tier === 'pending' ? '待入库' : '不在库（可能已删除）'
+}
+
+/** 每档的颜色与悬浮说明（`v-chip` 的 `color` 与 `title`）。 */
+function libColor(item: DownloadRecord): string | undefined {
+  const tier = libTier(item)
+  return tier === 'in' ? 'success' : tier === 'pending' ? 'warning' : undefined
+}
+
+function libHint(item: DownloadRecord): string {
+  const tier = libTier(item)
+  if (tier === 'in') return String(item.lib?.path || '')
+  if (tier === 'pending') {
+    return '刚下载完，Emby 还没扫到或刮削还没跑完；也可能这个番号刮不到（等一会儿再看）'
+  }
+  return 'Emby 库里没有这个番号，文件可能已经删了'
+}
+
+/** 三档各自的条数（全量口径：过滤只改下面的行数）。 */
+const tiers = computed(() => {
+  const out = { in: 0, pending: 0, gone: 0 }
+  for (const item of items.value) out[libTier(item)] += 1
+  return out
+})
+
+/** 工具条那句概况：`共 n 条 · 在库 x · 待入库 y · 不在库 z`。 */
 const summary = computed(
-  () => `共 ${counts.value.total} 条 · 在库 ${counts.value.inLibrary} · 不在库 ${counts.value.missing}`,
+  () => `共 ${counts.value.total} 条 · 在库 ${tiers.value.in}`
+    + ` · 待入库 ${tiers.value.pending} · 不在库 ${tiers.value.gone}`,
 )
 
-/** 库状态文案：`lib` 存在 → 「在库」，`null` → 「不在库（可能已删除）」（契约里就这一句）。 */
-function libraryText(item: DownloadRecord): string {
-  return inLibrary(item) ? '在库' : '不在库（可能已删除）'
+/** 演员那一段：投影给的 `actors[]` 优先（中文名口径），没有才退回台账那个单串。 */
+function actorText(item: DownloadRecord): string {
+  const list = (item as unknown as Record<string, any>).actors
+  if (Array.isArray(list)) {
+    const names = list
+      .map(row => String((row || {}).name || (row || {}).zh || '').trim())
+      .filter(Boolean)
+    if (names.length) return names.join(' / ')
+  }
+  return String(item.actor || '')
+}
+
+/** Emby 条目地址（在库的行给一颗「在 Emby 打开 ↗」）。 */
+function libUrl(item: DownloadRecord): string {
+  return String(item.lib?.url || '')
 }
 
 /**
@@ -266,10 +345,8 @@ onMounted(() => {
 
 <template>
   <div class="avh-history">
-    <!-- 工具条：一句说明 + 搜索 + 只看不在库 + 刷新（设计文档 §5.1 的四件套） -->
+    <!-- 工具条：**不画说明句**（用户 2026-10-15 要求），只留搜索 + 只看不在库 + 刷新 -->
     <div class="avh-history__toolbar">
-      <span class="avh-history__hint">插件下载过的番号都在这里，文件删了也留着记录</span>
-
       <div class="avh-history__spacer" />
 
       <v-text-field
@@ -285,32 +362,44 @@ onMounted(() => {
         aria-label="按番号、标题或演员过滤下载历史"
       />
 
-      <!-- 开关只显示 `lib == null` 的行：批量清点"记录在、库里没有"的那批 -->
+      <!--
+        开关只显示**未入库**的行（`lib == null`，含「待入库」那一档）：
+        批量清点"记录在、库里还没有"的那批。标签从「只看不在库」改成「只看未入库」是
+        2026-10-15 加三档时顺手对齐的 —— 它本来就含待入库，旧标签会让人以为待入库也被滤掉。
+      -->
       <v-switch
         v-model="onlyMissing"
         class="avh-history__switch"
         color="primary"
         density="compact"
         hide-details
-        label="只看不在库"
+        label="只看未入库"
       />
 
       <v-btn variant="outlined" size="small" :loading="loading" @click="load(true)">↻ 刷新</v-btn>
     </div>
 
-    <!-- 库状态与规模：在库绿、不在库灰；过滤只改下面表格里的**行数**，计数仍按全量 -->
+    <!-- 库状态与规模：在库绿、待入库黄、不在库灰；过滤只改下面表格里的**行数**，计数仍按全量 -->
     <div v-if="!error && (loaded || items.length)" class="avh-history__stats">
       <v-chip
         size="x-small"
         variant="flat"
         color="success"
         label
-      >在库 {{ counts.inLibrary }}</v-chip>
+      >在库 {{ tiers.in }}</v-chip>
+      <v-chip
+        v-if="tiers.pending"
+        size="x-small"
+        variant="flat"
+        color="warning"
+        label
+        title="刚下载完、Emby 还没扫到或刮削还没跑完；超过 48 小时仍未入库就归到「不在库」"
+      >待入库 {{ tiers.pending }}</v-chip>
       <v-chip
         size="x-small"
         variant="outlined"
         label
-      >不在库 {{ counts.missing }}</v-chip>
+      >不在库 {{ tiers.gone }}</v-chip>
       <span class="avh-history__hint">{{ summary }}</span>
     </div>
 
@@ -404,22 +493,33 @@ onMounted(() => {
               />
             </td>
             <td class="avh-history__no">{{ displayNumber(item) }}</td>
-            <!-- 标题长了省略号，`title` 给全量（照候选表 `.avh-cand__spec` 的处理） -->
+            <!-- 标题长了省略号，`title` 给全量（照候选表 `.avh-cand__spec` 的处理）。
+                 0.7.4 起这个值是**读侧统一投影的中文标题**（后端 `_film_extra` 让投影说话），
+                 不再是下载那一刻的种子名 —— 与榜单/下载页/库页同一个值。 -->
             <td class="avh-history__title" :title="String(item.title || '')">
               {{ String(item.title || '') || '—' }}
             </td>
-            <td :title="String(item.actor || '')">{{ String(item.actor || '') || '—' }}</td>
+            <!-- 演员：投影的 `actors[]`（中文名口径）优先，没有才退回台账那个单串 -->
+            <td :title="actorText(item)">{{ actorText(item) || '—' }}</td>
             <td>{{ sizeLabel(item) }}</td>
             <td :title="String(item.completedAt || item.createdAt || '')">{{ completedText(item) }}</td>
-            <!-- 在库绿、不在库灰：`title` 带上库内路径，判断"是不是同一部片"时不用点进去 -->
-            <td :title="String(item.lib?.path || '')">
+            <!-- 入库三档：在库绿 / 待入库黄 / 不在库灰；`title` 给出该怎么理解这一档 -->
+            <td :title="libHint(item)">
               <v-chip
                 size="x-small"
                 label
-                :variant="inLibrary(item) ? 'flat' : 'outlined'"
-                :color="inLibrary(item) ? 'success' : undefined"
+                :variant="libTier(item) === 'gone' ? 'outlined' : 'flat'"
+                :color="libColor(item)"
                 class="avh-history__lib"
               >{{ libraryText(item) }}</v-chip>
+              <!-- 在库的行给一个直达 Emby 的入口（`lib.url` 现成，判"是不是同一部片"时有用） -->
+              <a
+                v-if="libUrl(item)"
+                class="avh-history__embylink"
+                :href="libUrl(item)"
+                target="_blank"
+                rel="noopener"
+              >打开 ↗</a>
             </td>
             <td class="avh-history__act">
               <v-btn
@@ -548,9 +648,10 @@ onMounted(() => {
   width: 152px;
 }
 
-/* 「不在库（可能已删除）」是这一页最长的一格文案，给足宽度免得被省略号吃掉 */
+/* 「不在库（可能已删除）」是这一页最长的一格文案，给足宽度免得被省略号吃掉；
+   0.7.4 起这一格还要塞下在库行的「打开 ↗」，所以加宽 20px。 */
 .avh-history__col-lib {
-  width: 170px;
+  width: 190px;
 }
 
 .avh-history__col-act {
@@ -615,6 +716,23 @@ onMounted(() => {
 /* 库状态标签：跟表格同一号字（`v-chip` 默认字比表格大一点，会显得突兀） */
 .avh-history__lib {
   font-size: 11.5px;
+}
+
+/*
+ * 在库行那颗「打开 ↗」：跟着 chip 排在后面，比表格正文小半号、走主色。
+ * 在库那一格本来就是这一行最长的内容（170px 列宽），所以按钮必须能跟着 chip 挤在同一行
+ * —— `nowrap` 交给 `td` 的既有规则，这里只控字号与颜色。
+ */
+.avh-history__embylink {
+  margin-left: 6px;
+  font-size: 11.5px;
+  color: rgb(var(--v-theme-primary));
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.avh-history__embylink:hover {
+  text-decoration: underline;
 }
 
 /* 骨架格：主题前景色 8% 铺一条，按文字高度给高（不引入动画，避免抢注意力） */

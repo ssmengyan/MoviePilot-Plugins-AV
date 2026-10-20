@@ -21,17 +21,14 @@
  * | `queueMissingThumbs(S.queue)`（每轮最多 3 个、补过的番号不再排队） | 同（`common.queueMissingThumbs`），队列每次变化补一轮 |
  * | 轮询：`startTaskPolling()` 每 5 秒 `loadTasks(false)`，靠 `S.view` 是 tasks 或 downloads 判断"只在任务/下载页" | 本视图挂载且 `document.visibilityState === 'visible'` 时每 5 秒 `store.refreshTasks(true)`；**卸载或不可见即停**（不会在别的栏目里偷偷轮询） |
  *
- * **按 `state` 拆两节（下载历史契约 §5.3，本轮新增，用户诉求①）**：
- * 「已完成下载不再显示进度，直接当历史停住」——所以队列拆成「下载中」（`state !== 'done'`，
- * 照旧进度/百分比/封面）与「已完成」（`state === 'done'`：番号/标题/大小/完成时间/库状态，
- * **没有进度条、没有任何"进行中"交互**，就是一条静态历史行）。
+ * **按 `state` 拆节（下载历史契约 §5.3）**：
+ * 队列只剩两类要画的 —— 「下载中」（`state !== 'done' && state !== 'failed'`：封面/进度/百分比）
+ * 与「下载失败」（`state === 'failed'`：红色徽标 + 失败原因，没有进度条）。
  *
- * 为什么「已完成」这一节通常**是空的**：契约 §3 起，条目一旦变成 `done`，后端就把它写进下载台账
- * 并**从队列里删掉**（历史归台账，队列只留下载中）。留着这一节是为了兼容两种过渡情形 ——
- * ① 升级前留下的旧快照里那些 `done` 条目（后端删得掉队列，删不掉已经取到的快照）；
- * ② 轮询间隙：下载器刚报完成、后端这一轮还没清掉的那几秒。
- * 完成清单的权威位置是同一栏的「下载历史」页签，所以小节标题右侧写了那句指路。
- * 真机 2026-10-11 探针：队列 19 条里 17 条是 `done`（旧快照），这一节眼下反而是满的。
+ * **2026-10-15 起「已完成」整节删除**（用户明确要求）：条目一变 `done` 后端就把它写进台账
+ * 并**从队列摘掉**，所以那一节按设计就该是空的；以前留着它只为兼容旧快照与刷新间隙，
+ * 结果是一屏里同一件事说两遍（页签 + 小节标题 + 一节永远为空的列表）。完成清单的权威位置
+ * 就是同一栏的「下载历史」页签。
  *
  * **2026-10-12 起本栏分两个页签（用户要求的"下载历史与下载界面融合"）**：
  * 「下载中」= 上面这套（队列 + 旧快照的完成节），「下载历史」= 原第七栏 `HistoryView`
@@ -62,6 +59,8 @@ import EmptyState from '../common/EmptyState.vue'
 import Thumb from '../common/Thumb.vue'
 import HistoryView from './HistoryView.vue'
 import { filledThumbs, queueMissingThumbs } from '../common/common'
+import { pushBottomToast } from '../../composables/bottomToast'
+import { useHostConfirm } from '../../composables/useHostDialogs'
 import { hostToast, type PluginApi } from '../../composables/usePluginApi'
 import type { PluginStore } from '../../composables/usePluginStore'
 import type { QueueItem } from '../../composables/storeTypes'
@@ -84,6 +83,55 @@ const props = withDefaults(
 )
 
 const t = hostToast(props.toast as any)
+
+/**
+ * 宿主要求复用的确认弹窗；拿不到注入时 `useHostConfirm` 内部降级 `window.confirm`。
+ *
+ * 取消下载会**连磁盘上已下载的部分文件一起删**，属破坏性动作，必须过这道闸
+ * （与历史页「移除记录」、订阅页「取消」同一道闸）。
+ */
+const confirm = useHostConfirm()
+
+/**
+ * 行内动作的 in-flight（按行 id 记）。
+ *
+ * 纪律与 0.6.2 的任务页下载按钮**完全一致**（见 `AGENTS.md` §5 那条硬口径）：
+ * 1. 连点几行的按钮互不阻塞（各自等各自的结论），只有同一行重复触发才合并；
+ * 2. 行内转圈**只由这一行自己的结论结束** —— 成功就随行消失/变形，失败才由这里解下来；
+ * 3. 兜底看门狗：超过 `WATCHDOG_MS` 还没有结论（宿主那条请求挂了又没超时）只解这一行。
+ * `key` = `<动作>:<行id>`，动作有 `cancel` / `return` / `discard` / `drop`。
+ */
+const pending = ref<Record<string, boolean>>({})
+/** 看门狗窗口：与 `CandTable` 同一口径（3 分钟）。 */
+const WATCHDOG_MS = 180_000
+
+function pendingKey(action: string, item: QueueItem): string {
+  return `${action}:${String(item.id || item.hash || item.number || '')}`
+}
+
+function isPending(action: string, item: QueueItem): boolean {
+  return !!pending.value[pendingKey(action, item)]
+}
+
+/** 起一个行内动作：置转圈 + 看门狗；`run` 返回后按需自动解下来（成功由数据变化带走）。 */
+function withRowPending(action: string, item: QueueItem, run: () => Promise<boolean>): void {
+  const key = pendingKey(action, item)
+  if (pending.value[key]) return
+  pending.value = { ...pending.value, [key]: true }
+  const clear = () => {
+    if (!pending.value[key]) return
+    const next = { ...pending.value }
+    delete next[key]
+    pending.value = next
+  }
+  window.setTimeout(clear, WATCHDOG_MS)
+  void run().finally(clear)
+}
+
+/** 这一行是不是「已经取消」（后端 `state='canceled'`，行留在原位等用户选出口）。 */
+function isCanceled(item: QueueItem): boolean {
+  return item.state === 'canceled'
+}
 
 /** 轮询间隔：与老 `startTaskPolling()` 的 5000ms 一致（下载器进度本身就更新得慢）。 */
 const POLL_MS = 5000
@@ -121,25 +169,29 @@ const rows = computed<QueueItem[]>(() =>
 )
 
 /**
- * 完成行比队列项多出来的**可选**字段（契约 §5.3 要求「已完成」列出 标题/完成时间/库状态）。
+ * 队列项之外**可选读**的字段（后端 `_film_extra()` / `_merge_queue()` 什么时候给了就能用）。
  *
- * 为什么要单独声明：契约 §4 的台账条目（`GET /downloads`）才有 `title` / `completedAt` / `lib`，
- * 而真机实测（2026-10-11 探针：队列 19 条、17 条 `done`）队列条目的**全部键**只有
- * `id/number/thumb/site/spec/size/hash/downloader/category/savePath/state/progress/added`。
- * 所以这里按可选读：后端哪天把台账字段并进旧队列行（或直接给队列项带上），界面自动就能显示；
- * 拿不到就退回 `added`／留空，**绝不编造**「不在库」这种结论（那是台账 + Emby 实时命中的口径）。
+ * 队列条目的必给键只有
+ * `id/number/thumb/site/spec/size/hash/downloader/category/savePath/state/progress/added`；
+ * 所以这里一律按可选读：拿不到就**不画那一行**，绝不编造结论（例如"不在库"）。
+ *
+ * 「已完成」那一节 2026-10-15 已按用户要求整节删除（条目一变 `done` 就被后端写进台账并摘队列，
+ * 留着只是同一件事在两处说），所以这个类型现在只服务**失败行**。
  */
-type DoneRow = QueueItem & {
-  /** 片名（台账口径）。 */
+type RowExtra = QueueItem & {
+  /** 片名（读侧统一投影给的 `title`；队列行拿不到时不画）。 */
   title?: string
-  /** 完成时间（台账的 `completed_at`；旧队列快照没有）。 */
-  completedAt?: string
-  /** 实时 Emby 命中（`null` = 不在库），与契约 §4 的 `lib` 同名同形。 */
-  lib?: { id?: string; name?: string; path?: string; url?: string } | null
-  /** 失败原因（v4.1 §9.2-1：`state === 'failed'` 时后端记的那个字段）。 */
+  /** 下载速度（`12.3 MB` 这类可读串，后端从下载器读数里抄的）。 */
+  speed?: string
+  /** 剩余时间（`8m` 这类可读串）。 */
+  eta?: string
+  /** 取消时间与那一步的说明（`state === 'canceled'` 时后端记的）。 */
+  canceled_at?: string
+  canceled_detail?: string
+  /** 失败原因（`state === 'failed'` 时后端记的那个字段）。 */
   failed_reason?: string
   failedReason?: string
-  /** 版本角标数据（v4.1 §9.2-6；老后端没有这两个字段时什么都不画）。 */
+  /** 版本角标数据（后端没有这两个字段时什么都不画）。 */
   version_tags?: unknown
   versionTags?: unknown
   badge?: string
@@ -162,20 +214,44 @@ function isFailed(item: QueueItem): boolean {
   return item.state === 'failed'
 }
 
-/** 「下载中」：还没完成、也还没失败。 */
+/**
+ * 「下载中」：还没完成、也还没失败、**也还没被取消**。
+ *
+ * `canceled` 单独成节（见 `canceledRows`）：它的种子已经被删掉了，画进度条与百分比是假的；
+ * 但**行不消失**（用户要求"保留在原位置"），所以它必须有自己的一节来承载那三个出口。
+ */
 const activeRows = computed<QueueItem[]>(() =>
-  rows.value.filter(item => !isDone(item) && !isFailed(item)),
+  rows.value.filter(item => !isDone(item) && !isFailed(item) && !isCanceled(item)),
+)
+
+/** 「已取消」：行留在原位，等用户选「换资源」或「不要了」。 */
+const canceledRows = computed<RowExtra[]>(() =>
+  rows.value.filter(item => isCanceled(item)) as RowExtra[],
 )
 
 /** 「失败」：`state === 'failed'`，红色徽标 + 悬浮/正文给出 `failed_reason`。 */
-const failedRows = computed<DoneRow[]>(() => rows.value.filter(item => isFailed(item)) as DoneRow[])
-
-/** 「已完成」：`state === 'done'` —— 静态历史行，没有进度条与一切"进行中"交互（契约 §5.3）。 */
-const doneRows = computed<DoneRow[]>(() => rows.value.filter(item => isDone(item)) as DoneRow[])
+const failedRows = computed<RowExtra[]>(() => rows.value.filter(item => isFailed(item)) as RowExtra[])
 
 /** 失败原因（两种写法都认；都没有就写「原因未知」，不编造）。 */
-function failReasonOf(item: DoneRow): string {
+function failReasonOf(item: RowExtra): string {
   return String(item.failed_reason || item.failedReason || '').trim() || '原因未知'
+}
+
+/**
+ * 速度与剩余时间那一段：`12.3 MB/s · 剩余 8m`（两段各自可有可无；都没有返回空串）。
+ *
+ * 数据来自后端 `_merge_queue()` 从下载器读数里抄下来的 `speed` / `eta`
+ * （宿主的 `DownloaderTorrent.dlspeed` / `left_time`，已经是可读串）。
+ * **没有就不画** —— 宁可退回「下载中…」，也不编一个"0 B/s"出来。
+ */
+function speedOf(item: RowExtra): string {
+  const row = item as unknown as Record<string, any>
+  const speed = String(row.speed || '').trim()
+  const eta = String(row.eta || '').trim()
+  const parts: string[] = []
+  if (speed && speed !== '0 B') parts.push(/\/s$/i.test(speed) ? speed : `${speed}/s`)
+  if (eta) parts.push(`剩余 ${eta}`)
+  return parts.join(' · ')
 }
 
 /** 是否画版本角标（`badge` / `version_tags` 任一有值；老后端两个都没有 → false）。 */
@@ -231,23 +307,6 @@ function pathOf(item: QueueItem): string {
   return String(item.savePath || '') + (item.added ? ` · ${item.added}` : '')
 }
 
-/**
- * 完成行的「大小 · 完成时间 · 库状态」一行（契约 §5.3 的列）。
- *
- * 三个字段都按"拿得到才画"处理：
- * - 完成时间：台账的 `completedAt` 优先；旧队列快照只有 `added`（提交下载那一刻），
- *   就照实写「加入 …」而不是硬写成"完成"（两种情形差着整段下载时间，别骗用户）；
- * - 库状态：`lib` 键存在才画（`null` = 不在库）；键都没有就整段不出现 —— 凭一个拿不到的字段
- *   写「不在库」是编造，也会让用户以为台账在说这部片已经没了。
- */
-function doneInfoOf(item: DoneRow): string {
-  const completed = String(item.completedAt || '')
-  const added = String(item.added || '')
-  const when = completed ? `完成 ${completed}` : added ? `加入 ${added}` : ''
-  const lib = 'lib' in item ? (item.lib ? '在库' : '不在库') : ''
-  return [item.size, when, lib].filter(Boolean).join(' · ') || '—'
-}
-
 /** 行 key：老实现按数组顺序画、没有 key 概念；这里优先用队列里唯一的 hash / id。 */
 function rowKey(item: QueueItem, index: number): string {
   return String(item.hash || item.id || `${item.number || ''}#${index}`)
@@ -260,6 +319,99 @@ function rowKey(item: QueueItem, index: number): string {
  */
 function thumbOf(item: QueueItem): string {
   return String(item.thumb || filledThumbs.value[String(item.number || '')] || '')
+}
+
+/** 这一行的显示名（番号优先，其次片名/种子站点，最后兜底）。 */
+function labelOf(item: QueueItem): string {
+  return String(item.number || (item as RowExtra).title || item.site || '这条下载')
+}
+
+/**
+ * 「取消下载」：删下载器里的种子（**含已下载的部分文件**）→ 行变「已取消」留在原位。
+ *
+ * 三件事按顺序：
+ * 1. 宿主确认弹窗写清"会删掉已经下好的部分"，别让用户在不知情的情况下丢文件；
+ * 2. `store.cancelDownload(id)`（闸门 `qcancel:<id>`，按行并发）；
+ * 3. **成功不摘行**：后端把这一行标成 `canceled` 并回一份新队列，界面自会把它挪到
+ *    「已取消」那一节 —— 前端不自己动手，免得与后端那份快照打架。
+ */
+async function cancelDownload(item: QueueItem): Promise<void> {
+  const label = labelOf(item)
+  const ok = await confirm({
+    type: 'warn',
+    title: '取消下载',
+    content: `将从下载器删除「${label}」的下载任务，并删除已下载的部分文件。`
+      + `条目会留在原位，之后可以「换资源」重新挑一个，或者「不要了」彻底取消。`,
+    confirmText: '取消下载',
+    cancelText: '先留着',
+  })
+  if (!ok) return
+  withRowPending('cancel', item, async () => {
+    const res = await props.store.cancelDownload(String(item.id || ''))
+    if (res.ok) {
+      pushBottomToast('success', res.message || `已取消 ${label}`)
+      return true
+    }
+    pushBottomToast('warning', `取消失败：${res.message || '请稍后重试'}`)
+    return false
+  })
+}
+
+/**
+ * 「换资源」：把这条下载摘掉，并让它对应的任务回到「任务」页待确认。
+ *
+ * 后端的口径是"任务置回 await、候选原样保留"，所以点完去任务页就能挑别的种子，
+ * 不必重搜站点（重搜要走限流、还慢）。
+ */
+async function returnDownload(item: QueueItem): Promise<void> {
+  const label = labelOf(item)
+  withRowPending('return', item, async () => {
+    const res = await props.store.returnDownload(String(item.id || ''))
+    if (res.ok) {
+      pushBottomToast('success', res.message || `已把 ${label} 放回任务列表`)
+      return true
+    }
+    pushBottomToast('warning', `操作失败：${res.message || '请稍后重试'}`)
+    return false
+  })
+}
+
+/**
+ * 「不要了」：彻底取消 —— 摘行 + 台账墓碑 + 任务取消 +（默认）取消该番号的订阅。
+ *
+ * 勾选框默认**勾上**：不取消订阅的话，下一次订阅检查还会把同一个番号重新搜出来落成任务，
+ * "不要了"就成了假话（后端 `cancel_all` 会给 `known` 写一条忽略记录兜底）。
+ */
+async function discardDownload(item: QueueItem): Promise<void> {
+  const label = labelOf(item)
+  const ok = await confirm({
+    type: 'warn',
+    title: '不要了',
+    content: `「${label}」会从下载列表移除，下载历史里也不再保留这条记录。`
+      + `如果它有番号订阅，会一并取消，以后不会再自动下载。`,
+    confirmText: '不要了',
+    cancelText: '先留着',
+  })
+  if (!ok) return
+  withRowPending('discard', item, async () => {
+    const res = await props.store.discardDownload(String(item.id || ''), true)
+    if (res.ok) {
+      pushBottomToast('success', res.message || `已彻底取消 ${label}`)
+      return true
+    }
+    pushBottomToast('warning', `取消失败：${res.message || '请稍后重试'}`)
+    return false
+  })
+}
+
+/** 「移除」：只把这条已经取消的灰行从列表去掉（不动下载器、不动台账）。 */
+async function dropCanceledRow(item: QueueItem): Promise<void> {
+  withRowPending('drop', item, async () => {
+    const res = await props.store.dropDownloadRow(String(item.id || ''))
+    if (res.ok) return true
+    pushBottomToast('warning', `移除失败：${res.message || '请稍后重试'}`)
+    return false
+  })
 }
 
 /**
@@ -355,12 +507,9 @@ onBeforeUnmount(() => {
       </div>
 
       <!--
-        那句"进度取自下载器"只对「下载中」成立：看历史时**整句不画**。
-        历史页签自己有同一口径的说明（`HistoryView` 的工具条那句），外面再来一句一模一样的
-        就是同一句话在一屏里说两遍 —— 真机上看着就像出了 bug（0.5.0 真机验收发现）。
+        顶部**不画任何说明句**（用户 2026-10-15 明确要求）：「进度取自下载器，每 5 秒自动刷新」
+        这类话既不专业也占位置，工具条只留"数据 + 操作"。同理历史页与库页的那两句也一并删了。
       -->
-      <span v-if="tab === 'active'" class="avh-downloads__hint">进度取自下载器，每 5 秒自动刷新</span>
-
       <div class="avh-downloads__spacer" />
 
       <v-btn v-if="tab === 'active'" variant="outlined" size="small" @click="refreshQueue">↻ 刷新进度</v-btn>
@@ -371,9 +520,10 @@ onBeforeUnmount(() => {
     -->
     <template v-if="tab === 'active'">
       <template v-if="rows.length">
-        <!-- ===== 下载中：老实现的全套（封面 / 元信息 / 路径 / 百分比 / 进度条） ===== -->
-        <div class="avh-downloads__secttl">下载中（{{ activeRows.length }}）</div>
-
+        <!--
+          「下载中」直接开画，**不再画小节标题**（用户 2026-10-15）：
+          页签那颗胶囊里已经有 `下载中（N）`，下面再来一行"下载中（N）"是同一屏同一份计数说两遍。
+        -->
         <template v-if="activeRows.length">
           <div
             v-for="(item, index) in activeRows"
@@ -393,12 +543,29 @@ onBeforeUnmount(() => {
               />
               <div class="avh-q__main">
                 <div class="avh-q__no">{{ item.number || '' }}</div>
+                <!--
+                  影片标题（读侧统一投影给的 `title`，2026-10-15 加）：同一部片在榜单/历史/
+                  库页显示的都是它，下载页以前只有番号 —— 那正是"四个界面五花八门"的一处。
+                  拿不到（投影里没这部片）就整行不画，不拿种子名顶上。
+                -->
+                <div v-if="item.title" class="avh-q__ttl">{{ item.title }}</div>
                 <div class="avh-q__hint avh-q__meta">{{ metaOf(item) }}</div>
                 <div class="avh-q__hint avh-q__path">{{ pathOf(item) }}</div>
               </div>
               <div class="avh-q__right">
                 <div class="avh-q__no">{{ progressOf(item) }}%</div>
-                <div class="avh-q__hint">下载中…</div>
+                <!-- 速度与剩余时间（后端从下载器读的 `dlspeed`/`left_time`；没有就退回状态文案） -->
+                <div v-if="speedOf(item)" class="avh-q__hint">{{ speedOf(item) }}</div>
+                <div v-else class="avh-q__hint">下载中…</div>
+                <!-- 行内「取消下载」（2026-10-15）：删种子（含已下载的部分文件）→ 行留在原位变灰 -->
+                <v-btn
+                  class="avh-q__act"
+                  variant="text"
+                  size="x-small"
+                  color="error"
+                  :loading="isPending('cancel', item)"
+                  @click="cancelDownload(item)"
+                >取消下载</v-btn>
               </div>
             </div>
             <div class="avh-bar">
@@ -451,21 +618,26 @@ onBeforeUnmount(() => {
         </template>
 
         <!--
-          ===== 已完成：静态历史行（契约 §5.3）=====
-          没有进度条、没有百分比、没有状态文案、没有任何"进行中"交互 —— 用户的诉求就是
-          「已完成下载不再显示进度，直接当历史停住」。这一节通常为空：契约 §3 起，条目一变 `done`
-          就被后端写进下载台账并从队列里删掉；留着它只为兼容旧快照与轮询间隙（见文件头注释）。
-        -->
-        <div class="avh-downloads__secttl">
-          <span>已完成（{{ doneRows.length }}）</span>
-          <span class="avh-downloads__secttl-note">完整清单见本页「下载历史」</span>
-        </div>
+          ===== 已取消（2026-10-15 新增，用户明确要求）=====
+          用户点「取消下载」之后，种子已经从下载器删掉，但**行不消失**（"条目不要立即消失，
+          应保留在原位置"）—— 留在这里等用户选出口，避免"点错了只能重来"：
 
-        <template v-if="doneRows.length">
+          - 换资源：摘掉这一行 + 把任务放回「任务」页待确认（候选原样保留，挑别的种子）
+          - 不要了：彻底取消（摘行 + 台账墓碑 + 任务取消 + 默认连番号订阅一起取消）
+          - 移除：只把这条灰行从列表去掉（不动下载器、不改台账）
+
+          没有进度条也没有百分比：种子已经不在下载器里了，画 0% 是骗人。
+        -->
+        <template v-if="canceledRows.length">
+          <div class="avh-downloads__secttl">
+            <span>已取消（{{ canceledRows.length }}）</span>
+            <span class="avh-downloads__secttl-note">选「换资源」重新挑，或「不要了」彻底取消</span>
+          </div>
+
           <div
-            v-for="(item, index) in doneRows"
+            v-for="(item, index) in canceledRows"
             :key="rowKey(item, index)"
-            class="avh-q avh-q--done"
+            class="avh-q avh-q--canceled"
             :class="{ 'avh-q--vtag': hasBadge(item) }"
           >
             <span v-if="hasBadge(item)" class="avh-vbadge">{{ versionBadgeOf(item) }}</span>
@@ -478,26 +650,48 @@ onBeforeUnmount(() => {
                 :plugin-id="pluginId"
               />
               <div class="avh-q__main">
-                <div class="avh-q__no">{{ item.number || '' }}</div>
-                <!-- 标题是台账口径的可选字段（真机队列暂不携带），有才画这一行 -->
+                <div class="avh-q__no">
+                  {{ item.number || '' }}
+                  <v-chip size="x-small" variant="tonal" class="ms-1">已取消</v-chip>
+                </div>
                 <div v-if="item.title" class="avh-q__ttl">{{ item.title }}</div>
-                <div class="avh-q__hint avh-q__meta">{{ doneInfoOf(item) }}</div>
+                <div class="avh-q__hint avh-q__meta">{{ metaOf(item) }}</div>
+                <div class="avh-q__hint avh-q__path" :title="String(item.canceled_detail || '')">
+                  {{ item.canceled_detail || pathOf(item) }}
+                </div>
               </div>
+            </div>
+            <div class="avh-q__exits">
+              <v-btn
+                variant="tonal"
+                size="small"
+                :loading="isPending('return', item)"
+                @click="returnDownload(item)"
+              >换资源</v-btn>
+              <v-btn
+                variant="text"
+                size="small"
+                color="error"
+                :loading="isPending('discard', item)"
+                @click="discardDownload(item)"
+              >不要了</v-btn>
+              <v-btn
+                variant="text"
+                size="small"
+                :loading="isPending('drop', item)"
+                @click="dropCanceledRow(item)"
+              >移除</v-btn>
             </div>
           </div>
         </template>
-        <div v-else class="avh-downloads__hint">
-          暂无已完成条目<br>完成的下载会记入「下载历史」，这里只在旧快照与刷新间隙里短暂出现
-        </div>
       </template>
 
       <!--
-        队列整体为空时的空态：老实现那两句逐字保留，**末尾补一句指路**（0.3.4 加，2026-10-12
-        改成指向本页页签）。为什么必须补：完成条目现在会被后端写进台账并**从队列摘掉**
-        （设计文档 §3），于是「没有任何下载在进行」时这一页永远是空的 —— 不告诉用户
-        「完成的在下载历史里」，那个页签就等于藏起来了。
+        队列整体为空时的空态：**只留指路**（2026-10-15 精简）。
+        完成条目会被后端写进台账并**从队列摘掉**，所以"没有任何下载在进行"时这一页永远是空的
+        —— 不告诉用户"完成的在下载历史里"，那个页签就等于藏起来了，所以第三句保留。
       -->
-      <EmptyState v-else text="下载队列为空<br>在「任务」页挑好候选点「下载」，进度在这里看<br>完成的下载在「下载历史」页签，删了文件也还在" />
+      <EmptyState v-else text="下载队列为空<br>在「任务」页挑好候选点「下载」，进度在这里看<br>完成的下载在「下载历史」页签" />
     </template>
 
     <!--
@@ -615,6 +809,33 @@ onBeforeUnmount(() => {
   padding-top: 20px;
 }
 
+/*
+ * 已取消行（2026-10-15）：整行压暗一档，与「下载中」一眼分得开。
+ * 不用禁用态灰（那看着像坏掉了），只把底色与描边收淡 —— 它仍然是一张"可操作"的卡
+ * （下面那三个出口等着用户点）。
+ */
+.avh-q--canceled {
+  background: rgba(var(--v-theme-on-surface), 0.02);
+  border-style: dashed;
+}
+
+/* 行内动作按钮（「取消下载」）：贴着百分比右下，不与进度条抢注意力 */
+.avh-q__act {
+  margin-top: 2px;
+  padding: 0 4px;
+  min-width: 0;
+  font-size: 11.5px;
+}
+
+/* 已取消行的三个出口：左对齐一排，右留一点空隙免得贴着卡片边 */
+.avh-q__exits {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding-left: 60px;      /* 与封面右侧的正文对齐（48px 封面 + 12px gap） */
+}
+
 /* 对齐 `.qhd` */
 .avh-q__hd {
   display: flex;
@@ -663,13 +884,6 @@ onBeforeUnmount(() => {
   font-size: 12.5px;
   line-height: 1.5;
   color: rgba(var(--v-theme-on-surface), 0.7);
-}
-
-/*
- * 完成行没有进度条，`.avh-q__hd` 那 8px 的"给进度条留的"下边距就变成了行尾的空档，收掉。
- */
-.avh-q--done .avh-q__hd {
-  margin-bottom: 0;
 }
 
 /* 对齐 `.qhd .right` */
