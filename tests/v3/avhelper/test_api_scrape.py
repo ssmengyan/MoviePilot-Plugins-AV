@@ -25,6 +25,7 @@ import json
 import sys
 import types
 from pathlib import Path
+from urllib.parse import unquote
 
 import pytest
 
@@ -1216,6 +1217,56 @@ class TestDownloadingBadgeKeys:
         # 台账/队列在缓存窗口内又变了：5 秒内仍按旧结论（省掉每条电影的库读）
         store.kv_set("queue", [])
         assert "SNOS380" in plugin._downloading_keys()
+
+
+class TestBigCoverUpgrade:
+    """`_movie()` 的 `cover` 兜底（2026-10-21）：演员页只给小图，推回同目录的 `covers/`。
+
+    现场：`GET /actor` 的列表项**只有 `thumb_url`**（`…/small_covers/yw/<id>.jpg`，147×200），
+    作品史卡片盒子 216 px 宽起、2× 屏要 432 物理像素，放大 2.5 倍以上必然糊。
+    同一张图的大图档就在同目录的 `covers/` 下（实测 800×538 / 约 118 KB，直接 200），
+    换掉路径片段即可，不用多发一次详情请求。
+    """
+
+    SMALL = "https://tp.spfcas.com/rhe951l4q/small_covers/yw/YwG14b.jpg"
+    BIG = "https://tp.spfcas.com/rhe951l4q/covers/yw/YwG14b.jpg"
+
+    def test_small_covers_upgraded(self, plugin, api_mod, monkeypatch):
+        no_scraper(api_mod, monkeypatch)
+        movie = plugin._movie({"number": "SNOS-186", "title": "x", "thumb_url": self.SMALL})
+        cover = unquote(movie["cover"])          # `image_url()` 会给整串做 URL 编码
+        assert self.BIG in cover
+        assert "small_covers" not in cover
+        # 小竖图仍留在 thumb 上：任务行 / 下载队列那些小方框要的就是它（省流量）
+        assert "small_covers" in unquote(movie["thumb"])
+
+    def test_legacy_thumbs_dir_upgraded(self, plugin):
+        legacy = "https://c0.jdbstatic.com/thumbs/96/96GB0p.jpg"
+        assert plugin._big_cover(legacy) == "https://c0.jdbstatic.com/covers/96/96GB0p.jpg"
+
+    def test_cover_url_wins(self, plugin, api_mod, monkeypatch):
+        no_scraper(api_mod, monkeypatch)
+        movie = plugin._movie({"number": "SNOS-186", "thumb_url": self.SMALL,
+                               "cover_url": "https://tp.spfcas.com/other/big.jpg"})
+        cover = unquote(movie["cover"])
+        assert "other/big.jpg" in cover
+        assert "covers/yw" not in cover
+
+    def test_unknown_host_keeps_old_behaviour(self, plugin):
+        """认不出来的地址不猜：返回空串，`_movie()` 的 `cover` 为空、前端退回 `thumb`。"""
+        assert plugin._big_cover("https://example.com/a.jpg") == ""
+        assert plugin._big_cover("") == ""
+
+    def test_already_big_not_downgraded(self, plugin):
+        assert plugin._big_cover(self.BIG) == self.BIG
+
+    def test_vr_keeps_small_cover(self, plugin, api_mod, monkeypatch):
+        """VR 的大图档是宣传拼图，不是封面 —— 不升级，`cover` 留空由前端退回小竖图。"""
+        no_scraper(api_mod, monkeypatch)
+        movie = plugin._movie({"number": "KAVR-527", "title": "【VR】KAVR-527 何度も…",
+                               "thumb_url": self.SMALL})
+        assert movie["cover"] == ""
+        assert "small_covers" in unquote(movie["thumb"])
 
 
 class TestDownloadsReadSide:

@@ -129,8 +129,10 @@ const id = () => String(props.movie.id || '')
  * （60 张首屏约 9 MB，之后走浏览器 30 天缓存 + NAS 图片缓存，只付一次）。
  * 横向只看得到右侧那半幅（封底那半幅不显示）—— 这正是要的效果。
  *
- * 退回分支不是摆设：「已入库的番号」栏的行来自 Emby（`emby.library_rows()` 只有 `thumb`），
- * 演员作品史的卡片走 `variant="film"` 的 `contain` 版式也不吃这条路。后端 `_movie()` 两个字段都给。
+ * 退回分支不是摆设：「已入库的番号」栏的行来自 Emby（`emby.library_rows()` 只有 `thumb`）。
+ * 演员作品史（`ActorsView` 的 `.avh-film`）2026-10-21 起也走这条口径：它自己那套模板原先用
+ * `variant="film"` 的 `contain`，现在换成同一份 `cover 优先、thumb 兜底` + 377/538 盒子。
+ * 后端 `_movie()` 两个字段都给（`cover` 缺时用 `_big_cover()` 从 `covers/` 目录推）。
  */
 const cardCover = () => String(props.movie.cover || props.movie.thumb || '')
 

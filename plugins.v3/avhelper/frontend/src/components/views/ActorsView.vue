@@ -27,7 +27,7 @@
  * | 订阅判定 `S.subs.filter(s => s.type==='actor' && s.name===name)[0]` | `store.subs` 同一条过滤 |
  * | `subActorDialog(name, zh, avatar)`：**弹出规则编辑器** → `POST /subs` → 成功顺手收藏该演员 + `toast('订阅已创建', name,'ok')` + 切到订阅页 | 按 S6-4 订阅页的先例**不做规则编辑器**（规则唯一归属设置台「下载规则」栏）：直接 `store.subscribeNumber(name,'actor')`，先提示一句规则从哪来，成功后仍**顺手收藏**该演员、`t.success('订阅已创建')` + `t.info(name)`；**不切页**（宿主合同里没有"切到数据台某栏"的事件，见下） |
  * | `runCheck(name)`：订阅检查那条 toast 链（正在检查 / 限流 / 完成 / 失败） | 与 S6-4 订阅页**同一段实现**（先提示再请求；限流是业务结果，不是失败），文案一字不改 |
- * | `filmRow(mv,i)`：`.pic`（`--bg` 模糊底 + 竖版 `contain` 封面）+ `.fn` 番号 + `.ftt` 标题（有才画）+ `.fd`（日期 ／ `中字`\|`无中字` ／ `🧲 n` ／ 有 `lib` 才画 `已入库`） | 同一字段、同一顺序；`Thumb variant="film"` 负责 `contain`，模糊底用本地 `--bg` + `::before`（`--bg` 的 URL 转义照抄 `cssUrl`） |
+ * | `filmRow(mv,i)`：`.pic`（`--bg` 模糊底 + 竖版 `contain` 封面）+ `.fn` 番号 + `.ftt` 标题（有才画）+ `.fd`（日期 ／ `中字`\|`无中字` ／ `🧲 n` ／ 有 `lib` 才画 `已入库`） | 同一字段、同一顺序；**封面口径 2026-10-21 换成大图档**：`cover` 优先、`thumb` 兜底，`Thumb variant="thumb"`（cover + 贴右裁出 377/538 那段），盒子 `aspect-ratio: 377/538`；模糊底用本地 `--bg` + `::before`（`--bg` 的 URL 转义照抄 `cssUrl`） |
  * | **作品史服务端分页**（老 `#btnMoreFilms`）：首屏 `page=1&limit=30`，`.morebar` 里一颗「加载更多（已显示 n / 共 m 部）」，续拉下一页按 `id|番号` 去重后追加；`hasMore` 为假且不止一页时显示 `已加载全部 n 部` | `loadMoreFilms()` 同一套（页码存进页内缓存，切走只更新缓存不重绘），按钮 `:loading` 转圈 |
  * | 年份收敛：`years.length > 1` 才画 `.filmyears`，按钮 `全部 n`（还有下一页时带 `+`）+ 每年 `2025 6`（`opacity:.65` 的数字）；点击 `S.actorYear=y` | 同（保留 `全部 ` 后面那个空格与弱化数字）；筛选只作用于**已加载**的那几页，`hasMore` 时年份空态会提示「继续加载试试」 |
  * | 作品史接口 `apiGet('/actor', {name, page, limit:30})`（服务端分页；后端 `ACTOR_PAGE=30`、单页硬上限 50） | `api.get('plugin/actor', { params: { name, page, limit: FILM_PAGE } })`（契约 `GET /actor?name=&page=&limit=`，回 `page/limit/total/hasMore`） |
@@ -132,6 +132,8 @@ const FILM_PAGE = 30
 /** `GET plugin/actor` 返回的作品（后端 `_movie()`）。`filmRow` 用到的字段一个不少。 */
 interface ActorMovie {
   number?: string
+  /** 大图档（800×538 封套展开图）；演员页只有小图时后端会把同目录的 `covers/` 地址填进来。 */
+  cover?: string
   thumb?: string
   title?: string
   date?: string
@@ -775,10 +777,25 @@ async function checkActor(): Promise<void> {
 
 // ---------- 作品卡片 ----------
 
-/** `.pic` 的内联 `--bg`（有封面才给，与老实现 `mv.thumb ? ' style="--bg:url(...)"' : ''` 一致）。 */
+/**
+ * 卡片封面图源：**优先 javdb 的大图档 `cover`，没有才退回小竖图 `thumb`**（2026-10-21）。
+ *
+ * 为什么换：`thumb` 实测只有 147×200 / 约 11 KB，而卡片盒子是 216 px 宽起、2× 屏要 432 物理像素，
+ * 放大 2.5 倍以上必然糊。`cover` 是 800×538 的封套展开图（封底 | 书脊 | 封面），配合盒子上的
+ * `object-fit: cover` + `object-position: 100%`（贴右，`Thumb` 的 `--thumb` 变体）取回最右边
+ * 约 377×538 那段封面 —— 2× 屏下几乎 1:1，画面与老实现那张竖图同源，只是清楚得多。
+ * 榜单/搜索的卡片（`NumCard`）早在 2026-10-13 就是这个口径，当时漏了这里。
+ * 代价与榜单一致：单图约 11 KB → 约 118 KB（浏览器 30 天缓存 + NAS 图片缓存，只付一次）。
+ */
+function filmCover(mv: ActorMovie): string {
+  return String(mv.cover || mv.thumb || '')
+}
+
+/** `.pic` 的内联 `--bg`（模糊底，用同一张图；有封面才给）。 */
 function picStyle(mv: ActorMovie): Record<string, string> | undefined {
-  if (!mv.thumb) return undefined
-  return { '--bg': `url('${cssUrl(mv.thumb)}')` }
+  const src = filmCover(mv)
+  if (!src) return undefined
+  return { '--bg': `url('${cssUrl(src)}')` }
 }
 
 /** 行 key：老实现按数组顺序画（`data-i`）；这里用番号 + 下标，避免刷新时行被重建。 */
@@ -1082,8 +1099,8 @@ watch(
             >
               <div class="avh-film__pic" :style="picStyle(mv)">
                 <Thumb
-                  variant="film"
-                  :src="mv.thumb"
+                  variant="thumb"
+                  :src="filmCover(mv)"
                   :alt="mv.number || ''"
                   :plugin-id="pluginId"
                 />
@@ -1442,10 +1459,12 @@ watch(
   transform: translateY(-2px);
 }
 
-/* 对齐 `.film .pic` + `.pic::before`（同图模糊底，横竖混排也不裁切） */
+/* 对齐 `.film .pic` + `.pic::before`（同图模糊底，横竖混排也不裁切）。
+ * 盒子比例 377/538 与 `NumCard` 的封面盒子一致（2026-10-21）：大图档 `cover` 是 800×538 的
+ * 封套展开图，`--thumb` 变体贴右裁出最右那段恰好 377 宽、按高度铺满，1:1 不浪费也不裁变形。 */
 .avh-film__pic {
   position: relative;
-  aspect-ratio: 3 / 4;
+  aspect-ratio: 377 / 538;
   overflow: hidden;
   background: rgba(var(--v-theme-on-surface), 0.12);
 }
@@ -1461,7 +1480,7 @@ watch(
   opacity: 0.5;
 }
 
-/* 封面本体压在模糊底之上；`variant="film"` 已把 `object-fit` 定成 contain */
+/* 封面本体压在模糊底之上；`variant="thumb"` 已把 `object-fit` 定成 cover 并贴右（见 `Thumb.vue`） */
 .avh-film__pic :deep(.avh-thumb) {
   position: absolute;
   inset: 0;

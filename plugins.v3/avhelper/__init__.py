@@ -1450,6 +1450,28 @@ class AVHelper(_PluginBase):
                                    lambda: self.cli().magnets(number, cnsub=False))
         return detail, magnets
 
+    @staticmethod
+    def _big_cover(url: Any) -> str:
+        """把小缩略图地址推到大图档（javdb 同一张图有两种尺寸，目录不同）。
+
+        演员页（`GET /actor`）的列表项**只给 `thumb_url`**：`…/small_covers/<id前两位>/<id>.jpg`，
+        实测 147×200 / 约 11 KB，而作品史卡片盒子有 216 px 宽以上，2× 屏要放大 2.5 倍，
+        糊是必然的。同一张图的大图档在**同目录下的 `covers/`**（实测 800×538 / 约 118 KB，
+        直接 200），换掉路径片段即可，不需要多发一次详情请求。
+
+        认不出来源格式时返回空串 —— 调用方退回 `thumb_url`，行为与改动前一致。
+        `covers/` 已经在地址里时原样返回，免得被再去掉一层。
+        """
+        text = str(url or "")
+        if not text:
+            return ""
+        if "/covers/" in text:
+            return text
+        for small in ("/small_covers/", "/thumbs/"):
+            if small in text:
+                return text.replace(small, "/covers/", 1)
+        return ""
+
     def _movie(self, raw: Dict[str, Any], kind: str = "", actor: str = "") -> Dict[str, Any]:
         """把 javdb 记录归一化成契约里的 movie 结构（图片转代理地址）。
 
@@ -1462,15 +1484,23 @@ class AVHelper(_PluginBase):
         """
         number = str(raw.get("number") or "")
         who = actor or self._actor_of(number)
+        title = str(raw.get("title") or raw.get("origin_title") or "")
         uncensored = (
             kind == "uncensored"
             or str(raw.get("type") or "").lower() == "uncensored"
             or number.upper().startswith("FC2")
         )
+        # VR 的大图档不是封面（800×600 的宣传拼图：截图墙 + 8KVR 标），它的小竖图
+        # （294×400）才是真封面 —— 所以 VR 不做 `covers/` 升级，`cover` 留空让前端退回 `thumb`。
+        # 判据与动手清单一致：标题带 `【VR】`（javdb 固定写法，实测 KAVR-527 即带）。
+        is_vr = "VR】" in title or str(raw.get("type") or "").strip().lower() == "vr"
         movie = {
             "number": number,
-            "title": str(raw.get("title") or raw.get("origin_title") or ""),
-            "cover": self.image_url(raw.get("cover_url")),
+            "title": title,
+            # `cover` 是大图档：演员页/搜索结果常常只有小竖图 `thumb_url`，
+            # 用 `_big_cover()` 从同一张图的 `covers/` 目录取回大图（见该函数注释）
+            "cover": self.image_url(
+                raw.get("cover_url") or ("" if is_vr else self._big_cover(raw.get("thumb_url")))),
             "thumb": self.image_url(raw.get("thumb_url") or raw.get("cover_url")),
             "date": str(raw.get("release_date") or ""),
             "duration": int(raw.get("duration") or 0),

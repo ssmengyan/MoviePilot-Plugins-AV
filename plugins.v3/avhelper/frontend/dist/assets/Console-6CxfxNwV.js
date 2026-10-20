@@ -6337,7 +6337,7 @@ const _sfc_main$g = /* @__PURE__ */ _defineComponent$g({
   }
 });
 
-const NumCard = /* @__PURE__ */ _export_sfc(_sfc_main$g, [["__scopeId", "data-v-40465f5e"]]);
+const NumCard = /* @__PURE__ */ _export_sfc(_sfc_main$g, [["__scopeId", "data-v-a6914b79"]]);
 
 const {reactive: reactive$2} = await importShared('vue');
 
@@ -7814,9 +7814,13 @@ const _sfc_main$a = /* @__PURE__ */ _defineComponent$a({
         checking.value = false;
       }
     }
+    function filmCover(mv) {
+      return String(mv.cover || mv.thumb || "");
+    }
     function picStyle(mv) {
-      if (!mv.thumb) return void 0;
-      return { "--bg": `url('${cssUrl(mv.thumb)}')` };
+      const src = filmCover(mv);
+      if (!src) return void 0;
+      return { "--bg": `url('${cssUrl(src)}')` };
     }
     function filmKey(mv, index) {
       return `${mv.number || ""}#${index}`;
@@ -8071,8 +8075,8 @@ const _sfc_main$a = /* @__PURE__ */ _defineComponent$a({
                       style: _normalizeStyle$2(picStyle(mv))
                     }, [
                       _createVNode$9(Thumb, {
-                        variant: "film",
-                        src: mv.thumb,
+                        variant: "thumb",
+                        src: filmCover(mv),
                         alt: mv.number || "",
                         "plugin-id": _ctx.pluginId
                       }, null, 8, ["src", "alt", "plugin-id"])
@@ -8335,7 +8339,7 @@ const _sfc_main$a = /* @__PURE__ */ _defineComponent$a({
   }
 });
 
-const ActorsView = /* @__PURE__ */ _export_sfc(_sfc_main$a, [["__scopeId", "data-v-2c9a2e8e"]]);
+const ActorsView = /* @__PURE__ */ _export_sfc(_sfc_main$a, [["__scopeId", "data-v-45614b2c"]]);
 
 const {defineComponent:_defineComponent$9} = await importShared('vue');
 

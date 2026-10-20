@@ -1000,7 +1000,7 @@
 }
 
 /* 对齐 `app.css` 的 `.card`（网格列由父级 `.grid` 提供） */
-.avh-card[data-v-40465f5e] {
+.avh-card[data-v-a6914b79] {
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1010,13 +1010,13 @@
   background: rgb(var(--v-theme-surface));
   transition: 0.15s;
 }
-.avh-card[data-v-40465f5e]:hover {
+.avh-card[data-v-a6914b79]:hover {
   border-color: rgb(var(--v-theme-primary));
   transform: translateY(-2px);
 }
 
 /* `.thumb`：3:4 竖版封面 + 渐变底（缺图时不至于一片死黑） */
-.avh-card__thumb[data-v-40465f5e] {
+.avh-card__thumb[data-v-a6914b79] {
   position: relative;
   aspect-ratio: 3 / 4;
   overflow: hidden;
@@ -1044,7 +1044,7 @@
  * 只在真有 `cover` 时才收窄：「已入库的番号」栏的行只有 147×200 竖图（比例 0.735，
  * 比 0.7007 宽），照这个盒子会被横向裁掉左边约 9px，没必要为一个不存在的书脊付这个代价。
  */
-.avh-card__thumb.avh-card__thumb--spread[data-v-40465f5e] {
+.avh-card__thumb.avh-card__thumb--spread[data-v-a6914b79] {
   aspect-ratio: 377 / 538;
 }
 
@@ -1059,10 +1059,10 @@
  *   2. 缺图时 `.noimg` 是 `inset:0` 的绝对定位盒，父级零高 → 番号占位**看不见**
  *      （老实现会把番号画在封面位置上）。
  */
-.avh-card__thumb[data-v-40465f5e] .avh-thumb {
+.avh-card__thumb[data-v-a6914b79] .avh-thumb {
   height: 100%;
 }
-.avh-card__badges[data-v-40465f5e] {
+.avh-card__badges[data-v-a6914b79] {
   position: absolute;
   left: 6px;
   top: 6px;
@@ -1072,7 +1072,7 @@
 }
 
 /* `.badge` 系列：底色走主题语义色 + 半透明，不写死深色值 */
-.avh-badge[data-v-40465f5e] {
+.avh-badge[data-v-a6914b79] {
   padding: 1px 6px;
   font-size: 10px;
   border-radius: 4px;
@@ -1080,16 +1080,16 @@
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(0, 0, 0, 0.6);
 }
-.avh-badge--cn[data-v-40465f5e] {
+.avh-badge--cn[data-v-a6914b79] {
   background: rgba(var(--v-theme-success), 0.85);
 }
-.avh-badge--uc[data-v-40465f5e] {
+.avh-badge--uc[data-v-a6914b79] {
   background: rgba(var(--v-theme-secondary), 0.85);
 }
-.avh-badge--new[data-v-40465f5e] {
+.avh-badge--new[data-v-a6914b79] {
   background: rgba(var(--v-theme-warning), 0.85);
 }
-.avh-badge--lib[data-v-40465f5e] {
+.avh-badge--lib[data-v-a6914b79] {
   background: rgba(var(--v-theme-primary), 0.85);
 }
 
@@ -1101,7 +1101,7 @@
  * 取 `info`：与 `primary` 同属冷色、明度接近，落在同一批卡片上既不抢眼又能区分；
  * 其余四颗已占用 success / secondary / warning / primary，`info` 是唯一没被用掉的语义色。
  */
-.avh-badge--dl[data-v-40465f5e] {
+.avh-badge--dl[data-v-a6914b79] {
   background: rgba(var(--v-theme-info), 0.85);
 }
 
@@ -1109,7 +1109,7 @@
  * 「下载中」（2026-10-15）：取 `warning`（暖色）—— 与 `--lib`(primary) / `--dl`(info) 两颗冷色
  * 一眼分开。"还在下"是个**进行时**状态，用暖色比冷色更符合直觉，也与下载页那根进度条的主色同族。
  */
-.avh-badge--dlg[data-v-40465f5e] {
+.avh-badge--dlg[data-v-a6914b79] {
   background: rgba(var(--v-theme-warning), 0.9);
 }
 
@@ -1117,17 +1117,17 @@
  * 「未刮」（2026-10-15）：灰底 —— 它是个**质量提示**，不是状态（不是"正在进行"也不是"出错"），
  * 所以用最低调的中性色：看得见但不抢眼，与前几颗"有明确含义"的徽标区分开。
  */
-.avh-badge--unscraped[data-v-40465f5e] {
+.avh-badge--unscraped[data-v-a6914b79] {
   background: rgba(var(--v-theme-on-surface), 0.55);
 }
-.avh-card__meta[data-v-40465f5e] {
+.avh-card__meta[data-v-a6914b79] {
   padding: 8px 9px 10px;
 }
-.avh-card__num[data-v-40465f5e] {
+.avh-card__num[data-v-a6914b79] {
   font-size: 13px;
   font-weight: 700;
 }
-.avh-card__sub[data-v-40465f5e] {
+.avh-card__sub[data-v-a6914b79] {
   display: flex;
   justify-content: space-between;
   gap: 6px;
@@ -1135,7 +1135,7 @@
   font-size: 11px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-card__sub span[data-v-40465f5e] {
+.avh-card__sub span[data-v-a6914b79] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1146,14 +1146,14 @@
  * 它**不**继承 `.avh-card__sub span` 的省略号（那条只管 `span`）：链接要整体可见、
  * 不许被压缩，所以 `flex: none`；文件名那一格才吃剩余宽度。
  */
-.avh-card__watch[data-v-40465f5e] {
+.avh-card__watch[data-v-a6914b79] {
   flex: none;
   font-size: 11px;
   color: rgb(var(--v-theme-primary));
   text-decoration: none;
   white-space: nowrap;
 }
-.avh-card__watch[data-v-40465f5e]:hover {
+.avh-card__watch[data-v-a6914b79]:hover {
   text-decoration: underline;
 }
 
@@ -1551,23 +1551,23 @@
 }
 
 /* 对齐 `app.css` 的 `.toolbar` / `.hint` / `.spacer` */
-.avh-actors__toolbar[data-v-2c9a2e8e] {
+.avh-actors__toolbar[data-v-45614b2c] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 14px;
 }
-.avh-hint[data-v-2c9a2e8e] {
+.avh-hint[data-v-45614b2c] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-actors__spacer[data-v-2c9a2e8e] {
+.avh-actors__spacer[data-v-45614b2c] {
   flex: 1;
 }
 
 /* 对齐 `.loading`：弱化色、居中、上下留白 */
-.avh-loading[data-v-2c9a2e8e] {
+.avh-loading[data-v-45614b2c] {
   padding: 44px 20px;
   text-align: center;
   font-size: 13px;
@@ -1575,28 +1575,28 @@
 }
 
 /* 对齐 `.actors`（挑选弹窗那份按老实现收窄到 120px） */
-.avh-actors[data-v-2c9a2e8e] {
+.avh-actors[data-v-45614b2c] {
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
 }
-.avh-actors--pick[data-v-2c9a2e8e] {
+.avh-actors--pick[data-v-45614b2c] {
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
 }
 
 /* 末尾哨兵（`usePagedList` 的 `sentinel`）：只画一行进度提示；滚动到底自动追加靠它定位滚动层 */
-.avh-actors__more[data-v-2c9a2e8e] {
+.avh-actors__more[data-v-45614b2c] {
   padding: 14px 4px 2px;
   text-align: center;
 }
 
 /* 老实现的内联 `margin-bottom:12px` */
-.avh-actorpick__tip[data-v-2c9a2e8e] {
+.avh-actorpick__tip[data-v-45614b2c] {
   margin-bottom: 12px;
 }
 
 /* 对齐 `.profile`：横向卡片，头像 132×132（12px 圆角，不是圆形） */
-.avh-profile[data-v-2c9a2e8e] {
+.avh-profile[data-v-45614b2c] {
   display: flex;
   gap: 18px;
   flex-wrap: wrap;
@@ -1606,18 +1606,18 @@
   border-radius: 10px;
   background: rgba(var(--v-theme-on-surface), 0.04);
 }
-.avh-profile__av[data-v-2c9a2e8e] {
+.avh-profile__av[data-v-45614b2c] {
   width: 132px;
   height: 132px;
   flex: none;
   overflow: hidden;
   border-radius: 12px;
 }
-.avh-profile__main[data-v-2c9a2e8e] {
+.avh-profile__main[data-v-45614b2c] {
   flex: 1;
   min-width: 240px;
 }
-.avh-profile__name[data-v-2c9a2e8e] {
+.avh-profile__name[data-v-45614b2c] {
   margin: 0 0 4px;
   font-size: 20px;
   font-weight: 600;
@@ -1625,7 +1625,7 @@
 }
 
 /* 辅位：独立一行的原名（仅主位是中文名时才画），比主位小一号的浅色小字 */
-.avh-profile__zh[data-v-2c9a2e8e] {
+.avh-profile__zh[data-v-45614b2c] {
   font-size: 14px;
   font-weight: 400;
   line-height: 1.35;
@@ -1633,14 +1633,14 @@
 }
 
 /* 附加行：备注独立成行、比 `zh` 还小一号的浅色小字（用户要求「浅色、小字体」），**永不占用主位** */
-.avh-profile__alias[data-v-2c9a2e8e] {
+.avh-profile__alias[data-v-45614b2c] {
   margin-top: 2px;
   font-size: 11px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
 
 /* 对齐 `.kv`：`作品 12` 这种键值对，键比正文更淡 */
-.avh-kv[data-v-2c9a2e8e] {
+.avh-kv[data-v-45614b2c] {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 14px;
@@ -1648,13 +1648,13 @@
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.7);
 }
-.avh-kv b[data-v-2c9a2e8e] {
+.avh-kv b[data-v-45614b2c] {
   font-weight: 400;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
 
 /* 对齐 `.acts` */
-.avh-acts[data-v-2c9a2e8e] {
+.avh-acts[data-v-45614b2c] {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -1662,7 +1662,7 @@
 }
 
 /* 对齐 `.secttl`：12px、弱化色、字距 .4px */
-.avh-secttl[data-v-2c9a2e8e] {
+.avh-secttl[data-v-45614b2c] {
   margin: 20px 0 8px;
   font-size: 12px;
   letter-spacing: 0.4px;
@@ -1670,13 +1670,13 @@
 }
 
 /* 对齐 `.filmyears`：胶囊按钮，选中的那颗走主色 */
-.avh-filmyears[data-v-2c9a2e8e] {
+.avh-filmyears[data-v-45614b2c] {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
   margin: 0 0 12px;
 }
-.avh-filmyears button[data-v-2c9a2e8e] {
+.avh-filmyears button[data-v-45614b2c] {
   padding: 3px 11px;
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
@@ -1685,24 +1685,24 @@
   border-radius: 999px;
   cursor: pointer;
 }
-.avh-filmyears__on[data-v-2c9a2e8e] {
+.avh-filmyears__on[data-v-45614b2c] {
   color: rgb(var(--v-theme-on-primary)) !important;
   background: rgb(var(--v-theme-primary)) !important;
   border-color: rgb(var(--v-theme-primary)) !important;
 }
-.avh-filmyears__n[data-v-2c9a2e8e] {
+.avh-filmyears__n[data-v-45614b2c] {
   opacity: 0.65;
 }
 
 /* 对齐 `.films` */
-.avh-films[data-v-2c9a2e8e] {
+.avh-films[data-v-45614b2c] {
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(auto-fill, minmax(216px, 1fr));
 }
 
 /* 对齐 `.film` */
-.avh-film[data-v-2c9a2e8e] {
+.avh-film[data-v-45614b2c] {
   overflow: hidden;
   cursor: pointer;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
@@ -1710,19 +1710,21 @@
   background: rgba(var(--v-theme-on-surface), 0.04);
   transition: 0.15s;
 }
-.avh-film[data-v-2c9a2e8e]:hover {
+.avh-film[data-v-45614b2c]:hover {
   border-color: rgb(var(--v-theme-primary));
   transform: translateY(-2px);
 }
 
-/* 对齐 `.film .pic` + `.pic::before`（同图模糊底，横竖混排也不裁切） */
-.avh-film__pic[data-v-2c9a2e8e] {
+/* 对齐 `.film .pic` + `.pic::before`（同图模糊底，横竖混排也不裁切）。
+ * 盒子比例 377/538 与 `NumCard` 的封面盒子一致（2026-10-21）：大图档 `cover` 是 800×538 的
+ * 封套展开图，`--thumb` 变体贴右裁出最右那段恰好 377 宽、按高度铺满，1:1 不浪费也不裁变形。 */
+.avh-film__pic[data-v-45614b2c] {
   position: relative;
-  aspect-ratio: 3 / 4;
+  aspect-ratio: 377 / 538;
   overflow: hidden;
   background: rgba(var(--v-theme-on-surface), 0.12);
 }
-.avh-film__pic[data-v-2c9a2e8e]::before {
+.avh-film__pic[data-v-45614b2c]::before {
   content: '';
   position: absolute;
   inset: -10px;
@@ -1733,23 +1735,23 @@
   opacity: 0.5;
 }
 
-/* 封面本体压在模糊底之上；`variant="film"` 已把 `object-fit` 定成 contain */
-.avh-film__pic[data-v-2c9a2e8e] .avh-thumb {
+/* 封面本体压在模糊底之上；`variant="thumb"` 已把 `object-fit` 定成 cover 并贴右（见 `Thumb.vue`） */
+.avh-film__pic[data-v-45614b2c] .avh-thumb {
   position: absolute;
   inset: 0;
   z-index: 1;
   background: transparent;
 }
-.avh-film__ft[data-v-2c9a2e8e] {
+.avh-film__ft[data-v-45614b2c] {
   padding: 8px 10px 10px;
 }
-.avh-film__fn[data-v-2c9a2e8e] {
+.avh-film__fn[data-v-45614b2c] {
   font-size: 13px;
   font-weight: 700;
 }
 
 /* 对齐 `.ftt`：两行截断 */
-.avh-film__ftt[data-v-2c9a2e8e] {
+.avh-film__ftt[data-v-45614b2c] {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -1759,7 +1761,7 @@
   line-height: 1.35;
   color: rgba(var(--v-theme-on-surface), 0.7);
 }
-.avh-film__fd[data-v-2c9a2e8e] {
+.avh-film__fd[data-v-45614b2c] {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -1770,7 +1772,7 @@
 
 /* `.tag` / `.tag.on` / `.tag.lib` 的等价样式（老 `app.css` 同名规则；
    `ActorRow` 里那份是 scoped，作用不到作品史的标签上，所以这里再写一份） */
-.avh-tag[data-v-2c9a2e8e] {
+.avh-tag[data-v-45614b2c] {
   display: inline-block;
   padding: 1px 6px;
   font-size: 10.5px;
@@ -1778,19 +1780,19 @@
   border: 1px solid rgba(var(--v-theme-on-surface), 0.16);
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-tag--on[data-v-2c9a2e8e] {
+.avh-tag--on[data-v-45614b2c] {
   border-color: rgba(var(--v-theme-success), 0.45);
   background: rgba(var(--v-theme-success), 0.18);
   color: rgb(var(--v-theme-on-surface));
 }
-.avh-tag--lib[data-v-2c9a2e8e] {
+.avh-tag--lib[data-v-45614b2c] {
   border-color: rgba(var(--v-theme-primary), 0.5);
   background: rgba(var(--v-theme-primary), 0.22);
   color: rgb(var(--v-theme-on-surface));
 }
 
 /* 对齐 `.morebar`（现在是两颗按钮：加载更多 / 加载全部） */
-.avh-morebar[data-v-2c9a2e8e] {
+.avh-morebar[data-v-45614b2c] {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1800,7 +1802,7 @@
 }
 
 /* 触到一次连拉上限那句提示：独占一行、居中，别把两颗按钮挤变形 */
-.avh-morebar__tip[data-v-2c9a2e8e] {
+.avh-morebar__tip[data-v-45614b2c] {
   flex: 1 1 100%;
   text-align: center;
   line-height: 1.7;
