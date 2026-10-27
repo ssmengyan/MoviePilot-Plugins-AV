@@ -78,6 +78,15 @@ const props = withDefaults(
 
 const t = hostToast(props.toast as any)
 
+/**
+ * 本视图发出的事件（`defineEmits` **必须传字符串数组**，见 AGENTS.md §5：
+ * 函数式写法编译出 `emits: <函数>`，事件静默失效）。
+ *
+ * `refreshSide` 是 0.9.1 加的：卡片上的「转到订阅并自动搜索」会立刻跑一次订阅检查，
+ * 那次检查会改「运行概况」里的检查次数 / 下次可检查时间 —— 通知壳刷一下右栏。
+ */
+const emit = defineEmits(['refreshSide'])
+
 /** 轮询间隔：与老 `startTaskPolling()` 的 5000ms 一致（后端搜种/下载状态本身就变得慢）。 */
 const POLL_MS = 5000
 
@@ -111,9 +120,16 @@ const subscribedKeys = computed<Set<string>>(() => {
 })
 
 /**
- * 「📌 订阅该影片」的状态（0.6.0）：
+ * 「📌 订阅该影片 / 转到订阅并自动搜索」的状态（0.6.0 起；0.9.1 扩到"零候选"）。
+ *
  * 卡片里**有合格候选**就不画（那是"有得挑"，不是"没资源"）；没得挑时，
  * 已订阅过 → `done`（禁用显示「已订阅」），否则 `ready`。
+ *
+ * 0.9.1 加的那条（用户 2026-10-27 报的「点击下载未搜索到资源时，待确认任务栏中缺少
+ * 『转到订阅并自动搜索』的功能入口」）：**一条候选都没有**的卡片（`pending === 'none'`，
+ * 也就是 PT 与 BT 都没搜到）除了卡片头那颗按钮，还在表内空行里画一颗
+ * 「📌 转到订阅并自动搜索」—— 用户看的就是那格「没有搜到任何候选」，入口长在视线落点
+ * 才不用满屏找。两个位置共用同一个状态与同一个动作，不会各说各话。
  */
 function subscribeStateOf(task: SearchTask): 'hidden' | 'ready' | 'done' {
   const cands = Array.isArray(task.cands) ? task.cands : []
@@ -202,10 +218,15 @@ async function onCancel(payload: { taskId: string }): Promise<void> {
 }
 
 /**
- * 卡片上的「📌 订阅该影片」（0.6.0 加）：建一条**番号订阅**，等这部片有资源时订阅检查兜住它。
+ * 卡片上的「📌 订阅该影片 / 转到订阅并自动搜索」（0.6.0 加；0.9.1 起**顺便立刻搜一次**）。
  *
- * 与详情抽屉那颗「📌 订阅这个番号」走同一个 `store.subscribeNumber`，规则都是全局默认规则；
- * 订阅成功由后端回传整份 `subs` 刷新，按钮随 `subscribeStateOf()` 变成禁用的「已订阅」。
+ * 0.9.1 改了两处（用户 2026-10-27 反馈第 1 条）：
+ * 1. 走 `store.subscribeAndSearch()`：建订阅**之后立刻只检查这一条**，而不是等下一次 cron
+ *    —— 用户点这颗按钮的意思就是"现在就去找"；
+ * 2. 提示分三档（订阅成功/检查被限流/检查没跑成）而不是一律「订阅已创建」，
+ *    否则用户看到"已创建"却没有任何新任务，会以为又没生效。
+ *
+ * 规则仍是全局默认规则（`subscribeAndSearch` 不传 `rule` 时后端用 `global_rule()` 合并）。
  */
 async function onSubscribe(payload: { taskId: string }): Promise<void> {
   const task = pending.value.filter(item => String(item.id ?? '') === payload.taskId)[0]
@@ -214,17 +235,38 @@ async function onSubscribe(payload: { taskId: string }): Promise<void> {
     t.warning('订阅失败')
     t.info('这条任务缺少番号')
   } else {
-    const res = await props.store.subscribeNumber(number, 'number', String(task?.actor || ''))
-    if (res.kind === 'busy') return
+    t.info(`正在订阅 ${number} 并立刻搜索…`)
+    const res = await props.store.subscribeAndSearch(number, 'number', String(task?.actor || ''))
+    if (res.kind === 'busy') {
+      // 同一番号重复触发被合并：静默（在飞的那一次会给结论），只解本卡的转圈。
+      tables.value.forEach(table => table?.clearSubscribing(payload.taskId))
+      return
+    }
     if (!res.ok) {
       t.warning('订阅失败')
       t.info(res.message || '请稍后重试')
+    } else if (res.kind === 'limited') {
+      t.warning('订阅已创建')
+      t.info(res.message || `${number} · 这次检查被限流，等下一次订阅检查`)
+    } else if (res.kind === 'partial') {
+      t.warning('订阅已创建')
+      t.info(res.message || `${number} · 但这次检查没跑成`)
     } else {
-      t.success('订阅已创建')
-      t.info(`${number} · 有资源时自动下载`)
+      t.success('订阅已创建并检查完成')
+      t.info(`${number} · 有合格资源时会按规则自动下载`)
+      // 检查可能刚建了任务 / 下了单：静默对齐一次服务端，任务页与角标立刻能看见。
+      void props.store.refreshTasks(true)
+      emitRefreshSide()
     }
   }
   tables.value.forEach(table => table?.clearSubscribing(payload.taskId))
+}
+
+/** 订阅检查会改动「运行概况」里的检查次数与下次可检查时间，通知壳刷一下右栏。 */
+function emitRefreshSide(): void {
+  // TasksView 原本不发 `refreshSide`（待确认列表不需要它），这里借用同一个事件名：
+  // 壳那边已经接了 `@refresh-side`，多一个来源不影响任何现有行为。
+  emit('refreshSide')
 }
 
 /** 每轮列表变化补一轮缺图：老实现是在 `renderTasks` 末尾调一次 `queueMissingThumbs(pend)`。 */

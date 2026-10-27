@@ -19,8 +19,12 @@ export interface PluginApi {
   put?<T = any>(url: string, data?: unknown, config?: unknown): Promise<T>
 }
 
-/** `ready` = 这次动作走完了业务分支；`busy` = 同一动作重复触发被合并掉。 */
-export type ActionResultKind = 'ok' | 'limited' | 'busy' | 'error'
+/**
+ * `ready` = 这次动作走完了业务分支；`busy` = 同一动作重复触发被合并掉；
+ * `partial` = **一半成了**（0.9.1 加）：订阅已建好、但紧跟的那次检查没跑成
+ * （限流或请求失败）—— 界面要说「订阅已创建，但这次检查没跑成」，不能报成全成功或全失败。
+ */
+export type ActionResultKind = 'ok' | 'limited' | 'busy' | 'partial' | 'error'
 
 /** 动作统一返回（界面据此决定 toast 文案与是否重绘）。 */
 export interface ActionResult<T = unknown> {

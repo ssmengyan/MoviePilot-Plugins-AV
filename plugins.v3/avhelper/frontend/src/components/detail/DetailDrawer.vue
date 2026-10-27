@@ -481,21 +481,38 @@ async function ptSearch(): Promise<void> {
   }
 }
 
-/** 「📌 订阅这个番号」：老 `subscribeNumber(number)`。 */
+/**
+ * 「📌 订阅这个番号」：老 `subscribeNumber(number)`。
+ *
+ * 0.9.1 起与任务页那颗「转到订阅并自动搜索」走**同一条链**（`store.subscribeAndSearch`）：
+ * 建订阅之后立刻只检查这一条，而不是等下一次 cron。理由与任务页那边一样 ——
+ * 用户点订阅的意思就是"帮我盯着，现在也去找一下"；只建订阅不下单，他会以为没生效。
+ * 三档提示（成功 / 被限流 / 检查没跑成）也照那边的口径，别两处各说各话。
+ */
 const subscribing = ref(false)
 async function subscribeNumber(): Promise<void> {
   const number = num.value
   if (!number || subscribing.value) return
   subscribing.value = true
   try {
-    const res = await props.store.subscribeNumber(number)
+    t.info(`正在订阅 ${number} 并立刻搜索…`)
+    const res = await props.store.subscribeAndSearch(number)
+    if (res.kind === 'busy') return
     if (!res.ok) {
       t.warning('订阅失败')
       t.info(res.message || '请稍后重试')
       return
     }
-    t.success('订阅已创建')
-    t.info(number)
+    if (res.kind === 'limited') {
+      t.warning('订阅已创建')
+      t.info(res.message || `${number} · 这次检查被限流，等下一次订阅检查`)
+    } else if (res.kind === 'partial') {
+      t.warning('订阅已创建')
+      t.info(res.message || `${number} · 但这次检查没跑成`)
+    } else {
+      t.success('订阅已创建并检查完成')
+      t.info(number)
+    }
     emit('refreshSide')
   } finally {
     subscribing.value = false

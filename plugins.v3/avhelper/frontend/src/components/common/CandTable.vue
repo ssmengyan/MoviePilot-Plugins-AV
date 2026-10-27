@@ -527,7 +527,29 @@ const poster = computed(() => {
         </template>
 
         <tr v-if="!cands.length">
-          <td colspan="7" class="avh-cand__hint avh-cand__empty">没有搜到任何候选</td>
+          <td colspan="7" class="avh-cand__hint avh-cand__empty">
+            <span>没有搜到任何候选</span>
+            <!--
+              「转到订阅并自动搜索」（0.9.1，2026-10-27 用户反馈第 1 条）：
+              「点击下载未搜索到资源时，待确认任务栏中缺少『转到订阅并自动搜索』的功能入口」。
+              只在**一条候选都没有**时出现在这格空行里（有候选时那行是「没得挑」，卡片头的
+              「📌 订阅该影片」已经覆盖）；`subscribeState` 为 `hidden` 时（站点搜索页不传）
+              照旧不画 —— 那一页没有「待确认」概念。
+            -->
+            <v-btn
+              v-if="subscribeState !== 'hidden'"
+              class="avh-cand__subscribe avh-cand__subscribe--empty"
+              variant="tonal"
+              color="primary"
+              size="small"
+              :disabled="subscribeState === 'done' || !taskId"
+              :loading="subscribing"
+              :title="subscribeState === 'done'
+                ? '这个番号已经订阅过了，订阅检查会继续盯它'
+                : '建一条番号订阅，下一次订阅检查自动搜它，搜到合格资源按规则自动下载'"
+              @click="onSubscribe"
+            >{{ subscribeState === 'done' ? '✓ 已订阅该影片' : '📌 转到订阅并自动搜索' }}</v-btn>
+          </td>
         </tr>
       </tbody>
     </table>
@@ -741,6 +763,12 @@ const poster = computed(() => {
 
 .avh-cand__empty {
   padding: 10px;
+}
+
+/* 空行里的「转到订阅并自动搜索」：文字与按钮同一行，窄屏自然折行 */
+.avh-cand__subscribe--empty {
+  margin-left: 10px;
+  vertical-align: middle;
 }
 
 /* `.tag` 系列（老 `app.css` 同名规则；底色走主题语义色） */

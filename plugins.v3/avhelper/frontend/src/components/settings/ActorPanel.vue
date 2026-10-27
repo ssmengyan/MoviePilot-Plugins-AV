@@ -21,7 +21,7 @@
  *    - 索引状态 → GET /actor/sources（回 {success, sources[], index:{count, fetched_at, stale, source}}），
  *      进本栏时读一次，读不到只显示原因、不白屏。
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { errorText, hostToast, unwrap, type PluginApi } from '../../composables/usePluginApi'
 import { useHostConfirm } from '../../composables/useHostDialogs'
 import { shortTime } from '../../composables/storeTypes'
@@ -35,8 +35,14 @@ const props = withDefaults(
     api?: PluginApi | null
     /** 宿主 toast（moviepilot:toast 注入），拿不到时静默降级。 */
     toast?: unknown
+    /**
+     * 读演员设置（`GET /rule`）失败的原因（0.9.1 加）：
+     * 空串 = 没问题；非空时面板顶上出一行黄条 —— 这时勾选框里显示的是**默认值**，
+     * 不是用户存的值，必须说出来（以前这种情况界面一声不响）。
+     */
+    loadError?: string
   }>(),
-  { api: null, toast: null },
+  { api: null, toast: null, loadError: '' },
 )
 
 /** ⚠️ 必须是字符串数组（AGENTS.md §5：函数式写法编译出 emits: <函数>，事件静默失效）。 */
@@ -325,10 +331,22 @@ async function fillMissingAvatars(): Promise<void> {
   }
 }
 
-// 进本栏时读一次索引状态（壳只在真正点进「演员」栏时才挂载本组件）。
+/** 进本栏时读一次索引状态（壳只在真正点进「演员」栏时才挂载本组件）。 */
 onMounted(() => {
   void loadSources(false)
 })
+
+// 0.9.1：读演员设置失败 → 自动重试一次。
+// 为什么要有：用户 2026-10-27 报「点『演员』页签后无任何内容」，其中一个可能就是
+// 这一栏的两次 GET 在设置窗口刚打开时抢跑（宿主 api 还没就绪）。失败一次就永久显示默认值
+// 是 0.9.0 的写法；现在失败后延迟 1.5 秒再试一次（壳那边的闸门只在成功后闭合，所以再来一次就成功）。
+watch(
+  () => props.loadError,
+  (error, before) => {
+    if (!error || before) return
+    window.setTimeout(() => { void loadSources(false) }, 1500)
+  },
+)
 </script>
 
 <template>
@@ -342,6 +360,14 @@ onMounted(() => {
     </v-card-item>
 
     <v-card-text>
+      <v-alert
+        v-if="props.loadError"
+        type="warning"
+        variant="tonal"
+        density="compact"
+        class="text-caption mb-3"
+      >演员设置读取失败（下面显示的是默认值）：{{ props.loadError }}</v-alert>
+
       <!-- ===== 子系统总开关 ===== -->
       <v-switch
         :model-value="props.settings.actorEnabled"

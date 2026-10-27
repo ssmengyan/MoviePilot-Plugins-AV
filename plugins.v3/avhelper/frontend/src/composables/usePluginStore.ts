@@ -374,6 +374,73 @@ export function usePluginStore(api: PluginApi) {
   }
 
   /**
+   * 「转到订阅并自动搜索」（0.9.1，2026-10-27 用户反馈第 1 条）。
+   *
+   * 语义是**两步一个动作**：先建一条番号订阅（`POST /subs`），再**立刻只检查这一条**
+   * （`POST /check {name}`）—— 用户点这颗按钮的意思就是"现在就去搜，搜到了按规则下"，
+   * 只建订阅不下单等于让他白点一下、还要等下一个 cron。
+   *
+   * 两条纪律：
+   * - **建订阅失败就整件事失败**，不再去检查（否则会去检查一条根本不存在的订阅）；
+   * - **检查失败不算整件事失败**：订阅已经建好了（下次 cron 会兜住），只是"现在这次没跑成"
+   *   —— 返回 `ok: true` + `checked: false` + 原因，界面照实说「订阅已创建，但这次检查没跑成」。
+   *
+   * ⚠️ **`rule` 必须显式传当前全局规则**（`store.rule.value`），不能靠后端合并：
+   * `POST /subs` 会把 `global_rule` 合并后的整份规则**快照**写进 `sub.rule`（`store.sub_add`），
+   * 之后每次检查读的都是那份快照。不传的话用户以为"我在设置台开了自动下载"，
+   * 而这条订阅还带着它创建那一刻的 `trigger=notify` —— 2026-10-27 用户报的
+   * 「订阅规则里已开启命中后自动下载，但搜索到资源后并未自动执行下载」很可能就是这个：
+   * 规则是后来改的，旧订阅的快照没跟上。显式传 = 新建的订阅一定带着**此刻**的规则。
+   * （既有订阅的快照仍是历史值；要让它跟上，得重新订阅一次或等 0.9.2 做规则同步。）
+   *
+   * 限流（`limited`）同样算"订阅成功、这次没跑"：政策是每天 ≤6 次、间隔 ≥240 分钟，
+   * 界面上要说清"已被限流，等下一次订阅检查"，不能装成成功也不能报成失败。
+   */
+  function subscribeAndSearch(
+    name: string,
+    kind: 'number' | 'actor' = 'number',
+    actor = '',
+    rule?: RuleValue | null,
+  ): Promise<ActionResult<{ subscribed: boolean; checked: boolean; limited: boolean }>> {
+    return guarded(`subscribe-search:${kind}:${String(name ?? '').trim()}`, async () => {
+      const target = String(name ?? '').trim()
+      if (!target) return { ok: false, kind: 'error' as ActionResultKind, message: '订阅参数不完整' }
+      const body: Record<string, unknown> = { type: kind, name: target }
+      if (kind === 'number' && actor) body.actor = actor
+      const effective = (rule && typeof rule === 'object' ? rule : ruleRaw.value) as RuleValue | null
+      if (effective && typeof effective === 'object') body.rule = effective
+      const created = await send('post', 'subs', body)
+      if (!created.ok) return { ok: false, kind: 'error' as ActionResultKind, message: created.message }
+      if (created.res.success !== true) {
+        return { ok: false, kind: 'error' as ActionResultKind, message: textOf(created.res) || '请稍后重试' }
+      }
+      const nextSubs = listOf<Subscription>(created.res.subs)
+      if (nextSubs) subs.value = nextSubs
+      const check = await send('post', 'check', { name: target })
+      if (!check.ok) {
+        return {
+          ok: true, kind: 'partial' as ActionResultKind,
+          message: `已订阅 ${target}，但这次检查没跑成：${check.message}`,
+          data: { subscribed: true, checked: false, limited: false },
+        }
+      }
+      const payload = (check.res.data ?? check.res) as CheckResult
+      syncLists(check.res as Record<string, any>)
+      prependNotices(payload.notices)
+      const limited = payload.limited === true
+      return {
+        ok: true,
+        kind: (limited ? 'limited' : 'ok') as ActionResultKind,
+        limited,
+        message: limited
+          ? `已订阅 ${target}；这次检查被限流（${payload.message || '距上次检查不足间隔'}），等下一次订阅检查`
+          : `已订阅 ${target} 并检查了一次：${payload.message || '检查完成'}`,
+        data: { subscribed: true, checked: !limited, limited },
+      }
+    })
+  }
+
+  /**
    * `DELETE plugin/subs?id=`：取消订阅。
    *
    * 老实现传的就是订阅读取到的数字 id；这里额外容忍被传成订阅名（先在本地列表里找）。
@@ -901,6 +968,7 @@ export function usePluginStore(api: PluginApi) {
     delFav,
     setAlias,
     subscribeNumber,
+    subscribeAndSearch,
     searchKeyword,
     acquireMovie,
     startDownload,
@@ -917,3 +985,4 @@ export function usePluginStore(api: PluginApi) {
 
 /** 数据台 store 的类型别名：视图组件用它标注 `store` prop。 */
 export type PluginStore = ReturnType<typeof usePluginStore>
+

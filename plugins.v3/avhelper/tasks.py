@@ -512,11 +512,17 @@ class TaskEngine:
         return cands, notes
 
     def build_task(self, number: str, actor: str = "", rule: Optional[Dict[str, Any]] = None,
-                   auto: bool = False, thumb: str = "",
+                   auto: Optional[bool] = None, thumb: str = "",
                    only_sites: Optional[List[str]] = None,
                    source: str = "manual") -> Dict[str, Any]:
         """搜种并落库一条任务（含打分明细），返回任务体。
 
+        :param auto: 任务卡上的「按规则自动」标记（只有前端用它画那句话）。``None``（默认）
+            = 按规则自己判（`trigger == 'auto'`）。**它与「建完要不要自动下单」无关** ——
+            那个判断只在 `_after_task()` 一处（2026-10-27 查证：订阅两条路以前都把
+            `bool(rule.get('trigger') == 'auto')` 传进来，而 `_after_task()` 又自己重算一遍，
+            这个参数传不传都不影响是否自动下载；真正让自动下载落空的是 `_after_task()` 里
+            "有 pass 候选"与 `download()` 里"picked 优先"两个判据不一致，已修）。
         :param source: 任务来源标记，manual=界面手动搜索 /「下载该影片」，sub=订阅检查产生。
             actor 只是元数据（番号对应的演员），不能拿它推断来源。
             **来源决定要不要查重**（v4.1 §9.2 第 2 条）：`sub` 先查三处（Emby 库 / 下载台账 /
@@ -525,6 +531,8 @@ class TaskEngine:
             「下载该影片」与站点搜索这两个入口落库写的就是 `manual`。
         """
         rule = merge_rule(rule)
+        if auto is None:
+            auto = str(rule.get("trigger") or "notify") == "auto"
         duplicate = self.duplicate_reason(number, source)
         if duplicate:
             # 只在订阅那条路上会走到（manual 恒放行）：补写 known 让下一轮作品史差集不再把它
@@ -1860,8 +1868,8 @@ class TaskEngine:
             rule = merge_rule(sub.get("rule"))
             if sub.get("type") == "number":
                 notices.append(self.notifier.sub_hit_number(sub["name"]))
-                task = self.build_task(sub["name"], "", rule,
-                                        bool(rule.get("trigger") == "auto"), source="sub")
+                # auto 交给 `build_task()` 按规则自己判（不再在这里算一遍，见它的 `:param auto:`）
+                task = self.build_task(sub["name"], "", rule, source="sub")
                 notices.extend(self._after_task(task, sub, rule))
             else:
                 notices.extend(self._check_actor(sub, rule))
@@ -1896,27 +1904,42 @@ class TaskEngine:
             thumb = self.plugin.image_url(movie.get("cover_url") or movie.get("thumb_url"))
             self.store.known_add(number, name)
             notices.append(self.notifier.sub_new_actor(name, number))
-            task = self.build_task(number, name, rule,
-                                   bool(rule.get("trigger") == "auto"), thumb, source="sub")
+            task = self.build_task(number, name, rule, thumb=thumb, source="sub")
             notices.extend(self._after_task(task, sub, rule))
         return notices
 
     def _after_task(self, task: Dict[str, Any], sub: Dict[str, Any],
                     rule: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """任务建好后：自动订阅命中即下载，否则发“等你确认”。"""
+        """任务建好后：自动订阅命中即下载，否则发“等你确认”。
+
+        「有没有得下」的判据是 **`download()` 真会用哪一条**（`picked` 优先、其次第一条
+        `pass`），不是"有没有 `pass` 候选"（2026-10-27 修，见 `build_task()` 的 `:param auto:`）。
+        旧写法 `best = 第一条 pass 的候选` 会把 BT 兜底行当成可下项，而 `download()` 不传站点时
+        只挑 `picked` —— 两边判据不一致时自动下载落空：任务留在「待确认」，提示却是
+        「自动下载失败 / 该任务没有可下载的候选」（用户报的就是这个）。
+        """
         if str(task.get("state") or "") == "skipped":
             # 查重命中，这一单根本没建（见 `build_task()`）：说清为什么没下，别让用户以为
             # 订阅检查白跑了。`known` 已经补写，下一轮作品史差集不会再把它当新片。
             return [self.notifier.info(
                 "订阅命中但已跳过",
                 f"{task.get('number') or ''}：{task.get('duplicate') or '已存在'}，未重复下单")]
-        best = next((c for c in (task.get("cands") or []) if c.get("pass")), None)
-        if rule.get("trigger") == "auto" and best:
-            result = self.download(task["id"])
+        cands = [c for c in (task.get("cands") or []) if isinstance(c, dict)]
+        best = next((c for c in cands if c.get("picked")), None) \
+            or next((c for c in cands if c.get("pass")), None)
+        if str(rule.get("trigger") or "notify") == "auto":
+            if not best or not str(task.get("id") or ""):
+                # 自动下载开着、但一条合格候选都没有：只有进「任务」页这一种可能，照实说。
+                return [self.notifier.candidate_ready(str(task.get("number") or ""),
+                                                      len(cands))]
+            result = self.download(str(task["id"]))
             if result.get("ok"):
                 return [result["notice"]] if result.get("notice") else []
+            logger.warning(f"AVHelper 订阅自动下载失败：{task.get('number')} → "
+                           f"{result.get('message') or '未知原因'}")
             return [self.notifier.info("自动下载失败", str(result.get("message") or ""))]
-        return [self.notifier.candidate_ready(task["number"], len(task.get("cands") or []))]
+        return [self.notifier.candidate_ready(str(task.get("number") or ""),
+                                              len(task.get("cands") or []))]
 
     # ---------- 定时重刮（Tier 1 / Tier 2 队列挂点） ----------
 

@@ -74,17 +74,17 @@
   flex-wrap: wrap;
 }
 
-.avh-panel[data-v-a65bf8ed] {
+.avh-panel[data-v-cf885914] {
   margin-bottom: 12px;
 }
 
 /* 与 ScrapePanel / RulePanel 同一套「自动铺列」网格（窄屏自然折成一列） */
-.avh-grid[data-v-a65bf8ed] {
+.avh-grid[data-v-cf885914] {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px 16px;
 }
-.avh-row[data-v-a65bf8ed] {
+.avh-row[data-v-cf885914] {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -267,16 +267,38 @@
   background: rgba(var(--v-theme-on-surface), 0.04);
 }
 
-.avh-panel[data-v-fe8afc34] {
+.avh-panel[data-v-75682200] {
   margin-bottom: 12px;
 }
-.avh-counts[data-v-fe8afc34] {
+.avh-row[data-v-75682200] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* 渠道两列（窄屏自然折成一列）：13 个排一列太占高度 */
+.avh-channels[data-v-75682200] {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0 12px;
+}
+.avh-channel[data-v-75682200] {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.avh-channel__box[data-v-75682200] {
+  flex: 1;
+  min-width: 0;
+}
+.avh-counts[data-v-75682200] {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
-.avh-notices[data-v-fe8afc34] {
+.avh-notices[data-v-75682200] {
   max-height: 40vh;
   overflow-y: auto;
   background: transparent;
@@ -308,14 +330,14 @@
 }
 
 /* 对齐老 `.q`（调用方内联 `padding:0;overflow:hidden`） */
-.avh-cand[data-v-19382d3f] {
+.avh-cand[data-v-546dabf7] {
   overflow: hidden;
   margin-bottom: 10px;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
   border-radius: 10px;
   background: rgb(var(--v-theme-surface));
 }
-.avh-cand__head[data-v-19382d3f] {
+.avh-cand__head[data-v-546dabf7] {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -325,26 +347,26 @@
 }
 
 /* `.tposter`：48×64 小封面 */
-.avh-cand__poster[data-v-19382d3f] {
+.avh-cand__poster[data-v-546dabf7] {
   width: 48px;
   height: 64px;
   flex: none;
   border-radius: 6px;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
 }
-.avh-cand__no[data-v-19382d3f] {
+.avh-cand__no[data-v-546dabf7] {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.2px;
 }
-.avh-cand__hint[data-v-19382d3f] {
+.avh-cand__hint[data-v-546dabf7] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-cand__origin[data-v-19382d3f] {
+.avh-cand__origin[data-v-546dabf7] {
   margin-top: 3px;
 }
-.avh-cand__spacer[data-v-19382d3f] {
+.avh-cand__spacer[data-v-546dabf7] {
   flex: 1;
 }
 
@@ -354,7 +376,7 @@
  * 卡片 `.avh-cand{overflow:hidden}` 不会再裁掉右半张表——这是本次要修的真实缺陷。
  * 代价：所有单元格必须自己 `overflow:hidden` + 省略号，否则内容会溢到相邻列上。
  */
-.avh-cand__table[data-v-19382d3f] {
+.avh-cand__table[data-v-546dabf7] {
   table-layout: fixed;
   width: 100%;
   border-collapse: collapse;
@@ -368,43 +390,43 @@
    基准值决定；窄屏时反向等比收缩，且因为布局是 fixed，**永远不会把「操作」列挤出卡片**。
    （曾经把「标记」列写成 `auto`：宽屏下它一个人吃掉 632px，中间空出一大片，
    改为全列显式后同一行里最宽的一列是 287px。） */
-.avh-cand__col-site[data-v-19382d3f] {
+.avh-cand__col-site[data-v-546dabf7] {
   width: 96px;
 }
-.avh-cand__col-mark[data-v-19382d3f] {
+.avh-cand__col-mark[data-v-546dabf7] {
   width: 180px;
 }
-.avh-cand__col-spec[data-v-19382d3f] {
+.avh-cand__col-spec[data-v-546dabf7] {
   width: 120px;
 }
-.avh-cand__col-size[data-v-19382d3f] {
+.avh-cand__col-size[data-v-546dabf7] {
   width: 88px;
 }
-.avh-cand__col-seed[data-v-19382d3f] {
+.avh-cand__col-seed[data-v-546dabf7] {
   width: 72px;
 }
-.avh-cand__col-score[data-v-19382d3f] {
+.avh-cand__col-score[data-v-546dabf7] {
   width: 80px;
 }
-.avh-cand__col-act[data-v-19382d3f] {
+.avh-cand__col-act[data-v-546dabf7] {
   width: 156px;
 }
 
 /* 单元格截断：fixed 布局下不给省略号就会溢到邻列 */
-.avh-cand__table th[data-v-19382d3f],
-.avh-cand__table td[data-v-19382d3f] {
+.avh-cand__table th[data-v-546dabf7],
+.avh-cand__table td[data-v-546dabf7] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.avh-cand__table th[data-v-19382d3f] {
+.avh-cand__table th[data-v-546dabf7] {
   padding: 8px;
   text-align: left;
   font-weight: 500;
   color: rgba(var(--v-theme-on-surface), 0.5);
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.12);
 }
-.avh-cand__table td[data-v-19382d3f] {
+.avh-cand__table td[data-v-546dabf7] {
   /* 定高（约一行文字 + 上下 9px）配合上面的 overflow:hidden，给行高一个上限，
      内容按单行省略号处理而不是把行撑高 */
   height: 38px;
@@ -414,50 +436,50 @@
 }
 
 /* 「操作」列：右对齐 + 按钮不换行，保证按钮完整贴右边界显示 */
-.avh-cand__table th.avh-cand__act[data-v-19382d3f],
-.avh-cand__table td.avh-cand__act[data-v-19382d3f] {
+.avh-cand__table th.avh-cand__act[data-v-546dabf7],
+.avh-cand__table td.avh-cand__act[data-v-546dabf7] {
   text-align: right;
 }
-.avh-cand__table td.avh-cand__act[data-v-19382d3f] {
+.avh-cand__table td.avh-cand__act[data-v-546dabf7] {
   white-space: nowrap;
 }
 
 /* 「标记」列：标签排列不换行（宽度靠 auto 列吸收，标签少也不会撑宽表格） */
-.avh-cand__marks[data-v-19382d3f] {
+.avh-cand__marks[data-v-546dabf7] {
   white-space: nowrap;
 }
 
 /* 「规格」列：信息密度低，视觉弱化一档，长串走省略号（全文看 `title`） */
-.avh-cand__spec[data-v-19382d3f] {
+.avh-cand__spec[data-v-546dabf7] {
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
 
 /* 行语义：best 绿底、dead 淡化、bt 深一档（老 `tr.best/tr.dead/tr.bt`） */
-.avh-cand__table tr.best td[data-v-19382d3f] {
+.avh-cand__table tr.best td[data-v-546dabf7] {
   background: rgba(var(--v-theme-success), 0.14);
 }
-.avh-cand__table tr.dead td[data-v-19382d3f] {
+.avh-cand__table tr.dead td[data-v-546dabf7] {
   opacity: 0.42;
 }
-.avh-cand__table tr.bt td[data-v-19382d3f] {
+.avh-cand__table tr.bt td[data-v-546dabf7] {
   background: rgba(var(--v-theme-on-surface), 0.05);
 }
-.avh-cand__table tr.has-sub td[data-v-19382d3f] {
+.avh-cand__table tr.has-sub td[data-v-546dabf7] {
   border-bottom: 0;
 }
-.avh-cand__sub td[data-v-19382d3f] {
+.avh-cand__sub td[data-v-546dabf7] {
   /* 种子原名/副标题整行横跨 7 列：左右内边距与数据单元格统一取 8px（本次从 10px 收紧） */
   padding: 0 8px 9px;
 }
 
 /* 副行布局（0.6.3 起是「副标题 + 发布时间」两段，不再是单独一行种子原名）：
    副标题吃满剩余宽度、单行省略号；日期固定宽度贴右，不跟着省略号一起被截掉。 */
-.avh-cand__meta[data-v-19382d3f] {
+.avh-cand__meta[data-v-546dabf7] {
   display: flex;
   align-items: baseline;
   gap: 12px;
 }
-.avh-cand__ttl[data-v-19382d3f] {
+.avh-cand__ttl[data-v-546dabf7] {
   flex: 1 1 auto;
   /* `min-width: 0` 不能省：flex 子项默认 `min-width: auto`，长串会把日期挤出容器 */
   min-width: 0;
@@ -467,7 +489,7 @@
   font-size: 11.5px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-cand__date[data-v-19382d3f] {
+.avh-cand__date[data-v-546dabf7] {
   flex: none;
   font-size: 11.5px;
   font-variant-numeric: tabular-nums;
@@ -475,25 +497,31 @@
 }
 
 /* 「原帖」：文字链接，比按钮弱一档（它只是去看一眼，不是动作） */
-.avh-cand__post[data-v-19382d3f] {
+.avh-cand__post[data-v-546dabf7] {
   margin-right: 10px;
   font-size: 12px;
   color: rgb(var(--v-theme-primary));
   text-decoration: none;
   white-space: nowrap;
 }
-.avh-cand__post[data-v-19382d3f]:hover {
+.avh-cand__post[data-v-546dabf7]:hover {
   text-decoration: underline;
 }
-.avh-cand__btnote[data-v-19382d3f] {
+.avh-cand__btnote[data-v-546dabf7] {
   padding: 6px 10px;
 }
-.avh-cand__empty[data-v-19382d3f] {
+.avh-cand__empty[data-v-546dabf7] {
   padding: 10px;
 }
 
+/* 空行里的「转到订阅并自动搜索」：文字与按钮同一行，窄屏自然折行 */
+.avh-cand__subscribe--empty[data-v-546dabf7] {
+  margin-left: 10px;
+  vertical-align: middle;
+}
+
 /* `.tag` 系列（老 `app.css` 同名规则；底色走主题语义色） */
-.avh-tag[data-v-19382d3f] {
+.avh-tag[data-v-546dabf7] {
   display: inline-block;
   margin-right: 4px;
   padding: 1px 6px;
@@ -502,42 +530,42 @@
   border: 1px solid rgba(var(--v-theme-on-surface), 0.16);
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-tag--on[data-v-19382d3f] {
+.avh-tag--on[data-v-546dabf7] {
   border-color: rgba(var(--v-theme-success), 0.45);
   background: rgba(var(--v-theme-success), 0.18);
   color: rgb(var(--v-theme-on-surface));
 }
-.avh-tag--uc[data-v-19382d3f] {
+.avh-tag--uc[data-v-546dabf7] {
   border-color: rgba(var(--v-theme-secondary), 0.5);
   background: rgba(var(--v-theme-secondary), 0.2);
   color: rgb(var(--v-theme-on-surface));
 }
-.avh-tag--free[data-v-19382d3f] {
+.avh-tag--free[data-v-546dabf7] {
   border-color: rgba(var(--v-theme-warning), 0.5);
   background: rgba(var(--v-theme-warning), 0.18);
   color: rgb(var(--v-theme-on-surface));
 }
-.avh-tag--pref[data-v-19382d3f] {
+.avh-tag--pref[data-v-546dabf7] {
   border-color: rgba(var(--v-theme-primary), 0.5);
   background: rgba(var(--v-theme-primary), 0.22);
   color: rgb(var(--v-theme-on-surface));
 }
 
 /* `.score` 档位色（hi=成功、mid=警告、lo=中性） */
-.avh-score[data-v-19382d3f] {
+.avh-score[data-v-546dabf7] {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-.avh-score--hi[data-v-19382d3f] {
+.avh-score--hi[data-v-546dabf7] {
   color: rgb(var(--v-theme-success));
 }
-.avh-score--mid[data-v-19382d3f] {
+.avh-score--mid[data-v-546dabf7] {
   color: rgb(var(--v-theme-warning));
 }
-.avh-score--lo[data-v-19382d3f] {
+.avh-score--lo[data-v-546dabf7] {
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-cand__dl[data-v-19382d3f] {
+.avh-cand__dl[data-v-546dabf7] {
   white-space: nowrap;
 }
 
@@ -1235,23 +1263,23 @@
 }
 
 /* 对齐 `app.css` 的 `.toolbar` / `.hint` / `.spacer` */
-.avh-tasks__toolbar[data-v-3735d1a3] {
+.avh-tasks__toolbar[data-v-1e7056c7] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 14px;
 }
-.avh-tasks__hint[data-v-3735d1a3] {
+.avh-tasks__hint[data-v-1e7056c7] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-tasks__spacer[data-v-3735d1a3] {
+.avh-tasks__spacer[data-v-1e7056c7] {
   flex: 1;
 }
 
 /* 对齐 `.secttl`：12px、弱化色、字距 .4px（`margin-top` 与工具条的 margin-bottom 相叠） */
-.avh-tasks__secttl[data-v-3735d1a3] {
+.avh-tasks__secttl[data-v-1e7056c7] {
   margin: 20px 0 8px;
   font-size: 12px;
   letter-spacing: 0.4px;
@@ -2484,12 +2512,12 @@
  * （`scrollTopIfFresh()` 仍两个容器都归零：换片那一帧 body 可能还没溢出，
  *  偏移会短暂留在 `__content` 上。）
  */
-.avh-detail[data-v-95588827] .v-navigation-drawer__content {
+.avh-detail[data-v-e58bd4dc] .v-navigation-drawer__content {
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
-.avh-detail__head[data-v-95588827] {
+.avh-detail__head[data-v-e58bd4dc] {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -2497,59 +2525,59 @@
   padding: 14px 18px;
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.12);
 }
-.avh-detail__title[data-v-95588827] {
+.avh-detail__title[data-v-e58bd4dc] {
   font-size: 14px;
 }
-.avh-detail__spacer[data-v-95588827] {
+.avh-detail__spacer[data-v-e58bd4dc] {
   flex: 1;
 }
 
 /* 老 `.drawer .db{overflow:auto;padding:18px}` */
-.avh-detail__body[data-v-95588827] {
+.avh-detail__body[data-v-e58bd4dc] {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   padding: 18px;
 }
-.avh-hint[data-v-95588827] {
+.avh-hint[data-v-e58bd4dc] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
 
 /* 老 `.hero`：封面 min(420px,46vw) + 右侧信息区 */
-.avh-hero[data-v-95588827] {
+.avh-hero[data-v-e58bd4dc] {
   display: flex;
   gap: 20px;
   flex-wrap: wrap;
   margin-bottom: 18px;
 }
-.avh-hero__big[data-v-95588827] {
+.avh-hero__big[data-v-e58bd4dc] {
   width: min(420px, 46vw);
   flex: none;
 }
-.avh-hero__big img[data-v-95588827] {
+.avh-hero__big img[data-v-e58bd4dc] {
   display: block;
   width: 100%;
   border-radius: 10px;
   cursor: zoom-in;
   background: rgba(var(--v-theme-on-surface), 0.08);
 }
-.avh-hero__info[data-v-95588827] {
+.avh-hero__info[data-v-e58bd4dc] {
   flex: 1;
   min-width: 260px;
 }
-.avh-hero__num[data-v-95588827] {
+.avh-hero__num[data-v-e58bd4dc] {
   margin: 0 0 8px;
   font-size: 24px;
 }
-.avh-hero__ttl[data-v-95588827] {
+.avh-hero__ttl[data-v-e58bd4dc] {
   font-size: 13px;
   line-height: 1.7;
   color: rgba(var(--v-theme-on-surface), 0.68);
 }
 
 /* 老 `.librow`：已入库横幅 */
-.avh-librow[data-v-95588827] {
+.avh-librow[data-v-e58bd4dc] {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2561,7 +2589,7 @@
   border: 1px solid rgba(var(--v-theme-primary), 0.45);
   background: rgba(var(--v-theme-primary), 0.16);
 }
-.avh-librow a[data-v-95588827] {
+.avh-librow a[data-v-e58bd4dc] {
   color: rgb(var(--v-theme-primary));
 }
 
@@ -2570,7 +2598,7 @@
  * 只把语义色从 `primary` 换成 `info` —— 理由与 `NumCard` 的 `.avh-badge--dl` 一样：
  * 「此刻在库里」与「下载台账里记过（文件可能已删）」是两件事，同色会分不清看到的是哪一条。
  */
-.avh-dlrow[data-v-95588827] {
+.avh-dlrow[data-v-e58bd4dc] {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2584,13 +2612,13 @@
 }
 
 /* 老 `.actorchips` / `.actorchip`：胶囊演员卡 */
-.avh-actorchips[data-v-95588827] {
+.avh-actorchips[data-v-e58bd4dc] {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   margin: 10px 0;
 }
-.avh-actorchip[data-v-95588827] {
+.avh-actorchip[data-v-e58bd4dc] {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -2601,7 +2629,7 @@
   border-radius: 999px;
   background: rgba(var(--v-theme-on-surface), 0.04);
 }
-.avh-actorchip[data-v-95588827]:hover {
+.avh-actorchip[data-v-e58bd4dc]:hover {
   border-color: rgb(var(--v-theme-secondary));
 }
 
@@ -2612,24 +2640,24 @@
  * 基线周围再撑出空档（没有备注时胶囊会突然变高）。归零后由子元素自己定行高，
  * 有备注两行、没备注一行，都不会多出空白。
  */
-.avh-actorchip__body[data-v-95588827] {
+.avh-actorchip__body[data-v-e58bd4dc] {
   display: flex;
   flex-direction: column;
   line-height: 0;
 }
-.avh-actorchip__nm[data-v-95588827] {
+.avh-actorchip__nm[data-v-e58bd4dc] {
   line-height: 1.35;
 }
 
 /* 辅位（原名）：仅当主位是中文名时才画，浅色 + 小一号，与 `ActorRow` 的 `.avh-actor__zh` 同一口径 */
-.avh-actorchip__zh[data-v-95588827],
+.avh-actorchip__zh[data-v-e58bd4dc],
 
-.avh-actorchip__alias[data-v-95588827] {
+.avh-actorchip__alias[data-v-e58bd4dc] {
   font-size: 11px;
   line-height: 1.3;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-actorchip__av[data-v-95588827] {
+.avh-actorchip__av[data-v-e58bd4dc] {
   width: 26px;
   height: 26px;
   flex: none;
@@ -2638,7 +2666,7 @@
 }
 
 /* 老 `.kv`：键值对一行，键比正文更淡 */
-.avh-kv[data-v-95588827] {
+.avh-kv[data-v-e58bd4dc] {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 14px;
@@ -2646,11 +2674,11 @@
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.7);
 }
-.avh-kv b[data-v-95588827] {
+.avh-kv b[data-v-e58bd4dc] {
   font-weight: 400;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-acts[data-v-95588827] {
+.avh-acts[data-v-e58bd4dc] {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -2658,7 +2686,7 @@
 }
 
 /* 老 `.secttl` */
-.avh-secttl[data-v-95588827] {
+.avh-secttl[data-v-e58bd4dc] {
   margin: 20px 0 8px;
   font-size: 12px;
   letter-spacing: 0.4px;
@@ -2666,7 +2694,7 @@
 }
 
 /* 老 `.shots`：`repeat(auto-fill,minmax(250px,1fr))` */
-.avh-shots[data-v-95588827] {
+.avh-shots[data-v-e58bd4dc] {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
@@ -2674,7 +2702,7 @@
 }
 
 /* 老 `.shot`：固定 16:9 格子 + `::before` 同图模糊底 */
-.avh-shot[data-v-95588827] {
+.avh-shot[data-v-e58bd4dc] {
   position: relative;
   aspect-ratio: 16 / 9;
   overflow: hidden;
@@ -2682,7 +2710,7 @@
   border-radius: 8px;
   background: rgba(var(--v-theme-on-surface), 0.12);
 }
-.avh-shot--blur[data-v-95588827]::before {
+.avh-shot--blur[data-v-e58bd4dc]::before {
   content: '';
   position: absolute;
   inset: -10px;
@@ -2694,16 +2722,16 @@
 }
 
 /* 图压在模糊底之上；`Thumb` 里的 img 默认 `object-fit:cover`，这里改成 contain（不裁切） */
-.avh-shot[data-v-95588827] .avh-thumb {
+.avh-shot[data-v-e58bd4dc] .avh-thumb {
   position: absolute;
   inset: 0;
   z-index: 1;
   background: transparent;
 }
-.avh-shot[data-v-95588827] .avh-thumb img {
+.avh-shot[data-v-e58bd4dc] .avh-thumb img {
   object-fit: contain;
 }
-.avh-shot__noimg[data-v-95588827] {
+.avh-shot__noimg[data-v-e58bd4dc] {
   position: absolute;
   inset: 0;
   z-index: 2;
@@ -2715,40 +2743,40 @@
 }
 
 /* 老 `.mag` 那一行：左内容 + 右「⬇ 下载」 */
-.avh-mag[data-v-95588827] {
+.avh-mag[data-v-e58bd4dc] {
   display: flex;
   align-items: flex-start;
   gap: 12px;
   padding: 10px 0;
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.12);
 }
-.avh-mag[data-v-95588827]:last-child {
+.avh-mag[data-v-e58bd4dc]:last-child {
   border-bottom: none;
 }
-.avh-mag__mg[data-v-95588827] {
+.avh-mag__mg[data-v-e58bd4dc] {
   flex: 1;
   min-width: 0;
 }
-.avh-mag__mn[data-v-95588827] {
+.avh-mag__mn[data-v-e58bd4dc] {
   margin: 2px 0 4px;
   font-size: 12.5px;
   line-height: 1.5;
   word-break: break-all;
 }
-.avh-mag__mh[data-v-95588827] {
+.avh-mag__mh[data-v-e58bd4dc] {
   font-size: 11px;
   color: rgba(var(--v-theme-on-surface), 0.5);
   word-break: break-all;
 }
-.avh-mag__mh--link[data-v-95588827] {
+.avh-mag__mh--link[data-v-e58bd4dc] {
   margin-top: 4px;
 }
-.avh-mag__hash[data-v-95588827] {
+.avh-mag__hash[data-v-e58bd4dc] {
   color: rgb(var(--v-theme-primary));
 }
 
 /* `.tag` / `.tag.on` / `.tag.pref` 的等价样式（老 `app.css` 同名规则） */
-.avh-tag[data-v-95588827] {
+.avh-tag[data-v-e58bd4dc] {
   display: inline-block;
   margin-right: 4px;
   padding: 1px 6px;
@@ -2757,42 +2785,42 @@
   border: 1px solid rgba(var(--v-theme-on-surface), 0.16);
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-tag--on[data-v-95588827] {
+.avh-tag--on[data-v-e58bd4dc] {
   border-color: rgba(var(--v-theme-success), 0.45);
   background: rgba(var(--v-theme-success), 0.18);
   color: rgb(var(--v-theme-on-surface));
 }
-.avh-tag--pref[data-v-95588827] {
+.avh-tag--pref[data-v-e58bd4dc] {
   border-color: rgba(var(--v-theme-primary), 0.5);
   background: rgba(var(--v-theme-primary), 0.22);
   color: rgb(var(--v-theme-on-surface));
 }
 
 /* 老 `.longwrap` / `.longwrap img` / `.longerr` */
-.avh-longwrap[data-v-95588827] {
+.avh-longwrap[data-v-e58bd4dc] {
   margin-top: 8px;
 }
-.avh-longimg[data-v-95588827] {
+.avh-longimg[data-v-e58bd4dc] {
   display: block;
   max-width: 100%;
   cursor: zoom-in;
   border-radius: 8px;
   background: rgba(var(--v-theme-on-surface), 0.08);
 }
-.avh-longerr[data-v-95588827] {
+.avh-longerr[data-v-e58bd4dc] {
   font-size: 12px;
   line-height: 1.8;
   color: rgb(var(--v-theme-warning));
 }
-.avh-longerr__url[data-v-95588827] {
+.avh-longerr__url[data-v-e58bd4dc] {
   margin-top: 4px;
   word-break: break-all;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-longerr__act[data-v-95588827] {
+.avh-longerr__act[data-v-e58bd4dc] {
   margin-top: 6px;
 }
-.avh-skeleton__tip[data-v-95588827] {
+.avh-skeleton__tip[data-v-e58bd4dc] {
   margin-top: 10px;
 }
 
@@ -3044,7 +3072,7 @@
   word-break: break-word;
 }
 
-.avh-console[data-v-228305ec] {
+.avh-console[data-v-6f9c03d0] {
   display: flex;
   flex-direction: column;
   /*
@@ -3060,14 +3088,14 @@
   background: rgb(var(--v-theme-surface));
   color: rgb(var(--v-theme-on-surface));
 }
-.avh-topbar[data-v-228305ec] {
+.avh-topbar[data-v-6f9c03d0] {
   flex: 0 0 auto;
   padding-inline: 0;
 }
 
 /* 三段式顶栏的左块：与右块等宽（flex-basis 0）、内容左对齐。
    `min-width: 0` + `overflow: hidden` 让它在窄弹窗里先被压缩，把宽度让给中间的搜索框。 */
-.avh-topbar__left[data-v-228305ec] {
+.avh-topbar__left[data-v-6f9c03d0] {
   flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
@@ -3077,7 +3105,7 @@
 }
 
 /* 右块：与左块严格等宽 + 内容右对齐 —— 两块等宽，夹在中间的搜索框才落在工具条几何中心。 */
-.avh-topbar__right[data-v-228305ec] {
+.avh-topbar__right[data-v-6f9c03d0] {
   flex: 1 1 0;
   min-width: 0;
   display: flex;
@@ -3085,7 +3113,7 @@
   justify-content: flex-end;
   gap: 4px;
 }
-.avh-title[data-v-228305ec] {
+.avh-title[data-v-6f9c03d0] {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -3094,7 +3122,7 @@
 /* 顶栏搜索（老 `.searchbox`：输入框 + 紧贴的「搜索」按钮，占位符同款）。
    三段式里的中段：grow 0 / basis 420px → 固定基准宽，被两侧等宽块顶到几何中心；
    窄弹窗里可一路缩到 200px（工具条本身是 nowrap 的 flex，始终单行不换行）。 */
-.avh-searchbox[data-v-228305ec] {
+.avh-searchbox[data-v-6f9c03d0] {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -3102,20 +3130,20 @@
   min-width: 200px;
   margin-right: 0;
 }
-.avh-searchbox__input[data-v-228305ec] {
+.avh-searchbox__input[data-v-6f9c03d0] {
   flex: 1 1 auto;
   min-width: 120px;
 }
 
 /* 顶栏「🔔 通知」那颗按钮：老实现是 `.ghost`（`white-space:nowrap` + 12px 字号），
    不换行才不会在窄弹窗里折成两行。 */
-.avh-bell[data-v-228305ec] {
+.avh-bell[data-v-6f9c03d0] {
   white-space: nowrap;
 }
 
 /* 未读角标：照抄老 `.bellbadge`（圆角胶囊、11px、左侧 6px 间距、最小宽 16px）。
    老实现用 `.zero{display:none}` 在 0 时隐藏，这里等价地 `v-if="notifyUnread() > 0"` 不渲染。 */
-.avh-bellbadge[data-v-228305ec] {
+.avh-bellbadge[data-v-6f9c03d0] {
   display: inline-block;
   margin-left: 6px;
   padding: 0 6px;
@@ -3132,7 +3160,7 @@
    圆角 999px、字号 11px、内边距 `0 6px`、行高 16px、最小宽 16px、文字居中。
    配色不搬老界面的写死值（`--acc2:#2f6fd0` / `--warn:#d29922` / `#fff` / `#2b2100`），
    改走 Vuetify 主题变量：普通态 = 老那颗蓝（`primary`），warn 态 = 老那颗琥珀（`warning`）。 */
-.avh-pill[data-v-228305ec] {
+.avh-pill[data-v-6f9c03d0] {
   display: inline-block;
   min-width: 16px;
   padding: 0 6px;
@@ -3145,16 +3173,16 @@
 }
 
 /* 老 `.pill.warn`：只有「任务」栏那一颗。 */
-.avh-pill--warn[data-v-228305ec] {
+.avh-pill--warn[data-v-6f9c03d0] {
   background: rgb(var(--v-theme-warning));
   color: rgb(var(--v-theme-on-warning));
 }
 
 /* 计数为 0 也照画（老实现 `textContent = n`，不留空），只是弱化到不抢眼。 */
-.avh-pill--zero[data-v-228305ec] {
+.avh-pill--zero[data-v-6f9c03d0] {
   opacity: 0.55;
 }
-.avh-body[data-v-228305ec] {
+.avh-body[data-v-6f9c03d0] {
   display: flex;
   align-items: stretch;
   /* 根盒子定高后，这一层必须自己吃掉剩余高度：原来是 `flex: 0 1 auto`，
@@ -3167,7 +3195,7 @@
 
 /* 左栏：上 = 滚动区（栏目列表 + 运行概况），下 = 钉底的设置入口。
    216px = 原右栏 264px 的收窄版：概况整块搬进来后，内容区反而拿到了整宽。 */
-.avh-nav[data-v-228305ec] {
+.avh-nav[data-v-6f9c03d0] {
   flex: 0 0 216px;
   max-width: 216px;
   display: flex;
@@ -3178,7 +3206,7 @@
 
 /* 左栏滚动区：`min-height: 0` 不能省 —— flex 子项默认 `min-height: auto` 会拒绝收缩，
    内容一多就把左栏顶出根盒子。滚动条只出现在这里，底部那颗按钮永远留在栏底。 */
-.avh-nav__scroll[data-v-228305ec] {
+.avh-nav__scroll[data-v-6f9c03d0] {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -3187,17 +3215,17 @@
 /* 栏目行高收到 34px（Vuetify 默认 40）：左栏多装了「运行概况」整张卡片，
    6 行栏目 + 卡片 + 底部按钮要在 78vh 减去工具栏的高度里全部装下 ——
    实测 34px 正好让左栏在 1440×900 下不需要滚动（更矮的窗口仍由 `__scroll` 兜底）。 */
-.avh-nav__scroll > .v-list .v-list-item[data-v-228305ec] {
+.avh-nav__scroll > .v-list .v-list-item[data-v-6f9c03d0] {
   min-height: 34px;
 }
 
 /* 「打开设置」：`margin-top: auto` 把它钉在左栏最底部，`flex: 0 0 auto` 保证它不被滚动区挤压。
    位置/样式是本轮唯一改动 —— 它的 `@click="openSettings"` 与文案一字未改。 */
-.avh-nav__switch[data-v-228305ec] {
+.avh-nav__switch[data-v-6f9c03d0] {
   margin-top: auto;
   flex: 0 0 auto;
 }
-.avh-content[data-v-228305ec] {
+.avh-content[data-v-6f9c03d0] {
   flex: 1 1 auto;
   min-width: 0;
   overflow: auto;
@@ -3211,36 +3239,36 @@
  * 这里**没有** `position: sticky`（右栏那版有）：卡片现在是滚动区里的最后一项，
  * sticky 只会让它在滚动时浮到顶部盖住栏目列表（outlined 卡片还是透明底，会糊在一起）。
  */
-.avh-overview[data-v-228305ec] .v-card-item {
+.avh-overview[data-v-6f9c03d0] .v-card-item {
   padding: 8px 10px 4px;
 }
 
 /* 标题图标与文字之间默认 8px，窄栏里收到 6px */
-.avh-overview[data-v-228305ec] .v-card-item__prepend {
+.avh-overview[data-v-6f9c03d0] .v-card-item__prepend {
   padding-inline-end: 6px;
 }
-.avh-overview[data-v-228305ec] .v-card-text {
+.avh-overview[data-v-6f9c03d0] .v-card-text {
   padding: 4px 10px 8px;
 }
 
 /* 行高从 40px 收到 ~25px：7 行 + 分割线才装得进窄栏。
    只压 `padding-block` 没用（内容行高仍撑着），所以 `min-height` 也归零，
    由「标题行 21px + 上下各 2px」决定行高 —— 216px 窄栏里 7 行刚好排满。 */
-.avh-overview[data-v-228305ec] .v-list-item {
+.avh-overview[data-v-6f9c03d0] .v-list-item {
   min-height: 0;
   padding-block: 2px;
 }
-.avh-overview[data-v-228305ec] .v-list-item-title {
+.avh-overview[data-v-6f9c03d0] .v-list-item-title {
   line-height: 1.3;
 }
 
 /* 标题列（1fr，长标题仍是 ellipsis）与数值列之间留一点缝，别贴在一起 */
-.avh-overview[data-v-228305ec] .v-list-item__content {
+.avh-overview[data-v-6f9c03d0] .v-list-item__content {
   padding-inline-end: 6px;
 }
 
 /* 数值一律不换行：「待确认任务 12」这类行一折行，7 行就把窄栏撑散了 */
-.avh-overview[data-v-228305ec] .v-list-item__append {
+.avh-overview[data-v-6f9c03d0] .v-list-item__append {
   white-space: nowrap;
 }
 
@@ -3248,7 +3276,7 @@
  * 设置窗口：窗口自身占满 `v-dialog` 的 `max-width`（1120px），
  * 左栏固定 190px、右栏自适应并各自滚动 —— 与数据台同一套排布，只是换成了独立窗口。
  */
-.avh-settings[data-v-228305ec] {
+.avh-settings[data-v-6f9c03d0] {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -3263,43 +3291,70 @@
      `min-height` 的优先级高于 `max-height`，内容被撑到 78vh，那条 `100%` 也跟着变成 78vh。 */
   min-height: 78vh;
 }
-.avh-settings__bar[data-v-228305ec] {
+.avh-settings__bar[data-v-6f9c03d0] {
   flex: 0 0 auto;
   padding-inline: 0;
 }
-.avh-settings__body[data-v-228305ec] {
+.avh-settings__body[data-v-6f9c03d0] {
   display: flex;
   align-items: stretch;
   min-height: 0;
   padding: 12px;
   gap: 4px;
 }
-.avh-settings__nav[data-v-228305ec] {
+.avh-settings__nav[data-v-6f9c03d0] {
   flex: 0 0 190px;
   max-width: 190px;
   overflow-y: auto;
 }
-.avh-settings__content[data-v-228305ec] {
+.avh-settings__content[data-v-6f9c03d0] {
   flex: 1 1 auto;
   min-width: 0;
   overflow: auto;
   padding-inline: 12px;
   max-height: 68vh;
 }
+
+/*
+ * 栏目标题头（0.9.1）：一行「图标 + 栏名 + 一句用途」，钉在内容区顶部。
+ * `position: sticky` 是为了在长面板里滚到底部时仍知道自己看的是哪一栏。
+ */
+.avh-settings__head[data-v-6f9c03d0] {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 0 8px;
+  margin-bottom: 6px;
+  /* 盖住滚上来的面板内容：用卡片自身的表面色，不写死颜色（跟随宿主主题） */
+  background: rgb(var(--v-theme-surface));
+  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+}
+.avh-settings__title[data-v-6f9c03d0] {
+  font-size: 14px;
+  font-weight: 500;
+}
+.avh-settings__hint[data-v-6f9c03d0] {
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.5);
+}
 @media (max-width: 1100px) {
-.avh-body[data-v-228305ec] {
+.avh-body[data-v-6f9c03d0] {
     flex-wrap: wrap;
 }
 
   /* 窄屏降级：左栏不再钉 216px，交给 flex 分配（`.avh-side` 已随右栏一起删除） */
-.avh-nav[data-v-228305ec] {
+.avh-nav[data-v-6f9c03d0] {
     flex: 1 1 auto;
     max-width: none;
 }
-.avh-settings__body[data-v-228305ec] {
+.avh-settings__body[data-v-6f9c03d0] {
     flex-wrap: wrap;
 }
-.avh-settings__nav[data-v-228305ec] {
+.avh-settings__nav[data-v-6f9c03d0] {
     flex: 1 1 auto;
     max-width: none;
 }

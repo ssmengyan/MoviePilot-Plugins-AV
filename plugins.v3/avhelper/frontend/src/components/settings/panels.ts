@@ -34,7 +34,7 @@ export const SETTINGS_SECTIONS: SectionItem[] = [
 ]
 
 /**
- * 各栏目「算不算脏」看的是自己那部分草稿，避免在某栏改了东西、
+ * 设置台各栏目「算不算脏」看的是自己那部分草稿，避免在某栏改了东西、
  * 切到别的栏看不到未保存标记。通知/关于两栏没有草稿字段。
  * （「运行与缓存」0.6.3 起有宿主配置字段 `cache_max_gb`，所以归 host 组。）
  *
@@ -42,7 +42,8 @@ export const SETTINGS_SECTIONS: SectionItem[] = [
  * （见 `SCRAPE_DEFAULTS` 的说明），草稿层的 `ruleDirty` / `hostDirty` 认不出它们，
  * 所以这里写 `none`，由壳（`Console.vue` 的 `sectionDirtyEx()`）把
  * `scrapeDirty` 或进来 —— 两处合起来才是这一栏真正的脏标记。
- * 「演员」栏同一条待遇（`actorDirty`，见 `ACTOR_SECTIONS`）。
+ * 「演员」「通知」两栏同一条待遇（`actorDirty` / `notifyDirty`，见 `ACTOR_SECTIONS` /
+ * `NOTIFY_SECTIONS`）。
  */
 export const DIRTY_GROUPS: Record<string, 'none' | 'rule' | 'host' | 'both'> = {
   general: 'host',
@@ -62,6 +63,9 @@ export const SCRAPE_SECTIONS: string[] = ['scrape', 'scrapeRule']
 
 /** 「演员」栏的 key（与 `SCRAPE_SECTIONS` 同一套机制：壳用它决定脏标记与懒加载）。 */
 export const ACTOR_SECTIONS: string[] = ['actor']
+
+/** 「通知」栏的 key（0.9.1：推送渠道/分类/时间表都在这一栏，同一套脏标记与懒加载）。 */
+export const NOTIFY_SECTIONS: string[] = ['notify']
 
 /** 刮削模式四档（v4.1 §5 / 契约 §3.7 的 `/scrape/run`）。 */
 export type ScrapeMode = 'off' | 'fill' | 'hybrid' | 'own'
@@ -316,4 +320,97 @@ export const ACTOR_KEYS: (keyof ActorSettings)[] = [
   'actorAutoSync',
   'actorBatchSize',
   'actorInterval',
+]
+
+// ---------------------------------------------------------------------------
+// 通知（0.9.1，2026-10-27 用户反馈：通知栏要能选渠道 + 选推什么 + 配时间表）
+// ---------------------------------------------------------------------------
+
+/**
+ * 「通知」栏的设置形状（4 个键，其余两项是只读展示，不进草稿）。
+ *
+ * **存哪**：与「下载规则」「刮削」「演员」**完全同一套** —— `POST /rule` 那份 kv
+ * （后端 `merge_rule()` 原样保留未知键），键名就是下面这四个（后端 `notify_conf()` 这样读）。
+ *
+ * 语义（别混）：
+ * - `notifyPush`：推送总开关。关掉 = 通知只进插件收件箱，一个渠道都不发；
+ * - `notifyChannels`：发到**哪几个渠道**（存渠道中文标签，见后端 `notify.CHANNELS`）。
+ *   **空数组 = 不过滤 = 推给 MoviePilot 自己配置过的全部渠道**（老口径，升级不改行为）；
+ * - `notifyKinds`：推**哪些通知**（`sub` / `download` / `scrape` / `candidate`）。
+ *   空数组 = 老口径（业务通知都推，限流/界面提示永远只进收件箱）；含 `*` = 全推；
+ * - `notifyCron`：订阅检查的时间表（标准 5 段 cron）。默认值**固定写死**在这里与后端
+ *   `notify.DEFAULT_SUBCHECK_CRON`，两处都是 `30 9,14,21 * * *`（= 老的三档 09:30/14:30/21:30）。
+ */
+export interface NotifySettings {
+  notifyPush: boolean
+  notifyChannels: string[]
+  notifyKinds: string[]
+  notifyCron: string
+}
+
+/** 默认值（后端 `notify_conf()` 拿不到键时按同一份兜底；面板文案与它一一对应）。 */
+export const NOTIFY_DEFAULTS: NotifySettings = {
+  notifyPush: true,
+  notifyChannels: [],
+  notifyKinds: [],
+  notifyCron: '30 9,14,21 * * *',
+}
+
+/** 内置渠道表（后端 `notify.CHANNELS` 的镜像；`GET /notify` 拿不到时面板用它先画）。 */
+export const NOTIFY_CHANNEL_FALLBACK: Array<{ name: string; label: string }> = [
+  { name: 'Telegram', label: 'Telegram' },
+  { name: '微信', label: '微信' },
+  { name: '飞书', label: '飞书' },
+  { name: 'Discord', label: 'Discord' },
+  { name: 'Slack', label: 'Slack' },
+  { name: '钉钉', label: '钉钉' },
+  { name: 'QQ', label: 'QQ' },
+  { name: 'SynologyChat', label: 'SynologyChat' },
+  { name: 'VoceChat', label: 'VoceChat' },
+  { name: 'WebPush', label: 'WebPush' },
+  { name: 'Web', label: 'Web' },
+  { name: 'WebAgent', label: 'WebAgent' },
+  { name: '微信ClawBot', label: '微信ClawBot' },
+]
+
+/** 推送分类（后端 `notify.PUSH_KINDS` 的镜像）。 */
+export const NOTIFY_KIND_FALLBACK: Array<{ name: string; label: string }> = [
+  { name: 'sub', label: '订阅命中（新片 / 番号命中开始搜索）' },
+  { name: 'download', label: '开始下载' },
+  { name: 'scrape', label: '刮削与入库（正在刮削 / 已入库）' },
+  { name: 'candidate', label: '发现候选、等待确认' },
+]
+
+function listOfText(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const out: string[] = []
+  for (const item of value) {
+    const text = String(item ?? '').trim()
+    if (text && !out.includes(text)) out.push(text)
+  }
+  return out
+}
+
+/**
+ * 任意形状（`GET /notify` 的 `conf`、`GET /rule` 的原始 dict、老后端、缺键）→ `NotifySettings`。
+ * 认不出的值回落默认，**不抛错**。cron 这里只做「5 段」这一层粗判，
+ * 真正的合法性由后端 `pick_cron()` 兜底（写坏了会被夹回默认值）。
+ */
+export function toNotifySettings(raw: unknown): NotifySettings {
+  const src = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  const cron = typeof src.notifyCron === 'string' ? src.notifyCron.trim().split(/\s+/).join(' ') : ''
+  return {
+    notifyPush: boolOf(src.notifyPush, NOTIFY_DEFAULTS.notifyPush),
+    notifyChannels: listOfText(src.notifyChannels),
+    notifyKinds: listOfText(src.notifyKinds),
+    notifyCron: cron && cron.split(' ').length === 5 ? cron : NOTIFY_DEFAULTS.notifyCron,
+  }
+}
+
+/** 只有这几个键属于通知栏（决定「这一栏脏了没有」与提交哪些字段）。 */
+export const NOTIFY_KEYS: (keyof NotifySettings)[] = [
+  'notifyPush',
+  'notifyChannels',
+  'notifyKinds',
+  'notifyCron',
 ]

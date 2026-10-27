@@ -16,12 +16,16 @@ import { useHostConfirm } from '../composables/useHostDialogs'
 import {
   ACTOR_DEFAULTS,
   ACTOR_SECTIONS,
+  NOTIFY_DEFAULTS,
+  NOTIFY_SECTIONS,
   SCRAPE_DEFAULTS,
   SCRAPE_SECTIONS,
   SETTINGS_SECTIONS,
   toActorSettings,
+  toNotifySettings,
   toScrapeSettings,
   type ActorSettings,
+  type NotifySettings,
   type ScrapeSettings,
   type SectionItem,
 } from './settings/panels'
@@ -200,7 +204,7 @@ const notifyOpen = ref(false)
  * （模块顶层的 TDZ 会直接抛错）。模板里每次渲染都会重新求值，响应式照样跟得上。
  */
 function notifyUnread(): number {
-  return Math.max(countUnread(store.notices.value), countUnread(notices.value))
+  return Math.max(countUnread(store.notices.value), countUnread(draftNotices.value))
 }
 
 /** 打开通知抽屉：老 `openNotify()` 第一件事就是关掉详情抽屉与弹窗（同一时刻只开一层）。 */
@@ -224,7 +228,7 @@ async function clearNoticesFromDrawer(): Promise<void> {
       toast.warning(result.message || '清空通知失败')
       return
     }
-    notices.value = []
+    draftNotices.value = []
     toast.success(result.message || '通知已清空')
     await refreshRuntime()
   } finally {
@@ -244,6 +248,45 @@ const settingsEntry = computed(() => props.mode === 'settings')
 const activeSetting = computed<SectionItem>(
   () => SETTINGS_SECTIONS.find(item => item.key === settingsSection.value) || SETTINGS_SECTIONS[0]!,
 )
+
+/**
+ * 每个栏目的**一句话用途**（画在右栏标题头右侧）。
+ *
+ * 写在壳里而不是 `panels.ts`：这份文案只服务于「我知道自己进的是哪一栏」，
+ * 面板自己已经有一句副标题；两处都改反而容易出现第三种说法。
+ */
+const SETTINGS_HINTS: Record<string, string> = {
+  general: '启用开关、代理、数据目录与缓存上限',
+  sites: '搜索范围与优先站点',
+  rule: '打分与淘汰的基准，订阅检查、自动下载都按它走',
+  scrape: '自建刮削层：模式、简介源、翻译模型、预告片',
+  scrapeRule: '字段级择优、清洗词表、命名模板与限流',
+  actor: '演员头像来源、gFriends 索引、自动同步与一键补齐',
+  notify: '推送渠道、推送哪些通知、订阅检查时间表',
+  library: 'Emby 媒体库与识别参数',
+  runtime: '缓存占用、清理与运行状态',
+  about: '版本与仓库地址',
+}
+
+const activeSettingHint = computed(() => SETTINGS_HINTS[activeSetting.value.key] || '')
+
+/**
+ * 这一栏的面板**会不会被渲染出来**（0.9.1 加的兜底判断，见模板右栏末尾）。
+ *
+ * 为什么需要它：用户 2026-10-27 报的两个症状是同一个根因的两面 ——
+ * ① 点「演员」页签后右栏空空；② 点空白处退出后再进设置，整窗**全透明、无内容**。
+ * 共同点是"整张设置卡片一个面板都没挂上"：设置窗口是 `v-dialog` + `v-card`，
+ * 卡片里没有子元素撑高度，就只剩一层玻璃底 —— 看起来就是"全透明"。
+ * 现在右栏末尾有一块兜底提示，`title` 做了一次归一（`applyPendingSection` 的 else 分支），
+ * 让指针永远落在一个画得出来的栏目上。
+ *
+ * ⚠️ 这里过去是 `computed<SectionItem>` 那种写法之外**多出来的一段**，必须是 `computed`：
+ * 写成普通函数、模板里却带括号调用（`sectionHasPanel()`）时，Vue 会把函数本身当 getter
+ * 存进 computed 槽 —— 真机症状是点一下栏目整块渲染抛
+ * `TypeError: computed.fn is not a function`，设置窗口直接消失（2026-10-27 本会话踩过）。
+ */
+const sectionHasPanel = computed<boolean>(() =>
+  SETTINGS_SECTIONS.some(item => item.key === settingsSection.value))
 
 /** 当前栏目有没有原生视图：`null` → 内容区走 iframe（设置台栏目的 key 不在 `NATIVE_VIEWS` 里）。 */
 const nativeView = computed<Component | null>(() => NATIVE_VIEWS[section.value] || null)
@@ -356,7 +399,12 @@ const {
   hostConfig,
   sites,
   sitesLoaded,
-  notices,
+  /**
+   * ⚠️ 解构出来的名字**不能叫 `notices`**：本文件还 import 了一份同名的
+   * `composables/noticesSeen`（里面是 `noticesSeen.ts` 的已读位点那套），解构会把那份
+   * **整个遮蔽**掉 —— `notifyUnread()` 读到的就不是收件箱了（2026-10-27 实际踩过）。
+   */
+  notices: draftNotices,
   cacheText,
   cacheBytes,
   checkInfo,
@@ -368,6 +416,8 @@ const {
   loading: draftLoading,
   saving: draftSaving,
   noticeLoading,
+  /** 重新读一次收件箱（`GET /notices`）：通知栏「刷新」与「测试渠道」之后用。 */
+  reloadNotices,
   cacheCleaning,
   error: draftError,
   sectionDirty,
@@ -472,26 +522,41 @@ async function saveScrapeSettings(): Promise<boolean> {
 const actorSettings = ref<ActorSettings>({ ...ACTOR_DEFAULTS })
 const actorPatches = ref<Partial<ActorSettings>>({})
 const actorDirty = computed(() => Object.keys(actorPatches.value).length > 0)
-/** 面板显示值 = 已存值 + 未提交补丁（面板只读这一份，自己不存状态）。 */
-const actorView = computed<ActorSettings>({ ...actorSettings.value, ...actorPatches.value } as ActorSettings)
-/** 只在真正进「演员」栏时读一次 `GET /rule`。 */
-let actorLoaded = false
+/**
+ * ⚠️ 必须是 `computed(() => ({...}))`：写成 `computed({...})`（少一层箭头）时 Vue 收到的是
+ * **普通对象**，第一次读 `.value` 就抛 `TypeError: computed.fn is not a function` ——
+ * 真机症状是"点进『演员』栏，整个设置窗口直接消失"（2026-10-27 本会话踩到过，
+ * 迷你宿主把它打成 vue:render function 错误，没有任何面板上的提示）。
+ */
+const actorView = computed<ActorSettings>(() => ({ ...actorSettings.value, ...actorPatches.value } as ActorSettings))
+/**
+ * 「演员」栏读一次 `GET /rule` 的闸门。
+ *
+ * ⚠️ 0.9.1 之前这里是 `let actorLoaded = false` + `catch { 回落默认值 }`：读**失败**
+ * （宿主 api 没就绪、`/rule` 500）会把默认值当已存值用，勾选框与真实设置对不上；
+ * 而「列一次也不重试」又能让一次失败永久生效。现在只在**读成功**时置真，
+ * 失败时留 false + 记下原因，下次再点进这一栏会重读（`NotifyPanel` 同一套写法）。
+ */
+const actorLoaded = ref(false)
+const actorLoadError = ref('')
 
 function ensureActorLoaded(): void {
-  if (actorLoaded) return
-  actorLoaded = true
+  if (actorLoaded.value) return
   void loadActorSettings()
 }
 
 async function loadActorSettings(): Promise<void> {
+  actorLoadError.value = ''
   try {
     const res: any = await currentApi().get('plugin/rule')
     const payload = res && typeof res === 'object' && 'data' in res ? res.data : res
     const raw = payload && typeof payload === 'object' && 'rule' in payload ? payload.rule : payload
     actorSettings.value = toActorSettings(raw)
-  } catch {
-    // 读不到（老后端 / 请求失败）：保持默认值即可，保存时后端 `merge_rule()` 还会兜一道。
+    actorLoaded.value = true
+  } catch (err) {
+    // 读不到（老后端 / 请求失败）：保持默认值，但**把原因摆到界面上**，并在下次进栏时重试。
     actorSettings.value = { ...ACTOR_DEFAULTS }
+    actorLoadError.value = errorText(err)
   }
 }
 
@@ -524,14 +589,117 @@ async function saveActorSettings(): Promise<boolean> {
 }
 
 /**
- * 左栏脏点：草稿层那两个组 + 刮削两栏自己的补丁。
- * `panels.ts` 里把这两栏的 `DIRTY_GROUPS` 标成 `none`（草稿层认不出它们的字段），所以在这里或进来。
+ * 「通知」栏的设置草稿（0.9.1，2026-10-27 用户要求）。
+ *
+ * 四件事与上面刮削/演员**同一套机制**（`POST /rule` 这份 kv、后端 `merge_rule()` 保留未知键、
+ * 脏标记在 `panels.ts` 里标 `none`、由 `sectionDirtyEx()` 或进来）：
+ * `notifyPush`（总开关）/ `notifyChannels`（发到哪几个渠道）/ `notifyKinds`（推哪些通知）/
+ * `notifyCron`（订阅检查时间表）。另外两样**不进草稿**、只读展示：渠道清单
+ * （`GET /notify` 的 `channels[]`）与实际生效的宿主 cron（`cron{}`）。
+ */
+const notifySettings = ref<NotifySettings>({ ...NOTIFY_DEFAULTS })
+const notifyPatches = ref<Partial<NotifySettings>>({})
+const notifyDirty = computed(() => Object.keys(notifyPatches.value).length > 0)
+/** 面板显示值 = 已存值 + 未提交补丁（同上：必须包一层箭头函数）。 */
+const notifyView = computed<NotifySettings>(() => ({ ...notifySettings.value, ...notifyPatches.value } as NotifySettings))
+/** `GET /notify` 的渠道与分类清单（`null` = 还没拿到，面板按内置表先画）。 */
+const notifyMeta = ref<{ channels: Array<{ name: string; label: string }>; kinds: Array<{ name: string; label: string }>; cronText: string } | null>(null)
+const notifyLoaded = ref(false)
+const notifyLoadError = ref('')
+
+function ensureNotifyLoaded(): void {
+  if (notifyLoaded.value) return
+  void loadNotifySettings()
+}
+
+/** 读 `/notify`（渠道清单 + 分类 + 当前设置）；读不到只记原因，草稿照旧可用。 */
+async function loadNotifySettings(): Promise<void> {
+  notifyLoadError.value = ''
+  try {
+    const res: any = await currentApi().get('plugin/notify')
+    const payload = unwrapPayload(res)
+    const conf = payload && typeof payload === 'object' ? payload.conf : null
+    notifySettings.value = toNotifySettings(conf)
+    const channels = Array.isArray(payload?.channels) ? payload.channels : []
+    const kinds = Array.isArray(payload?.kinds) ? payload.kinds : []
+    notifyMeta.value = {
+      channels: channels.map((row: any) => ({ name: String(row?.name || ''), label: String(row?.label || row?.name || '') })).filter((row: any) => row.name),
+      kinds: kinds.map((row: any) => ({ name: String(row?.name || ''), label: String(row?.label || row.name || '') })).filter((row: any) => row.name),
+      cronText: cronTextOf(payload?.cron),
+    }
+    notifyLoaded.value = true
+  } catch (err) {
+    // 老后端没有 `/notify`（404）：用内置的默认设置与内置渠道表，**原因照样显示出来**
+    notifySettings.value = { ...NOTIFY_DEFAULTS }
+    notifyLoadError.value = errorText(err)
+  }
+}
+
+function patchNotify(patch: Partial<NotifySettings>): void {
+  notifyPatches.value = { ...notifyPatches.value, ...patch }
+}
+
+/** 提交通知设置（只发补丁本身，不会冲掉别的栏）。 */
+async function saveNotifySettings(): Promise<boolean> {
+  if (!notifyDirty.value) return true
+  try {
+    const res: any = await currentApi().post('plugin/rule', { rule: { ...notifyPatches.value } })
+    const payload = res && typeof res === 'object' && 'data' in res ? res.data : res
+    if (payload && typeof payload === 'object' && (payload as any).success === false) {
+      toast.error(String((payload as any).message || '通知设置保存失败'))
+      return false
+    }
+    notifySettings.value = { ...notifySettings.value, ...notifyPatches.value }
+    notifyPatches.value = {}
+    return true
+  } catch (err) {
+    toast.error(`通知设置保存失败：${errorText(err)}`)
+    return false
+  }
+}
+
+/** 信封归一（`{data:{…}}` → `{…}`），三处草稿共用。 */
+function unwrapPayload(res: any): any {
+  return res && typeof res === 'object' && 'data' in res ? res.data : res
+}
+
+/** `cron{}`（宿主 kwargs，每段是整数列表）→ 一行 5 段表达式的**只读回显**。 */
+function cronTextOf(cron: any): string {
+  if (!cron || typeof cron !== 'object') return ''
+  const part = (value: any) => {
+    if (Array.isArray(value) && value.length) return value.length > 1 ? value.join(',') : String(value[0])
+    return typeof value === 'number' ? String(value) : '*'
+  }
+  return ['minute', 'hour', 'day', 'month', 'day_of_week'].map(key => part(cron[key])).join(' ')
+}
+
+/** 「通知设置」里某个渠道的「测试」：`POST /notify/test {channel}`（只发这一个渠道）。 */
+async function testChannel(channel: string): Promise<void> {
+  try {
+    const res: any = await currentApi().post('plugin/notify/test', { channel })
+    const payload = unwrapPayload(res)
+    if (payload && typeof payload === 'object' && payload.success === false) {
+      toast.warning(String(payload.message || `测试失败（${channel}）`))
+      return
+    }
+    toast.info(String(payload?.message || `已交给 MoviePilot 推送（${channel}）`))
+    // 测试消息也会写进插件自有通知表：顺手刷新设置台那份，用户切过去就能看到
+    await reloadNotices()
+  } catch (err) {
+    toast.warning(`测试失败（${channel}）：${errorText(err)}`)
+  }
+}
+
+/**
+ * 左栏脏点：草稿层那两个组 + 刮削两栏 / 演员 / 通知自己的补丁。
+ * `panels.ts` 里把这几栏的 `DIRTY_GROUPS` 标成 `none`（草稿层认不出它们的字段），所以在这里或进来。
  */
 function sectionDirtyEx(key: string): boolean {
   return (
     sectionDirty(key)
     || (scrapeDirty.value && SCRAPE_SECTIONS.includes(key))
     || (actorDirty.value && ACTOR_SECTIONS.includes(key))
+    || (notifyDirty.value && NOTIFY_SECTIONS.includes(key))
   )
 }
 
@@ -539,12 +707,28 @@ function pick(item: SectionItem): void {
   section.value = item.key
 }
 
+/**
+ * 切到设置台的某一栏。
+ *
+ * ⚠️ 0.9.1 之前这里只做两件事（写 `settingsSection` + 按栏读数据），**没有**兜底：
+ * 某个栏目面板没挂上（组件不存在 / 渲染报错）时右栏是一片空白，界面还给不出任何线索
+ * （用户 2026-10-27 报的「点『演员』页签后，无任何菜单选项显示」就是这种"白屏"）。
+ * 现在两处补救：
+ * ① 每一栏都有一行**标题头**（`activeSetting.title` + 一句用途说明），面板画不出来时
+ *    用户至少知道自己进的是哪一栏；
+ * ② 右栏底部有兜底块（模板里的 `sectionHasPanel()` 判断）：面板整块没渲染出来时，
+ *    出一行「本栏没有可显示的内容」+ 原因，而不是一片空白。
+ */
 function pickSetting(item: SectionItem): void {
   settingsSection.value = item.key
-  // 刮削两栏的字段不在草稿层里：真正点进这两栏时才读一次 `GET /rule` 拿它们的现值。
-  if (SCRAPE_SECTIONS.includes(item.key)) ensureScrapeLoaded()
-  // 「演员」栏同一条待遇（见 `actorSettings`）。
-  if (ACTOR_SECTIONS.includes(item.key)) ensureActorLoaded()
+  ensureSectionReady(item.key)
+}
+
+/** 按栏懒加载：刮削两栏 / 演员 / 通知的字段都不在草稿层里，各读各的 `GET /rule`。 */
+function ensureSectionReady(key: string): void {
+  if (SCRAPE_SECTIONS.includes(key)) ensureScrapeLoaded()
+  if (ACTOR_SECTIONS.includes(key)) ensureActorLoaded()
+  if (NOTIFY_SECTIONS.includes(key)) ensureNotifyLoaded()
 }
 
 /**
@@ -647,6 +831,9 @@ async function saveAll(): Promise<void> {
   // 「演员」栏同理（同一条纪律：上一步失败就不往下走）。
   const actorOk = await saveActorSettings()
   if (!actorOk) return
+  // 「通知」栏同理（推送渠道/分类/时间表，与上面同一份 kv）。
+  const notifyOk = await saveNotifySettings()
+  if (!notifyOk) return
   const ok = await saveDraft()
   if (!ok) return
   emit('action')
@@ -673,7 +860,7 @@ async function clearNotices(): Promise<void> {
   const ok = await confirm({
     type: 'warn',
     title: '清空通知',
-    content: `将清空全部 ${notices.value.length} 条通知，且无法恢复。确认继续？`,
+    content: `将清空全部 ${draftNotices.value.length} 条通知，且无法恢复。确认继续？`,
     confirmText: '清空',
     cancelText: '取消',
   })
@@ -687,7 +874,7 @@ async function clearNotices(): Promise<void> {
       toast.warning(result.message || '清空通知失败')
       return
     }
-    notices.value = []          // 设置台「通知」栏显示的就是这个 ref，顺手清掉，免得还列着旧条目
+    draftNotices.value = []          // 设置台「通知」栏显示的就是这个 ref，顺手清掉，免得还列着旧条目
     await refreshRuntime()
   } finally {
     noticeClearing.value = false
@@ -802,10 +989,14 @@ watch(
  */
 function applyPendingSection(): void {
   const pending = takePendingSettingsSection()
+  // 「落地到哪一栏」**认不出就忽略**：栏目 key 从开发期就在变（0.3.x 的 `SETTINGS_SECTIONS`
+  // 只有七栏，0.9.0 才加「演员」），一个过期的 key 不该让设置窗口停在空白上 ——
+  // 认不出就留在当前栏（0.9.1 的「透明设置窗口」就是它留下的：落点是一个没有面板的 key）。
   if (pending && SETTINGS_SECTIONS.some(item => item.key === pending)) {
     settingsSection.value = pending
-    if (SCRAPE_SECTIONS.includes(pending)) ensureScrapeLoaded()
-    if (ACTOR_SECTIONS.includes(pending)) ensureActorLoaded()
+    ensureSectionReady(pending)
+  } else if (pending) {
+    settingsSection.value = SETTINGS_SECTIONS[0]!.key
   }
 }
 
@@ -1076,16 +1267,18 @@ onBeforeUnmount(() => {
           <v-spacer />
 
           <!-- 保存按钮跟着设置窗口走：数据台没有可保存的东西。
-               `scrapeDirty` / `actorDirty` 是刮削两栏与演员栏的补丁（不在草稿层的字段集合里），
-               三处合起来才是完整的未保存态。 -->
+               `scrapeDirty` / `actorDirty` / `notifyDirty` 是刮削两栏、演员栏、通知栏的补丁
+               （都不在草稿层的字段集合里），**四处合起来**才是完整的未保存态。
+               ⚠️ 漏一处 = 那一栏改了东西顶条不变「● 未保存」、用户以为没生效（0.9.1 实际踩过：
+               通知栏改完渠道顶条纹丝不动，因为这里只列了三处）。 -->
           <v-btn
-            :color="dirty || scrapeDirty || actorDirty ? 'warning' : 'primary'"
-            :variant="dirty || scrapeDirty || actorDirty ? 'flat' : 'tonal'"
+            :color="dirty || scrapeDirty || actorDirty || notifyDirty ? 'warning' : 'primary'"
+            :variant="dirty || scrapeDirty || actorDirty || notifyDirty ? 'flat' : 'tonal'"
             prepend-icon="mdi-content-save"
             :loading="draftSaving"
             class="me-2"
             @click="saveAll"
-          >{{ dirty || scrapeDirty || actorDirty ? '保存修改 ● 未保存' : saveButtonLabel }}</v-btn>
+          >{{ dirty || scrapeDirty || actorDirty || notifyDirty ? '保存修改 ● 未保存' : saveButtonLabel }}</v-btn>
 
           <v-btn
             variant="text"
@@ -1134,6 +1327,18 @@ onBeforeUnmount(() => {
               density="compact"
               class="text-caption mb-3"
             >{{ draftError }}</v-alert>
+
+            <!--
+              栏目标题头（0.9.1 加）：让"进的是哪一栏"永远看得见。
+              用户报的「点『演员』页签后无任何内容」在真机上是一整片空白 —— 有这一行，
+              哪怕某个面板没渲染出来，也知道自己进的是哪一栏、该报哪一栏的 bug。
+              紧跟最后一栏的面板，标题与左栏清单同一份来源（`activeSetting`）。
+            -->
+            <div class="avh-settings__head">
+              <v-icon :icon="activeSetting.icon" size="18" color="primary" />
+              <span class="avh-settings__title">{{ activeSetting.title }}</span>
+              <span v-if="activeSettingHint" class="avh-settings__hint">{{ activeSettingHint }}</span>
+            </div>
 
             <!-- 规则草稿还没到位时才出骨架（`/rule` 在飞）。它是独立的，不参与下面的
                  v-if/v-else-if 链：否则「常规」「通知」这些不依赖规则的栏目会被一起挡住。 -->
@@ -1186,16 +1391,24 @@ onBeforeUnmount(() => {
               :settings="actorView"
               :api="currentApi()"
               :toast="injectedToast"
+              :load-error="actorLoadError"
               @patch="patchActor"
             />
 
             <NotifyPanel
               v-else-if="settingsSection === 'notify'"
-              :notices="notices"
+              :settings="notifyView"
+              :channels="notifyMeta?.channels || NOTIFY_CHANNEL_FALLBACK"
+              :kinds="notifyMeta?.kinds || NOTIFY_KIND_FALLBACK"
+              :cron-text="notifyMeta?.cronText || ''"
+              :load-error="notifyLoadError"
+              :notices="draftNotices"
               :loading="noticeLoading"
               :clearing="noticeClearing"
+              @patch="patchNotify"
+              @test-channel="testChannel"
               @clear="clearNotices"
-              @reload="loadNotices"
+              @reload="() => reloadNotices()"
             />
 
             <LibraryPanel
@@ -1225,8 +1438,9 @@ onBeforeUnmount(() => {
               :source-plugin-id="props.sourcePluginId"
             />
 
-            <v-alert v-else type="info" variant="tonal">
-              未知栏目：{{ activeSetting.title }}
+            <v-alert v-else-if="!sectionHasPanel" type="warning" variant="tonal" density="compact" class="text-caption mb-3">
+              本栏「{{ activeSetting.title }}」没有可显示的内容（0.9.1 的兜底提示）：
+              这个栏目在这个版本里没有对应的面板。请点左栏其它栏目，或把插件升到最新版。
             </v-alert>
           </section>
         </div>
@@ -1540,6 +1754,35 @@ onBeforeUnmount(() => {
   max-height: 68vh;
 }
 
+/*
+ * 栏目标题头（0.9.1）：一行「图标 + 栏名 + 一句用途」，钉在内容区顶部。
+ * `position: sticky` 是为了在长面板里滚到底部时仍知道自己看的是哪一栏。
+ */
+.avh-settings__head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 0 8px;
+  margin-bottom: 6px;
+  /* 盖住滚上来的面板内容：用卡片自身的表面色，不写死颜色（跟随宿主主题） */
+  background: rgb(var(--v-theme-surface));
+  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+}
+
+.avh-settings__title {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.avh-settings__hint {
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.5);
+}
+
 @media (max-width: 1100px) {
   .avh-body {
     flex-wrap: wrap;
@@ -1561,3 +1804,5 @@ onBeforeUnmount(() => {
   }
 }
 </style>
+
+

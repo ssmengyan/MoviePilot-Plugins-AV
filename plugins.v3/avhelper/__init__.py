@@ -36,7 +36,11 @@ from app.sdk.scheduler import add_plugin_once_job, remove_plugin_once_job
 
 from . import emby, imgproxy, longshot, paths, scoring
 from .client import JavdbClient, mask, reset as reset_javdb_state
-from .notify import Notifier
+# `notify` 模块本身也要在作用域里（`pick_channels()` / `pick_kinds()` 用它当**唯一真值**查表：
+# `notify.CHANNELS` / `notify.PUSH_KINDS`）。只 import 那几个常量不够 —— 常量与表会各自漂。
+from . import notify
+from .notify import (CHANNELS, DEFAULT_SUBCHECK_CRON, PUSH_KINDS, Notifier, parse_cron)
+from .schedule import host_kwargs
 from .ratelimit import RateLimiter
 from . import number_classify
 from . import scrape_graph
@@ -417,6 +421,57 @@ def _rate_map(value: Any) -> Dict[str, str]:
     return out
 
 
+def pick_channels(value: Any) -> List[str]:
+    """`notifyChannels` → 渠道**中文标签**清单（只留 `notify.CHANNELS` 里认得的，去重保序）。
+
+    默认空数组 = 不过滤 = 推给宿主开着的全部渠道（老口径）。认不出的条目直接丢掉而不是
+    报错：这份清单跟着宿主版本变（MP 加/删渠道），老规则里的旧标签不该让保存失败。
+    """
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    allowed = set(notify.CHANNELS)
+    out: List[str] = []
+    for item in value:
+        name = str(item or "").strip()
+        if name in allowed and name not in out:
+            out.append(name)
+    return out
+
+
+def pick_kinds(value: Any) -> List[str]:
+    """`notifyKinds` → 推送哪几类通知（只留 `notify.PUSH_KINDS` 里认得的 + 通配 `*`）。
+
+    `*` 是**通配**（「全部通知都推」），它不在 `PUSH_KINDS` 里（那是"分类"清单，
+    通配不是分类）—— 所以这里单独放行，别当成非法值丢掉。
+    """
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    allowed = set(notify.PUSH_KINDS) | {notify.PUSH_ALL}
+    out: List[str] = []
+    for item in value:
+        name = str(item or "").strip()
+        if name in allowed and name not in out:
+            out.append(name)
+    return out
+
+
+def pick_cron(value: Any) -> str:
+    """`notifyCron` → 订阅检查的时间表（标准 cron 表达式，**5 段**：分 时 日 月 周）。
+
+    空/非法一律回落 `DEFAULT_SUBCHECK_CRON`。校验只做"段数与取值范围"这一层
+    （`notify.cron_field()` 同一个 parser）：真正的调度由宿主 scheduler 做，
+    这里兜的是"存进库里的东西能被 `get_service()` 直接喂给宿主"。
+    """
+    text = str(value or "").strip()
+    if not text or len(text.split()) != 5:
+        return DEFAULT_SUBCHECK_CRON
+    try:
+        parse_cron(text)
+    except ValueError:
+        return DEFAULT_SUBCHECK_CRON
+    return " ".join(text.split())
+
+
 def _source_list(rule: Dict[str, Any]) -> List[str]:
     """启用了哪些数据源（P1-5）：`sources` 是**新真值**；老规则没有它就由两个布尔开关推。
 
@@ -461,7 +516,7 @@ class AVHelper(_PluginBase):
     # 0.8.0 = 两条并行的 0.7.4 线汇合 + 后台按 amane 的运维纪律重构
     # （失败原因闭枚举 + 单一记账点 + 单一出站函数、声明式取数图、逐站快照、限流单一执行点、
     #  /img ETag、迁移与索引纪律）
-    plugin_version = "0.9.0"
+    plugin_version = "0.9.1"
     plugin_label = "发现"
     plugin_author = "ssmengyan"
     plugin_config_prefix = "avhelper_"
@@ -631,20 +686,34 @@ class AVHelper(_PluginBase):
     # ---------- 宿主扩展点 ----------
 
     def get_service(self) -> List[Dict[str, Any]]:
-        """注册定时服务：订阅检查（每天 3 次）、缓存清理（每天 4 点）、演员头像同步（每 15 分钟）。
+        """注册定时服务：订阅检查（时间表可配，默认每天 3 次）、缓存清理（每天 4 点）、
+        演员头像同步（每 15 分钟）。
 
         本插件是在用插件，订阅检查的 cron 必须挂着 —— 否则会静默停摆。
         （若用分身/副本再装一份，务必只让一边挂 cron：会重复抓站点、重复下载。）
+
+        **订阅检查的时间表读设置台「通知」栏的 `notifyCron`**（0.9.1 起）：默认值
+        `notify.DEFAULT_SUBCHECK_CRON` = `30 9,14,21 * * *`，与 0.9.0 之前写死的
+        `{"hour": "9,14,21", "minute": 30}` **同一时刻**，升级不改现有时刻。存进来的值
+        由 `pick_cron()` 兜底（非法回默认），再由 `schedule.host_kwargs()` 拆成宿主
+        `add_job()` 直接收下的参数（每段是 **cron 字段字符串**，如 `hour="9,14,21"`；
+        ⚠️ 不能改成整数列表 —— 容器里实测 APScheduler 会把它当字符串解析并抛
+        `Unrecognized expression "[9"`，整条服务注册失败，详见 `schedule.py` 文件头）。
+        宿主改时间表要 reload 插件 —— 设置台在保存后提示这一点。
 
         演员同步这条自带门禁（`actorEnabled` / `actorAutoSync` 任一关着就静默 return 0），
         所以常驻注册表也不会白跑。
         """
         return [
             {"id": "subcheck", "name": "AV 订阅检查", "trigger": "cron",
-             "kwargs": {"hour": "9,14,21", "minute": "30"}, "func": self.job_subcheck},
+             "kwargs": host_kwargs(pick_cron(self.notify_conf().get("notifyCron"))),
+             "func": self.job_subcheck},
             {"id": "cacheclean", "name": "AV 缓存清理", "trigger": "cron",
              "kwargs": {"hour": 4, "minute": 0}, "func": self.job_cacheclean},
             {"id": "actorsync", "name": "AV 演员头像同步", "trigger": "cron",
+             # ⚠️ 值必须是 cron 字段**字符串**（`"5,20,35,50"`）。写成整数列表时 APScheduler
+             # 会把它当字符串 `"[5, 20, 35, 50]"` 解析并抛 `Unrecognized expression "[5"` ——
+             # 整条服务注册失败、演员同步静默停摆（容器里实测，见 `schedule.py` 文件头）。
              "kwargs": {"minute": "5,20,35,50"}, "func": self.job_actor_sync},
         ]
 
@@ -928,6 +997,16 @@ class AVHelper(_PluginBase):
              "summary": "手动检查订阅(受限流)"},
             {"path": "/notices", "endpoint": self.api_notices, "methods": ["GET", "DELETE"],
              "auth": "bear", "summary": "通知列表/清空"},
+            # 0.9.1：「通知」栏的渠道/分类/时间表。路径是 `/notify` 与 `/notices` 区别开 ——
+            # 宿主按注册顺序匹配，`/notices` 在前不会被 `/notify` 吃掉，但两者语义不同：
+            # `/notices` = 收件箱，`/notify` = 推送设置。
+            {"path": "/notify", "endpoint": self.api_notify, "methods": ["GET"],
+             "auth": "bear", "summary": "通知设置(渠道/分类/时间表)",
+             "description": "回 channels[]（宿主通知渠道）、kinds[]（推送分类）、conf{}（当前设置"
+                            "含 notifyCron 与默认值）、cron{}（实际生效的宿主 cron kwargs）"},
+            {"path": "/notify/test", "endpoint": self.api_notify_test, "methods": ["POST"],
+             "auth": "bear", "summary": "给某个渠道发测试通知",
+             "description": "POST {channel}：只发这一个渠道（不过推送门），回 {success, delivered}"},
             {"path": "/sites", "endpoint": self.api_sites, "methods": ["GET"], "auth": "bear",
              "summary": "已配置站点"},
             {"path": "/cache/clean", "endpoint": self.api_cache_clean, "methods": ["POST"],
@@ -1204,6 +1283,46 @@ class AVHelper(_PluginBase):
             "fieldPriority": _field_map(rule.get("fieldPriority")),
             "fieldBlacklist": _field_map(rule.get("fieldBlacklist")),
         }
+
+    def notify_conf(self) -> Dict[str, Any]:
+        """通知设置（10 项）：**塞进插件自有通知表**与**推送渠道**两件事。
+
+        存在哪：与 `scrape_conf()` 完全同一套 —— `global_rule` 这份 kv（`POST /rule` 写入、
+        `merge_rule()` 原样透传未知键）。键名一个字母都不许改（前端 `NOTIFY_KEYS` 按这套读写）：
+        `notifyPush`（总开关）/ `notifyChannels`（渠道**中文标签**数组，见
+        `notify.CHANNELS`）/ `notifyKinds`（推送哪些通知，见 `notify.PUSH_KINDS`）。
+
+        缺键（老用户存的规则里没有这三样）逐项回落默认值：**沿用宿主通知开关**、
+        两类通知都推、分类未知的通知推 —— 与 0.9.0 之前的行为一字不差，升级不改变现状。
+        `on_download_done` 等免限流分类、发给某个点名渠道的 `send_to_channel` 不过这张表。
+        """
+        rule = self.global_rule() or {}
+        return {
+            "notifyPush": pick_bool(rule.get("notifyPush"), True),
+            "notifyChannels": pick_channels(rule.get("notifyChannels")),
+            "notifyKinds": pick_kinds(rule.get("notifyKinds")),
+            "notifyCron": pick_cron(rule.get("notifyCron")),
+            # 宿主「设置 → 通知」里此刻真正配好的渠道（回给设置台勾选用；空 = 宿主没开任何渠道）
+            "available": Notifier.available_channels(),
+        }
+
+    def notify_test(self, channel: str) -> Dict[str, Any]:
+        """给**点名的一个渠道**发一条测试通知（设置台「通知」栏每个渠道旁边那颗「测试」）。
+
+        走 `Notifier.send_to_channel()`：不过推送门（`notifyPush` 关着也能测），只发这一个
+        渠道 + 写一条插件自有通知。`delivered=True` 只表示"已交给宿主"—— 宿主侧那个渠道
+        没配好时它自己会跳过，插件这边看不出来。
+        """
+        name = str(channel or "").strip()
+        if name not in CHANNELS:
+            return {"success": False, "message": f"未知渠道：{name or '（空）'}"}
+        ok = self.notifier.send_to_channel(
+            name, "AV 资源助手 · 测试通知",
+            f"这条来自插件设置台「通知」栏：渠道「{name}」的测试消息。收到即说明 MoviePilot "
+            f"把这个渠道配对了。")
+        return {"success": True, "delivered": bool(ok), "channel": name,
+                "message": (f"已交给 MoviePilot 推送（{name}）" if ok
+                            else f"提交给宿主时出错（{name}），请检查宿主日志")}
 
     def magnets_cached(self, number: str) -> Optional[List[Dict[str, Any]]]:
         """磁力列表：优先读 7 天文件缓存（与详情页共用同一个 key），未命中才起子进程。
@@ -2927,6 +3046,43 @@ class AVHelper(_PluginBase):
             return {"success": True, "notices": [], "message": "已清空通知"}
         return {"success": True, "notices": self.store.notice_list()}
 
+    def api_notify(self) -> Dict[str, Any]:
+        """`GET /notify`：设置台「通知」栏要的三张表（0.9.1）。
+
+        - `channels[]`：宿主通知渠道清单 `[{name, label, enabled}]`（`notify.CHANNELS`）；
+        - `kinds[]`：推送分类 `[{name, label}]`（`notify.PUSH_KINDS`）；
+        - `conf{}`：当前通知设置（`notify_conf()`，含 `notifyCron` 与它的默认值
+          `notifyCronDefault`）+ 实际生效的宿主 cron `cron`（`schedule.host_kwargs()` 的结果，
+          回显给用户看"这一行真的会按什么时刻跑"）。
+
+        读的是 `global_rule` 这一份 kv，写走 `POST /rule`（与设置台其余栏目同一套）。
+        """
+        conf = self.notify_conf()
+        try:
+            kwargs = host_kwargs(pick_cron(conf.get("notifyCron")))
+        except ValueError:      # 理论上 `pick_cron()` 已兜底，这里只防库里存了坏值
+            kwargs = host_kwargs(DEFAULT_SUBCHECK_CRON)
+        return {
+            "success": True,
+            "channels": [{"name": item["name"], "label": item["label"], "enabled": True}
+                         for item in conf.get("available") or []],
+            "kinds": [{"name": name, "label": label}
+                      for name, label in PUSH_KINDS.items()],
+            "conf": {
+                "notifyPush": conf.get("notifyPush", True),
+                "notifyChannels": conf.get("notifyChannels") or [],
+                "notifyKinds": conf.get("notifyKinds") or [],
+                "notifyCron": pick_cron(conf.get("notifyCron")),
+                "notifyCronDefault": DEFAULT_SUBCHECK_CRON,
+            },
+            "cron": kwargs,
+        }
+
+    async def api_notify_test(self, request: Request) -> Dict[str, Any]:
+        """`POST /notify/test {channel}`：给某一个渠道发测试通知（见 `notify_test()`）。"""
+        payload = await self._json_body(request)
+        return await asyncio.to_thread(self.notify_test, str(payload.get("channel") or ""))
+
     @staticmethod
     async def _json_body(request: Request) -> Dict[str, Any]:
         """安全读取 JSON 请求体（空体或非法 JSON 都返回空字典）。"""
@@ -4440,3 +4596,4 @@ class AVHelper(_PluginBase):
                                 name="AV 订阅立即检查")
         except Exception as error:
             logger.error(f"AVHelper 挂起立即检查任务失败：{error}")
+

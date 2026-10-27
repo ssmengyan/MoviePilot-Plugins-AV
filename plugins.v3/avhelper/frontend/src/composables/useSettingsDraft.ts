@@ -116,7 +116,10 @@ export interface UseSettingsDraft {
   reset: () => void
   resetRule: () => void
   loadNotices: () => Promise<void>
-  clearNotices: () => Promise<boolean>
+  /** 再读一次收件箱（通知栏「刷新」/ 测试渠道之后）：与 `loadNotices` 同一个实现，另起名字只为语义清楚。 */
+  reloadNotices: () => Promise<void>
+  /** 清空收件箱（`DELETE /notices`）：设置台「清空通知」用它。 */
+  cleanNotices: () => Promise<boolean>
   cleanCache: () => Promise<boolean>
 }
 
@@ -297,6 +300,11 @@ export function useSettingsDraft(options: UseSettingsDraftOptions): UseSettingsD
     }
   }
 
+  /** 收件箱重新读一次（设置台「通知」栏的「刷新」，以及测试渠道之后）。 */
+  async function reloadNotices(): Promise<void> {
+    await loadNotices()
+  }
+
   /** 挂载时跑一次：规则与通知要真数据，站点/缓存/限流由 `/bootstrap` 轮询补。 */
   async function load(): Promise<void> {
     loading.value = true
@@ -467,7 +475,11 @@ export function useSettingsDraft(options: UseSettingsDraftOptions): UseSettingsD
     reset,
     resetRule,
     loadNotices,
-    clearNotices,
+    reloadNotices,
+    // `cleanNotices` 是 `clearNotices` 的对外名（0.9.1 起才进接口表：设置台「通知」栏的
+    // 「清空通知」走的是 `Console.clearNotices`，它内部用 `store.clearNotices()`，不读这一项；
+    // 保留导出只为将来别处要用时不必再改接口）。
+    cleanNotices: clearNotices,
     cleanCache,
   }
 }
