@@ -15,5 +15,6 @@
     "noUnusedLocals": false,
     "useDefineForClassFields": true
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "tests/**/*.ts",
+              "vite.config.ts", "vitest.config.ts"]
 }

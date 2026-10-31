@@ -19,6 +19,7 @@
  */
 import { computed, ref, shallowRef, type Ref } from 'vue'
 import { errorText } from './usePluginApi'
+import { createLatestGate } from './latestGate'
 import {
   PENDING_TASK_STATE,
   SITES_FALLBACK,
@@ -177,6 +178,9 @@ export function usePluginStore(api: PluginApi) {
    */
   const busy = ref<Record<string, boolean>>({})
 
+  /** 快照序号闸（A4）：轮询 / 首屏 / 手动刷新只接受最新一次发起的响应。 */
+  const gate = createLatestGate()
+
   // ---------- 派生值（角标与空态） ----------
   /** 待确认任务数（老 `renderPills` 的 `pillTasks`）：只数 `await`，见 `PENDING_TASK_STATE`。 */
   const awaitTasks = computed(
@@ -253,6 +257,17 @@ export function usePluginStore(api: PluginApi) {
     if (nextTasks) tasks.value = nextTasks
     const nextQueue = listOf<QueueItem>(res.queue)
     if (nextQueue) queue.value = nextQueue
+  }
+
+  /**
+   * 用户动作写快照（A4）：先**作废所有在飞的读取**，再落这份更新的数据。
+   *
+   * 不做这一步的话，动作完成前发出、动作之后才回来的轮询会把结果盖回去 ——
+   * 用户看到的正是「刚取消的行又变回下载中」。读取那边由 `gate.accept()` 把关。
+   */
+  function applyActionSnapshot(res: Record<string, any>): void {
+    gate.invalidate()
+    syncLists(res)
   }
 
   /** 新通知插到最前（老实现 `S.notices.unshift(...)` 的语义）。 */
@@ -337,12 +352,16 @@ export function usePluginStore(api: PluginApi) {
   async function refresh(): Promise<boolean> {
     if (loading.value) return false
     loading.value = true
+    // A4：这份读取和任务轮询写的是同一批任务/队列字段，同样要过序号闸 ——
+    // 先发后到的旧 bootstrap 不许把刚下的单、刚取消的行覆盖回旧状态。
+    const token = gate.start()
     try {
       const outcome = await send('get', 'bootstrap')
       if (!outcome.ok) {
         error.value = outcome.message || 'bootstrap 失败'
         return false
       }
+      if (!gate.accept(token)) return true        // 迟到的旧响应：整份丢弃，不回滚
       return await hydrate(outcome.res)
     } finally {
       loading.value = false
@@ -363,7 +382,7 @@ export function usePluginStore(api: PluginApi) {
       const outcome = await send('post', 'check', name ? { name } : {})
       if (!outcome.ok) return { ok: false, kind: 'error' as ActionResultKind, message: outcome.message }
       const payload = (outcome.res.data ?? outcome.res) as CheckResult
-      syncLists(outcome.res as Record<string, any>)
+      applyActionSnapshot(outcome.res as Record<string, any>)
       prependNotices(payload.notices)
       const limited = payload.limited === true
       return {
@@ -701,6 +720,8 @@ export function usePluginStore(api: PluginApi) {
         return { ok: false, kind: 'error' as ActionResultKind, message: textOf(outcome.res) || '请稍后重试' }
       }
       const payload = (outcome.res.data ?? outcome.res) as TaskDownloadResult
+      // A4：动作刚写了一份更新的快照 → 让在飞的轮询作废，别把「刚提交」盖回「待确认」。
+      gate.invalidate()
       const nextQueue = listOf<QueueItem>(outcome.res.queue)
       if (nextQueue) queue.value = nextQueue
       // 后端在顶层给 `notice`；老实现还有 `{...id}` 兜底（宿主回传任务体）→ 认出来就插通知。
@@ -736,6 +757,7 @@ export function usePluginStore(api: PluginApi) {
       if (outcome.res.success !== true) {
         return { ok: false, kind: 'error' as ActionResultKind, message: textOf(outcome.res) || '请检查下载器配置' }
       }
+      gate.invalidate()                         // A4：同 startDownload
       const nextQueue = listOf<QueueItem>(outcome.res.queue)
       if (nextQueue) queue.value = nextQueue
       if (number) known.value = new Set([...known.value, String(number)])
@@ -763,6 +785,7 @@ export function usePluginStore(api: PluginApi) {
       if (outcome.res.success !== true) {
         return { ok: false, kind: 'error' as ActionResultKind, message: textOf(outcome.res) || '请稍后重试' }
       }
+      gate.invalidate()                         // A4：取消也是一份更新的快照
       const nextTasks = listOf<SearchTask>(outcome.res.tasks)
       if (nextTasks) tasks.value = nextTasks
       const nextQueue = listOf<QueueItem>(outcome.res.queue)
@@ -796,7 +819,7 @@ export function usePluginStore(api: PluginApi) {
       if (outcome.res.success !== true) {
         return { ok: false, kind: 'error' as ActionResultKind, message: textOf(outcome.res) || '请稍后重试' }
       }
-      syncLists(outcome.res)
+      applyActionSnapshot(outcome.res)
       return {
         ok: true,
         kind: 'ok' as ActionResultKind,
@@ -823,7 +846,7 @@ export function usePluginStore(api: PluginApi) {
       if (outcome.res.success !== true) {
         return { ok: false, kind: 'error' as ActionResultKind, message: textOf(outcome.res) || '请稍后重试' }
       }
-      syncLists(outcome.res)
+      applyActionSnapshot(outcome.res)
       return {
         ok: true,
         kind: 'ok' as ActionResultKind,
@@ -852,7 +875,7 @@ export function usePluginStore(api: PluginApi) {
       if (outcome.res.success !== true) {
         return { ok: false, kind: 'error' as ActionResultKind, message: textOf(outcome.res) || '请稍后重试' }
       }
-      syncLists(outcome.res)
+      applyActionSnapshot(outcome.res)
       return {
         ok: true,
         kind: 'ok' as ActionResultKind,
@@ -874,7 +897,7 @@ export function usePluginStore(api: PluginApi) {
       if (outcome.res.success !== true) {
         return { ok: false, kind: 'error' as ActionResultKind, message: textOf(outcome.res) || '请稍后重试' }
       }
-      syncLists(outcome.res)
+      applyActionSnapshot(outcome.res)
       return {
         ok: true,
         kind: 'ok' as ActionResultKind,
@@ -929,11 +952,15 @@ export function usePluginStore(api: PluginApi) {
    * :param silent: `true` 时失败不写 `error`（后台轮询不该把界面打成错误态）。
    */
   async function refreshTasks(silent = true): Promise<boolean> {
+    // A4：5 秒轮询会叠着首屏与手动刷新一起发。只接受**最近一次发起**那份 ——
+    // 慢的旧响应回来时令牌已经过期，整份丢掉，绝不把新状态改回旧的。
+    const token = gate.start()
     const outcome = await send('get', 'tasks')
     if (!outcome.ok) {
       if (!silent) error.value = outcome.message
       return false
     }
+    if (!gate.accept(token)) return true
     syncLists(outcome.res as Record<string, any>)
     return true
   }

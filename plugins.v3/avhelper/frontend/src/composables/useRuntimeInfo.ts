@@ -50,6 +50,8 @@ export function useRuntimeInfo(api: PluginApi) {
   const loading: Ref<boolean> = ref(false)
   const updatedAt: Ref<string> = ref('')
   let timer: ReturnType<typeof setInterval> | null = null
+  /** 在飞时被点下的手动刷新（A4）：当前请求结束后补跑一次 `fresh=1`。 */
+  let pendingFresh = false
 
   const overview = computed<RuntimeOverview>(() => {
     const d = data.value
@@ -91,7 +93,12 @@ export function useRuntimeInfo(api: PluginApi) {
    * （`TaskEngine.queue()` 里的两档年龄说明）。
    */
   async function refresh(fresh = false): Promise<void> {
-    if (loading.value) return
+    // A4：手动「立即刷新」（`fresh=true`）不能被静默丢弃 —— 15 秒轮询在飞时先排个队，
+    // 当前请求结束后立刻补跑一次真正带 `?fresh=1` 的请求（只排一次，不会雪崩）。
+    if (loading.value) {
+      if (fresh) pendingFresh = true
+      return
+    }
     loading.value = true
     try {
       const res: any = await api.get(
@@ -111,6 +118,11 @@ export function useRuntimeInfo(api: PluginApi) {
       error.value = errorText(err)
     } finally {
       loading.value = false
+      // 排队的手动刷新在这里补跑：`pendingFresh` 先清零再递归，避免自己又排一次。
+      if (pendingFresh) {
+        pendingFresh = false
+        void refresh(true)
+      }
     }
   }
 

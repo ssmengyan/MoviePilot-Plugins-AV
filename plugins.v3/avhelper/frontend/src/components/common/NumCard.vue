@@ -39,6 +39,7 @@
  * 满足"点击可直接跳转到对应的 MB 观看地址"。
  */
 import Thumb from './Thumb.vue'
+import { safeUrl } from '../../composables/safeUrl'
 
 /** 卡片数据：`/rankings` 的 `movies[]` 与 `/detail` 的 `movie` 同shape（后端 `_movie()`）。 */
 export interface CardMovie {
@@ -176,8 +177,8 @@ const actorLine = () => {
 /** 库卡片正文：影片标题优先，取不到才退回库内文件名（见模板里的说明）。 */
 const libBodyText = () => String(props.movie.title || '') || fileName()
 
-/** Emby 观看地址（`lib.url`）；没有就整颗「观看」不画。 */
-const watchUrl = () => String(props.movie.lib?.url || '')
+/** Emby 观看地址（`lib.url`，只认 http(s)，见 `safeUrl`）；没有就整颗「观看」不画。 */
+const watchUrl = () => safeUrl(props.movie.lib?.url)
 </script>
 
 <template>

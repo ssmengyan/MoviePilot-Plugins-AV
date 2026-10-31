@@ -72,6 +72,7 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import Thumb from './Thumb.vue'
 import { filledThumbs, scoreLevel } from './common'
 import type { Candidate, SearchTask } from '../../composables/storeTypes'
+import { safeUrl } from '../../composables/safeUrl'
 
 const props = withDefaults(
   defineProps<{
@@ -208,11 +209,10 @@ function metaTip(cand: Candidate): string {
 
 /**
  * 「原帖」地址：只认 http(s) 绝对地址，其余（空串、`/detail/123` 这类相对地址）返回空串。
- * BT 兜底候选没有发布页，自然也不画。
+ * BT 兜底候选没有发布页，自然也不画。判据统一走 `safeUrl()`（与 `lib.url` 那些动态链接同一套）。
  */
 function postUrl(cand: Candidate): string {
-  const url = String(cand._page_url || '').trim()
-  return /^https?:\/\//i.test(url) ? url : ''
+  return safeUrl(cand._page_url)
 }
 
 /** 做种数：BT 兜底行显示「未知」，PT 行 null/undefined 显示 `—`（老实现逐字）。 */

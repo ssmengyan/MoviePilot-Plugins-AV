@@ -1,0 +1,15 @@
+{
+  "_comment": "番号归一化的共用用例表：后端 emby.norm_key() 与前端 downloadHistory.normKey() 都必须吐出同一份 key。由 tests/v3/avhelper/test_normkey_shared_table.py 与 frontend/tests/norm-key.test.ts 两头读取，改一处两边一起红。",
+  "cases": [
+    { "input": "ipzz00961", "key": "IPZZ961", "why": "小写 + 数字段前导零要抹掉" },
+    { "input": "IPZZ-961", "key": "IPZZ961", "why": "连字符不是字母数字" },
+    { "input": "MIDV-946-UC", "key": "MIDV946UC", "why": "版本后缀（UC）留在 key 里" },
+    { "input": "IPOK-025L", "key": "IPOK25L", "why": "后缀字母保留，数字段抹零" },
+    { "input": "CAWD-989_4K", "key": "CAWD9894K", "why": "下划线也是分隔符" },
+    { "input": "SSIS-001-C", "key": "SSIS1C", "why": "001 → 1" },
+    { "input": "   ", "key": "", "why": "空白归一成空串" },
+    { "input": "", "key": "", "why": "空串还是空串" },
+    { "input": "FC2-PPV-1234567", "key": "FC2PPV1234567", "why": "纯数字段不丢" },
+    { "input": "abp-123 ", "key": "ABP123", "why": "首尾空白先 trim 再归一" }
+  ]
+}

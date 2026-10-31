@@ -50,6 +50,7 @@ import Lightbox from './Lightbox.vue'
 import { hostToast, type PluginApi } from '../../composables/usePluginApi'
 import { playBottomToasts, pushBottomToast } from '../../composables/bottomToast'
 import { cssUrl } from '../../composables/cssUrl'
+import { safeUrl } from '../../composables/safeUrl'
 import {
   cachedDetail,
   dropDetail,
@@ -969,11 +970,11 @@ defineExpose({ syncCursor, focusFresh, reloadDetail, retryDetail })
           <div class="avh-hero__info">
             <h2 class="avh-hero__num">{{ num }}</h2>
 
-            <!-- 老 `librow`：已在 Emby 库中（有 url 才画「在 Emby 中打开 ↗」） -->
+            <!-- 老 `librow`：已在 Emby 库中（有合法 http(s) 地址才画那颗入口，见 `safeUrl`） -->
             <div v-if="movie.lib" class="avh-librow">
               ✅ 已在 Emby 库中
-              <template v-if="movie.lib.url">
-                · <a :href="String(movie.lib.url)" target="_blank" rel="noopener">在 Emby 中打开 ↗</a>
+              <template v-if="safeUrl(movie.lib.url)">
+                · <a :href="safeUrl(movie.lib.url)" target="_blank" rel="noopener">在 Emby 中打开 ↗</a>
               </template>
             </div>
 

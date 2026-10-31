@@ -10,21 +10,38 @@
  *
  * 默认插槽的内容插在文案下方（老实现允许空态里带按钮）。
  */
-withDefaults(
+import { computed } from 'vue'
+
+const props = withDefaults(
   defineProps<{
-    /** 主文案（可含 `<br>`，按老实现的 HTML 行为原样渲染）。 */
+    /** 主文案（可以含 `<br>` 当换行符：本组件按它拆行，**不当 HTML 渲染**）。 */
     text?: string
     /** 追加一行次要说明（比主文案小一号）。 */
     hint?: string
   }>(),
   { text: '', hint: '' },
 )
+
+/**
+ * 文案按 `<br>` 拆成多行**纯文本**（0.9.3 B3：去掉了 `v-html`）。
+ *
+ * 老实现是 `emptyHtml(html)` 直接塞 HTML，调用方因此把 `<br>` 写进了文案。这里保留
+ * `<br>` 的书写习惯、只把它当分隔符：逐行插值渲染 —— 换行不丢，HTML 注入面没了
+ * （这个组件是公共的，迟早有人把外部文本传进来；真到那时也不会变成执行面）。
+ */
+const lines = computed(() =>
+  String(props.text || '')
+    .split(/<br\s*\/?>/i)
+    .map(line => line.trim())
+    .filter(line => line !== ''),
+)
 </script>
 
 <template>
   <div class="avh-empty">
-    <!-- 文案允许含 <br>（老实现 `emptyHtml` 就是塞 HTML），内容只来自本插件视图，不来自外部输入 -->
-    <div class="avh-empty__text" v-html="text" />
+    <div v-if="lines.length" class="avh-empty__text">
+      <div v-for="(line, index) in lines" :key="index">{{ line }}</div>
+    </div>
     <div v-if="hint" class="avh-empty__hint">{{ hint }}</div>
     <div v-if="$slots.default" class="avh-empty__slot">
       <slot />

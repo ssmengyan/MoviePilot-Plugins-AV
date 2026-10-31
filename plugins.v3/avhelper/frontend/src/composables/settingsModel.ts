@@ -174,8 +174,11 @@ export function toRuleState(raw: unknown): RuleState {
     preferUncensored: bool(src.preferUncensored, RULE_FALLBACK.preferUncensored),
     allow4k: bool(src.allow4k, RULE_FALLBACK.allow4k),
     minSeeders: num(src.minSeeders, RULE_FALLBACK.minSeeders, true, 0),
-    sites: strList(src.sites),
-    prefSites: strList(src.prefSites),
+    // 「缺这个键」与「用户清空了列表」是两回事（0.9.3 D2 的测试查出来的）：
+    // 前者要回落后端 `DEFAULT_RULE` 的默认值（`馒头` / `Rousi`，否则界面显示"无优先站"
+    // 而后端实际按两个优先站打分），后者必须保留空数组。
+    sites: Array.isArray(src.sites) ? strList(src.sites) : RULE_FALLBACK.sites,
+    prefSites: Array.isArray(src.prefSites) ? strList(src.prefSites) : RULE_FALLBACK.prefSites,
     btFallback: bool(src.btFallback, RULE_FALLBACK.btFallback),
     trigger: str(src.trigger) === 'auto' ? 'auto' : 'notify',
     // 限流参数不由界面放宽：每日上限封顶政策值 6（后端 `merge_rule()` 还会再夹一道），
