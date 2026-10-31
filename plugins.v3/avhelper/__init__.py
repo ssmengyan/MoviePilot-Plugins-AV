@@ -1,23 +1,21 @@
 """AV 资源助手：JAV 榜单/演员/详情浏览 + 番号订阅、PT 选种下载、通知与缓存治理。
 
-后端为 2026-10 的前端重写版（Vue 联邦界面 + `/ui` 静态应用）。数据根、javdb 二进制路径
-都不写死，由 `paths.py` 按「插件配置 → 历史固定路径 → MoviePilot 插件数据目录」解析，
-别人装到自己机器上也能直接跑（详见仓库 README 的「安装」一节）。
+后端为 2026-10 的前端重写版。数据根、javdb 二进制路径都不写死，由 `paths.py` 按「插件配置 →
+历史固定路径 → MoviePilot 插件数据目录」解析，别人装到自己机器上也能直接跑（详见仓库
+README 的「安装」一节）。
 
-界面说明：宿主 Vuetify JSON 页面无法承载搜索框、灯箱等交互（当前宿主前端在事件调用后不会
-重新拉取页面），因此完整界面由本插件自带的静态目录 `ui/`（拆分前是单文件 `webui.html`）经
-匿名路由 `/ui/` 下发，插件页用 iframe 承载；前端自己带状态、自己调接口（契约见
-docs/AVHelper-API契约.md）。
+界面说明：**只有 Vue 联邦界面**（`get_render_mode()` 返回 `vue`，宿主加载
+`frontend/dist/assets/remoteEntry.js`）。旧的自带静态应用（`ui/` 与单文件 `webui.html`）
+2026-11-01 已删除 —— 那是 v2 期的补丁（宿主事件后不重新拉页面，只能拿 iframe 承载完整应用），
+MP ≥ 3.1.0 走联邦渲染后不再需要；`get_page()` 只回一句降级提示。
 
-安全边界：只有 `/ui`、`/ui/`（含 `ui/` 下的静态资源）与 `/img` 匿名；`/img` 仅反代白名单图床
-且无写能力，其余数据接口一律 bear 鉴权。`API_TOKEN` 不出现在任何 URL 或页面里，前端从同源
-localStorage 取会话 JWT。
+安全边界：只有 `/img` 匿名（仅反代白名单图床，且无写能力），其余数据接口一律 bear 鉴权。
+`API_TOKEN` 不出现在任何 URL 或页面里，前端从同源 localStorage 取会话 JWT。
 """
 
 import asyncio
 import hashlib
 import json
-import mimetypes
 import threading
 import time
 from collections import deque
@@ -26,7 +24,6 @@ from typing import Any, Deque, Dict, Iterable, List, Optional, Sequence, Set, Tu
 from urllib.parse import quote, unquote
 
 from fastapi import Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.sdk.logging import logger
 from app.sdk.network import RequestUtils
@@ -47,25 +44,6 @@ from .store import PLUGIN_SOURCES, Store
 from .tasks import TaskEngine, merge_rule
 
 PLUGIN_ID = "AVHelper"
-# 前端静态目录与 MIME 表：多文件前端由 `/ui/` 下发，ES module 的相对导入依赖目录语义
-UI_DIR = Path(__file__).with_name("ui")
-UI_EXT_MIME: Dict[str, str] = {
-    ".html": "text/html; charset=utf-8",
-    ".js": "application/javascript",
-    ".mjs": "application/javascript",
-    ".css": "text/css",
-    ".json": "application/json",
-    ".map": "application/json",
-    ".svg": "image/svg+xml",
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".webp": "image/webp",
-    ".gif": "image/gif",
-    ".ico": "image/x-icon",
-    ".woff": "font/woff",
-    ".woff2": "font/woff2",
-}
 # 默认不内置代理：内地以外直连即可，内地用户在插件设置里填自己的代理
 DEFAULT_PROXY = ""
 GLOBAL_RULE_KEY = "global_rule"
@@ -314,31 +292,6 @@ def scrape_tier_of(completeness: Any, scraped: bool) -> str:
 # 都幂等），成功与否都只在这一个进程里试一次，避免坏资源文件把日志刷爆。
 _NAMEMAP_TRIED = False
 _NAMEMAP_LOCK = threading.Lock()
-
-
-def ui_file(path: str) -> Optional[Path]:
-    """把 `/ui/{path}` 的子路径安全地解析成 `ui/` 目录内的文件；越界或不存在返回 None。
-
-    含 `..` 的路径（包括被二次百分号编码、解码后才现形的）一律拒绝，解析后必须仍在 `ui/`
-    目录内；只服务文件，不列目录。
-    """
-    rel = unquote(str(path or "")).strip("/")
-    if not rel or ".." in rel:
-        return None
-    base = UI_DIR.resolve()
-    try:
-        target = (base / rel).resolve()
-    except OSError:
-        return None
-    if not target.is_relative_to(base) or not target.is_file():
-        return None
-    return target
-
-
-def ui_media_type(path: Path) -> str:
-    """静态资源的 Content-Type：先查扩展名表，再退回标准库猜测，最后 octet-stream。"""
-    guessed = mimetypes.guess_type(path.name)[0]
-    return UI_EXT_MIME.get(path.suffix.lower()) or guessed or "application/octet-stream"
 
 
 def size_text(size: Any) -> str:
@@ -857,32 +810,32 @@ class AVHelper(_PluginBase):
                       "cache_max_gb": self._cache_max_gb}
 
     def get_page(self) -> Optional[List[dict]]:
-        """详情页：内嵌自带应用界面（宿主 JSON 页面无法承载交互式界面）。"""
+        """详情页：**只回降级提示**（界面由 Vue 联邦组件渲染，见 `get_render_mode()`）。
+
+        旧写法嵌一个指向 `/ui/` 的 iframe。自带静态应用 2026-11-01 删除后，这里再没有页面可嵌：
+        宿主走 `vue` 渲染模式时根本不会问 `get_page()`，只有「宿主不认 vue / 联邦组件加载失败」
+        才会落在这里 —— 那就该让用户看见一句能照着做的话，而不是又一个空白 iframe。
+        """
         if not self._enabled:
             return [{
                 "component": "VAlert",
                 "props": {"type": "warning", "variant": "tonal", "class": "ma-2"},
                 "text": "插件尚未启用：请先在插件设置中开启。",
             }]
-        # 尾斜杠不能省：文档 URL 带 `/ui/` 时 ES module 的 `./app.js` 才会解析到 `/ui/app.js`
-        src = f"/api/v1/plugin/{PLUGIN_ID}/ui/?v={self.plugin_version}"
-        return [
-            {
-                "component": "iframe",
-                "props": {
-                    "src": src,
-                    "style": "width:100%;height:78vh;min-height:560px;border:0;margin-top:8px;"
-                             "border-radius:10px;background:transparent",
-                },
-            },
-        ]
+        return [{
+            "component": "VAlert",
+            "props": {"type": "info", "variant": "tonal", "class": "ma-2"},
+            "text": "界面由 Vue 联邦组件提供（需要 MoviePilot ≥ 3.1.0）。看到这条说明宿主没有"
+                    "加载到 remoteEntry.js：请先在插件页点「重载」，仍不行就确认 "
+                    "frontend/dist/assets/remoteEntry.js 已随插件同步。",
+        }]
 
     def get_render_mode(self) -> Tuple[str, Optional[str]]:
         """使用 Vue 联邦模式：弹窗正文交给 `frontend/dist/assets` 里的远程组件。
 
         切到 `vue` 之后宿主**不再画右下角那个齿轮按钮**（那是 `vuetify` 分支专有的 `VFab`），
-        设置台与数据台都由组件自己绘制。`get_form()` 仍提供宿主配置模型的默认值，
-        `get_page()` 保留 iframe 作为旧宿主/联邦加载失败时的回退。
+        设置台与数据台都由组件自己绘制。`get_form()` 仍提供宿主配置模型的默认值。
+        旧的自带应用（`ui/` + `webui.html`）已删除，`get_page()` 只剩一句降级提示。
         """
         return "vue", "frontend/dist/assets"
 
@@ -893,15 +846,12 @@ class AVHelper(_PluginBase):
     # ---------- API 注册 ----------
 
     def get_api(self) -> List[Dict[str, Any]]:
-        """返回插件 API 列表：`/ui` 三连（含静态资源）与 `/img` 匿名，其余 bear 鉴权。"""
+        """返回插件 API 列表：只有 `/img` 匿名（图片代理），其余一律 bear 鉴权。
+
+        旧内置应用的三条 `/ui*` 路由 2026-11-01 随 `ui/` 目录一起删除 —— 匿名面只剩图片代理
+        一个口子（`/ui` 当年是给 iframe 用的，等于把整个静态目录匿名挂出去）。
+        """
         return [
-            {"path": "/ui", "endpoint": self.api_ui, "methods": ["GET"], "allow_anonymous": True,
-             "summary": "应用界面入口(307→/ui/)", "description": "自带界面，无密钥，补尾斜杠"},
-            {"path": "/ui/", "endpoint": self.api_ui_index, "methods": ["GET"], "allow_anonymous": True,
-             "summary": "应用界面(HTML)", "description": "自带界面，无密钥"},
-            {"path": "/ui/{path:path}", "endpoint": self.api_ui_file, "methods": ["GET"],
-             "allow_anonymous": True, "summary": "界面静态资源",
-             "description": "ui/ 目录下的 js/css/图片，按扩展名给 MIME，每次从盘上读"},
             {"path": "/img", "endpoint": self.api_img, "methods": ["GET"], "allow_anonymous": True,
              "summary": "图片代理(XOR解包)", "description": "白名单图床，匿名开放"},
             {"path": "/bootstrap", "endpoint": self.api_bootstrap, "methods": ["GET"], "auth": "bear",
@@ -2242,57 +2192,7 @@ class AVHelper(_PluginBase):
             return {"success": True, "items": [], "total": 0, "libraryReady": ready}
         return {"success": True, "items": items, "total": len(items), "libraryReady": True}
 
-    # ---------- API：界面与图片 ----------
-
-    def api_ui(self, request: Request) -> Response:
-        """`/ui`（缺尾斜杠）307 跳到 `/ui/`：ES module 的相对导入按文档所在目录解析。
-
-        没有尾斜杠时 `./app.js` 会解析成 `…/app.js`（少一层 `ui/`），所以这里必须补上；
-        查询串（如 `?v=`）原样保留，避免把版本参数丢掉。
-        """
-        target = f"/api/v1/plugin/{PLUGIN_ID}/ui/"
-        query = request.url.query
-        if query:
-            target = f"{target}?{query}"
-        return RedirectResponse(target, status_code=307)
-
-    def api_ui_index(self) -> Response:
-        """`/ui/` 下发界面入口页（无密钥，可匿名访问）。
-
-        每次请求都从盘上读（前端调试改完刷新即生效，见 AGENTS.md 的硬要求）。
-        `ui/index.html` 尚未拆出来时回落到老的 `webui.html`，保证多文件前端就位前也能用。
-        """
-        page = UI_DIR / "index.html"
-        if not page.is_file():
-            page = Path(__file__).with_name("webui.html")
-        if not page.is_file():
-            return HTMLResponse(
-                "<meta charset='utf-8'><h2>界面文件缺失</h2>"
-                "<p>请重新同步插件目录（ui/index.html 或 webui.html）。</p>", status_code=500,
-            )
-        try:
-            html = page.read_text(encoding="utf-8")
-        except Exception as error:
-            return HTMLResponse(f"<meta charset='utf-8'>读取界面失败：{error}", status_code=500)
-        return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
-
-    def api_ui_file(self, path: str = "") -> Response:
-        """`/ui/{path}` 下发 `ui/` 目录内的静态文件，按扩展名给 MIME（ES module 必须是对的 JS 类型）。
-
-        每次请求都从盘上读，不做内存缓存；空路径、越界路径、不存在一律 404（不列目录）。
-        """
-        if not str(path or "").strip("/"):
-            return self.api_ui_index()
-        target = ui_file(path)
-        if target is None:
-            return Response(status_code=404)
-        try:
-            blob = target.read_bytes()
-        except Exception as error:
-            logger.error(f"AVHelper 读取界面资源失败 {target.name}：{error}")
-            return Response(status_code=500)
-        return Response(content=blob, media_type=ui_media_type(target),
-                        headers={"Cache-Control": "no-cache"})
+    # ---------- API：图片代理 ----------
 
     @staticmethod
     def local_image(url: Any) -> Optional[bytes]:

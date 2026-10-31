@@ -396,6 +396,16 @@ class TestRouteTable:
         assert routes["/img"].get("allow_anonymous") is True
         assert routes["/img"].get("auth") in (None, "")
 
+    def test_legacy_ui_routes_are_gone(self, plugin):
+        """旧内置应用（`/ui` 三连 + `ui/` 静态目录）已下线：匿名面只剩 `/img`。
+
+        界面 100% 由 Vue 联邦组件渲染（`get_render_mode()` = vue），`ui/` 与 `webui.html`
+        2026-11-01 删除。这条锁住「不再给匿名分配一整个目录」—— 重新加回来时先想清楚。
+        """
+        routes = {route["path"]: route for route in plugin.get_api()}
+        assert [p for p in routes if p.startswith("/ui")] == []
+        assert sorted(p for p, r in routes.items() if r.get("allow_anonymous")) == ["/img"]
+
     def test_existing_read_paths_still_registered(self, plugin):
         routes = {route["path"] for route in plugin.get_api()}
         for path in ("/bootstrap", "/library", "/downloads", "/tasks", "/detail", "/img"):

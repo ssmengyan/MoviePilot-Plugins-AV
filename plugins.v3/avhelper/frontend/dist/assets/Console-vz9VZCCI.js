@@ -1,51 +1,5 @@
 import { importShared } from './__federation_fn_import-JrT3xvdd.js';
 
-const {defineComponent:_defineComponent$y} = await importShared('vue');
-
-const {openBlock:_openBlock$y,createElementBlock:_createElementBlock$x} = await importShared('vue');
-
-const _hoisted_1$w = ["src"];
-const {computed: computed$s} = await importShared('vue');
-
-const _sfc_main$y = /* @__PURE__ */ _defineComponent$y({
-  __name: "AppFrame",
-  props: {
-    pluginId: {},
-    version: { default: "" },
-    sectionKey: { default: "discover" }
-  },
-  setup(__props) {
-    const props = __props;
-    const src = computed$s(() => {
-      const params = new URLSearchParams();
-      if (props.version) params.set("v", props.version);
-      if (props.sectionKey) params.set("view", props.sectionKey);
-      const query = params.toString();
-      return `/api/v1/plugin/${props.pluginId}/ui/${query ? `?${query}` : ""}`;
-    });
-    return (_ctx, _cache) => {
-      return _openBlock$y(), _createElementBlock$x("iframe", {
-        key: `${_ctx.pluginId}:${_ctx.sectionKey}`,
-        src: src.value,
-        class: "avh-app-frame",
-        title: "AV 资源助手 · 内嵌应用",
-        referrerpolicy: "no-referrer",
-        allow: "clipboard-write"
-      }, null, 8, _hoisted_1$w);
-    };
-  }
-});
-
-const _export_sfc = (sfc, props) => {
-  const target = sfc.__vccOpts || sfc;
-  for (const [key, val] of props) {
-    target[key] = val;
-  }
-  return target;
-};
-
-const AppFrame = /* @__PURE__ */ _export_sfc(_sfc_main$y, [["__scopeId", "data-v-d2cb29e5"]]);
-
 const DEFAULT_MAX_WIDTH = "90rem";
 
 const CONSOLE_EMIT_NAMES = ["save", "layout", "switch", "close", "action"];
@@ -932,6 +886,14 @@ const _sfc_main$x = /* @__PURE__ */ _defineComponent$x({
     };
   }
 });
+
+const _export_sfc = (sfc, props) => {
+  const target = sfc.__vccOpts || sfc;
+  for (const [key, val] of props) {
+    target[key] = val;
+  }
+  return target;
+};
 
 const GeneralPanel = /* @__PURE__ */ _export_sfc(_sfc_main$x, [["__scopeId", "data-v-0c3f0ccd"]]);
 
@@ -14601,19 +14563,14 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
               onRefreshSide: _cache[2] || (_cache[2] = ($event) => _unref(refreshRuntime)(true)),
               onOpenMovie,
               onOpenActor: openActorFromOverlay
-            }, null, 40, ["store", "plugin-id", "api", "toast", "focus-actor"])) : framePluginId.value ? (_openBlock(), _createBlock(AppFrame, {
+            }, null, 40, ["store", "plugin-id", "api", "toast", "focus-actor"])) : (_openBlock(), _createBlock(_component_v_alert, {
               key: 1,
-              "plugin-id": framePluginId.value,
-              "section-key": section.value,
-              version: version.value
-            }, null, 8, ["plugin-id", "section-key", "version"])) : (_openBlock(), _createBlock(_component_v_alert, {
-              key: 2,
               type: "warning",
               variant: "tonal"
             }, {
-              default: _withCtx(() => _cache[31] || (_cache[31] = [
-                _createTextVNode(" 宿主没有传入 pluginId，无法定位内嵌应用。 ")
-              ])),
+              default: _withCtx(() => [
+                _createTextVNode(_toDisplayString(framePluginId.value ? "这一栏还没有原生视图（旧的内嵌应用已下线），请升级插件或把栏目切回去。" : "宿主没有传入 pluginId，界面无法定位自己所属的插件实例。"), 1)
+              ]),
               _: 1
             }))
           ])
@@ -14639,7 +14596,7 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                       class: "ms-2"
                     }),
                     _createVNode(_component_v_toolbar_title, { class: "text-h6" }, {
-                      default: _withCtx(() => _cache[32] || (_cache[32] = [
+                      default: _withCtx(() => _cache[31] || (_cache[31] = [
                         _createTextVNode("设置")
                       ])),
                       _: 1
@@ -14862,6 +14819,6 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
   }
 });
 
-const Console = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-1d63e486"]]);
+const Console = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-a0f2cf30"]]);
 
 export { CONSOLE_EMIT_NAMES as C, Console as a };

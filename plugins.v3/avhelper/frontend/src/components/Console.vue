@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
-import AppFrame from './AppFrame.vue'
 import { DEFAULT_MAX_WIDTH, type ConfigProps } from './contract'
 import { CONSOLE_EMIT_NAMES } from './emitContract'
 import {
@@ -118,10 +117,11 @@ const pluginId = computed(() => props.pluginId || props.sourcePluginId || '')
  * **六栏到这里全部原生化**（2026-10-10，`discover` 是最后一栏）；0.3.4 起多出第七栏
  * `history`（下载历史，见 `docs/AVHelper-下载历史设计.md`），2026-10-12 那一栏**并进「下载」栏
  * 的两个页签**（左栏省下一格），同一天新增第七栏 `library`（已入库的番号，
- * 见 `docs/AVHelper-已入库列表设计.md`）。这张表里没有的栏目
- * 仍由 `AppFrame` 承载被嵌应用（`ui/`），`AppFrame` 从此只作为"设置台之外的回退"保留
- * ——真机上它只在两种情况下出现：这张表被回退式删掉一行，或宿主不认识 `vue` 渲染模式
- * （那时整个联邦组件根本不会加载，`get_page()` 的 iframe 才是退路）。
+ * 见 `docs/AVHelper-已入库列表设计.md`）。
+ *
+ * 2026-11-01 起这张表是**唯一**的栏目渲染来源：旧内嵌应用（`ui/` 那个 iframe，原来由
+ * `AppFrame.vue` 承载）已随 `ui/` 目录一起删除，表里没有的栏目只会出一句提示 ——
+ * 加栏目就得在这里加一个视图组件，别再指望回退页面。
  *
  * 所有原生视图共用同一组 props（`store` / `pluginId` / `api` / `toast`）；
  * `@switch` / `@refresh-side` / `@open-movie` 也统一绑在 `<component>` 上——没有声明这些
@@ -1218,7 +1218,8 @@ onBeforeUnmount(() => {
 
       <!-- 内容区 -->
       <section class="avh-content">
-        <!-- S6 增量替换：已原生化的栏目走 Vue 组件（见 NATIVE_VIEWS），六栏现在全在这里。 -->
+        <!-- 已原生化的栏目走 Vue 组件（见 NATIVE_VIEWS）。旧内嵌应用（`ui/` iframe）2026-11-01
+             删除：这张表里没有的栏目不再有兜底页面，直接给一句可照做的提示。 -->
         <component
           :is="nativeView"
           v-if="nativeView && framePluginId"
@@ -1233,15 +1234,11 @@ onBeforeUnmount(() => {
           @open-movie="onOpenMovie"
           @open-actor="openActorFromOverlay"
         />
-        <AppFrame
-          v-else-if="framePluginId"
-            :plugin-id="framePluginId"
-            :section-key="section"
-            :version="version"
-          />
-          <v-alert v-else type="warning" variant="tonal">
-            宿主没有传入 pluginId，无法定位内嵌应用。
-          </v-alert>
+        <v-alert v-else type="warning" variant="tonal">
+          {{ framePluginId
+            ? '这一栏还没有原生视图（旧的内嵌应用已下线），请升级插件或把栏目切回去。'
+            : '宿主没有传入 pluginId，界面无法定位自己所属的插件实例。' }}
+        </v-alert>
       </section>
     </div>
 
@@ -1510,7 +1507,7 @@ onBeforeUnmount(() => {
   /*
    * 固定高度：宿主弹窗是**按内容量尺寸**的，根盒子不定高时「发现榜单」能长到 5562px、
    * 其它栏目只有 501~645px，于是切栏目弹窗忽大忽小。78vh 是本项目既有口径
-   * （`AppFrame.vue` 里 iframe 的高度），**不用** `calc(100vh - …)`（改它需要真机调，设计文档 §7）。
+   * （旧内嵌 iframe 时代定下的高度），**不用** `calc(100vh - …)`（改它需要真机调，设计文档 §7）。
    * `min-height` 兜住矮视口，`overflow: hidden` 让多出来的内容由内部滚动消化（内容区本来就
    * 是 `overflow: auto`），根盒子从此不再长高 —— 任何栏目下弹窗外框都一样大。
    */
