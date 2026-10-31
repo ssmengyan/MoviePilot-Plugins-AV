@@ -475,11 +475,14 @@ class TestUploadImage:
         # 不能是裸字节（那是 P0-① 的第一条反例：500 not a valid Base-64 string）
         assert not isinstance(call["data"], (bytes, bytearray))
 
-    def test_api_key_travels_in_params(self, emby_mod, fake_http):
+    def test_api_key_travels_in_header(self, emby_mod, fake_http):
+        """0.9.4 B2：密钥走 `X-Emby-Token` 请求头，查询串里不再有 api_key。"""
         c = _client(emby_mod)
         fake_http.on("post", "/Images/Primary", FakeReply(204))
         c.upload_image("12598", "Primary", self.RAW)
-        assert _last(fake_http, "post", "/Images/Primary")["params"]["api_key"] == "KEY"
+        call = _last(fake_http, "post", "/Images/Primary")
+        assert call["headers"]["X-Emby-Token"] == "KEY"
+        assert "api_key" not in (call.get("params") or {})
 
     def test_person_image_uses_same_rules(self, emby_mod, fake_http):
         """头像（Person 的 Primary）与影片封面走的是同一条格式约束。"""
@@ -523,27 +526,23 @@ class TestUploadImage:
         assert ok is False and "500" in detail
 
 
-class TestImageUrl:
-    """`image_url()` 的拼接形状（局域网直取原图，带 api_key）。"""
+class TestNoKeyInUrl:
+    """0.9.4 B2：`EmbyClient` 不许再产出带 `api_key` 的图片地址。
 
-    def test_shape(self, emby_mod, fake_http):
-        c = _client(emby_mod)
-        assert (c.image_url("12598")
-                == "http://emby.test:8096/emby/Items/12598/Images/Primary?api_key=KEY")
+    老方法 `image_url()` 拼的就是 `...?api_key=KEY`，而请求库的连接异常会把整条 URL 写进日志。
+    它当时**没有任何调用方**（前端拿的是插件自己的 `/img?emby=`），所以直接删掉；
+    这条锁住「别再把它加回来」。
+    """
 
-    def test_custom_type_and_trailing_slash_host(self, emby_mod, fake_http):
-        c = emby_mod.EmbyClient("http://emby.test:8096/", "KEY")
-        assert (c.image_url("11265", "Thumb")
-                == "http://emby.test:8096/emby/Items/11265/Images/Thumb?api_key=KEY")
+    def test_client_has_no_url_building_helper(self, emby_mod):
+        assert not hasattr(emby_mod.EmbyClient, "image_url")
 
-    def test_blank_inputs_are_harmless(self, emby_mod, fake_http):
-        c = _client(emby_mod)
-        assert c.image_url("") == ""
-        assert emby_mod.EmbyClient("", "KEY").image_url("1") == ""
-
-    def test_no_apikey_no_query(self, emby_mod, fake_http):
-        c = emby_mod.EmbyClient("http://emby.test:8096", "")
-        assert c.image_url("1") == "http://emby.test:8096/emby/Items/1/Images/Primary"
+    def test_scrub_removes_key_from_log_text(self, emby_mod):
+        text = "HTTPError: 401 for url: http://emby.test:8096/emby/Items/1/Images/Primary?api_key=SECRET123&x=1"
+        scrubbed = emby_mod._scrub(text)
+        assert "SECRET123" not in scrubbed
+        assert "api_key=***" in scrubbed
+        assert "&x=1" in scrubbed          # 只抹值，不动其余参数
 
 
 class TestPeople:

@@ -483,6 +483,65 @@ class TestImageProxy:
         assert response.status_code == 404
         assert called == []
 
+    def test_bad_emby_id_is_404_without_network(self, plugin, api_mod, monkeypatch):
+        """0.9.4 B1：`?emby=` 是匿名入参，id 形状不对直接 404（不发请求、不建缓存键）。"""
+        use_emby(plugin)
+        called = []
+        monkeypatch.setattr(api_mod.imgproxy, "emby_image",
+                            lambda *a, **k: called.append(a) or b"\xff\xd8\xff\xe0x")
+        for bad in ("../../etc/passwd", "12/34", "1 2", "x" * 65, "id;drop"):
+            response = plugin.api_img(img_req(), emby=bad)
+            assert response.status_code == 404, bad
+            assert plugin.api_img(img_req(), emby_person=bad).status_code == 404, bad
+        assert called == []
+
+    def test_bad_image_type_is_404_without_network(self, plugin, api_mod, monkeypatch):
+        """0.9.4 B1：`type` 只认四种写法 —— 它会拼进回源 URL 与缓存键。"""
+        use_emby(plugin)
+        called = []
+        monkeypatch.setattr(api_mod.imgproxy, "emby_image",
+                            lambda *a, **k: called.append(a) or b"\xff\xd8\xff\xe0x")
+        for bad in ("../../x", "Primary/../../x", "Whatever", "Backdrop/x"):
+            response = plugin.api_img(img_req(), emby="12598", type=bad)
+            assert response.status_code == 404, bad
+        assert called == []
+        # 合法类型仍然放行
+        assert plugin.api_img(img_req(), emby="12598", type="Backdrop/0").status_code == 200
+
+    def test_tasks_response_has_no_enclosure(self, plugin, api_mod, monkeypatch):
+        """0.9.4 B2：候选里的 `_enclosure`（种子下载地址、可能带 passkey）不下发浏览器。"""
+        task = {
+            "id": "t1",
+            "number": "IPZZ-961",
+            "cands": [
+                {"site": "馒头", "spec": "1080p", "pass": True, "picked": True,
+                 "_enclosure": "https://tracker.example/download?passkey=SECRET",
+                 "_page_url": "https://x/1"},
+            ],
+        }
+        plugin._engine.tasks = [task]
+        for payload in (plugin.api_tasks(), plugin.api_bootstrap()):
+            rows = payload.get("tasks") or []
+            assert rows and "_enclosure" not in rows[0]["cands"][0]
+            assert "SECRET" not in str(payload)
+            # 界面上要用的字段一个都不能少
+            assert rows[0]["cands"][0]["_page_url"] == "https://x/1"
+            assert rows[0]["cands"][0]["picked"] is True
+
+    def test_acquire_response_has_no_enclosure(self, plugin, api_mod, monkeypatch):
+        """同一条口径也要覆盖 `/tasks/acquire`（它也回任务体）。"""
+        task = {"id": "t2", "number": "CAWB-040",
+                "cands": [{"site": "肉丝", "_enclosure": "magnet:?xt=urn:btih:abc&passkey=SECRET"}]}
+
+        def fake_acquire(*args, **kwargs):
+            return {"task": task, "outcome": "pending", "message": "待确认"}
+
+        plugin._engine.acquire = fake_acquire
+        result = call(plugin.api_task_acquire(FakeRequest({"number": "CAWB-040"})))
+        assert "_enclosure" in task["cands"][0]          # 服务端内存里那份不动
+        assert "_enclosure" not in result["task"]["cands"][0]
+        assert "SECRET" not in str(result)
+
     def test_img_sets_etag_and_revalidates(self, plugin, api_mod, monkeypatch):
         """★ P1-10：老口径是 30 天强缓存且**没有 ETag**，而插件每晚清缓存 —— 会拿到陈旧图。"""
         monkeypatch.setattr(api_mod.imgproxy, "fetch",

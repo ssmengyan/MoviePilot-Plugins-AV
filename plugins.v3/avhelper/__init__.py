@@ -345,6 +345,31 @@ def _unique_size(files: Iterable[Path]) -> int:
     return total
 
 
+def public_tasks(tasks: Any) -> List[Dict[str, Any]]:
+    """剥掉只该留在服务端的候选字段（0.9.4 B2）。
+
+    `_enclosure` 是**种子的下载地址**（馒头/肉丝的换票链可能会带上 passkey），原先原样随
+    `/tasks`、`/bootstrap` 进浏览器。前端只展示候选项（站点/规格/大小/分数/原帖地址），
+    真正下单走服务端 —— 它用不着这个字段，那就别下发。
+
+    其余键一个不动（`picked` / `pass` / `_page_url` 这些界面要用）。
+    """
+    out: List[Dict[str, Any]] = []
+    for task in tasks or []:
+        if not isinstance(task, dict):
+            continue
+        cands = task.get("cands")
+        if isinstance(cands, list):
+            task = dict(task)
+            task["cands"] = [
+                {k: v for k, v in cand.items() if k != "_enclosure"}
+                if isinstance(cand, dict) else cand
+                for cand in cands
+            ]
+        out.append(task)
+    return out
+
+
 def _rate_value(value: Any, default: Any = None) -> str:
     """请求间隔（秒）→ 规范化字符串；认不出/≤0 回 `default`（`None` 时回空串）。
 
@@ -468,7 +493,7 @@ class AVHelper(_PluginBase):
     # 0.8.0 = 两条并行的 0.7.4 线汇合 + 后台按 amane 的运维纪律重构
     # （失败原因闭枚举 + 单一记账点 + 单一出站函数、声明式取数图、逐站快照、限流单一执行点、
     #  /img ETag、迁移与索引纪律）
-    plugin_version = "0.9.3"
+    plugin_version = "0.9.4"
     plugin_label = "发现"
     plugin_author = "ssmengyan"
     plugin_config_prefix = "avhelper_"
@@ -2282,8 +2307,15 @@ class AVHelper(_PluginBase):
         """
         target = str(emby_person or emby or "").strip()
         if target:
+            # B1（0.9.4）：这两个参数都是**匿名**端点的入参 —— id 只收合法形状、type 只认
+            # Emby 的四种写法（它要拼进回源 URL 与缓存键），非法直接 404：不发请求、不建缓存键。
+            if not imgproxy.image_id_ok(target):
+                return Response(status_code=404)
+            kind = imgproxy.normalize_image_type(type)
+            if not kind:
+                return Response(status_code=404)
             host, apikey = self._emby_conn()
-            blob = (imgproxy.emby_image(host, apikey, target, type or "Primary")
+            blob = (imgproxy.emby_image(host, apikey, target, kind)
                     if host and apikey else None)
         else:
             # 先试本地派生图（裁剪/上传的落盘路径）；不是缓存目录内的图片文件才走白名单取图
@@ -2381,7 +2413,7 @@ class AVHelper(_PluginBase):
             "subs": self.store.sub_list(),
             "known": self.store.known_all(),
             "notices": self.store.notice_list(),
-            "tasks": self.engine.task_list(),
+            "tasks": public_tasks(self.engine.task_list()),
             "queue": queue,
             "defaultRule": rule,
             # 运行概况（设置台「运行与缓存」/ 右栏）：体积带 60 秒内存缓存，检查状态是只读快照
@@ -2723,7 +2755,7 @@ class AVHelper(_PluginBase):
             self.fill_posters(tasks, queue)
         except Exception as error:      # 补图失败不该让任务页整个挂掉
             logger.error(f"AVHelper 补任务封面失败：{error}")
-        return {"success": True, "tasks": tasks, "queue": queue}
+        return {"success": True, "tasks": public_tasks(tasks), "queue": queue}
 
     async def api_rule(self, request: Request) -> Dict[str, Any]:
         """全局默认规则：GET 读取、POST 保存（以已存规则为基准合并）。
@@ -2785,6 +2817,10 @@ class AVHelper(_PluginBase):
             str(payload.get("thumb") or ""), str(request.base_url).rstrip("/"),
         )
         message = str(result.get("message") or "")
+        # B2：这条返回里也带任务体（候选里有 `_enclosure`），同样只在服务端留
+        task_body = result.get("task")
+        if isinstance(task_body, dict):
+            result = {**result, "task": public_tasks([task_body])[0]}
         if result.get("outcome") == "downloaded":
             message += self._duplicate_note((result.get("task") or {}).get("number"))
         # `**result` 放最前：它自己带一个 `message`（不含"已下载过"提示），
@@ -2867,7 +2903,8 @@ class AVHelper(_PluginBase):
         返回 `{"tasks": [...], "queue": [...]}`，两个键名与各端点原先直接塞进响应的键一致。
         """
         def collect() -> Dict[str, Any]:
-            return {"tasks": self.engine.task_list(), "queue": self.engine.queue(fresh=fresh)}
+            return {"tasks": public_tasks(self.engine.task_list()),
+                    "queue": self.engine.queue(fresh=fresh)}
 
         return await asyncio.to_thread(collect)
 

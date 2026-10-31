@@ -634,8 +634,13 @@ class TestJavdbAvatar:
 class TestWhitelist:
     """gFriends 的两个 host 必须在 imgproxy 白名单里（否则下一环取图会被 SSRF 边界挡掉）。"""
 
-    def test_gfriends_hosts_are_allowlisted(self, actor_sources):
+    def test_gfriends_image_hosts_are_allowlisted(self, actor_sources):
+        """头像直链能过 `/img`，但**索引文件不算图**（0.9.4 B1 收紧了 GitHub 路径前缀）。
+
+        索引（`Filetree.json`）是 `actor_sources._http_fetch` 自己去拉的，不走图片代理；
+        `/img` 只放行 `Content/` 下的头像。
+        """
         imgproxy = _load("imgproxy")
-        assert imgproxy.is_allowed(actor_sources.GFRIENDS_URL)
-        assert imgproxy.is_allowed(actor_sources.GFRIENDS_MIRROR)
         assert imgproxy.is_allowed(actor_sources.GFRIENDS_RAW_BASE + "/7-S1/葵つかさ.jpg?t=1")
+        assert not imgproxy.is_allowed(actor_sources.GFRIENDS_URL)
+        assert not imgproxy.is_allowed(actor_sources.GFRIENDS_MIRROR)

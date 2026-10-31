@@ -29,6 +29,16 @@ TIMEOUT = 6           # 单次请求超时，媒体库不通时不能拖住界�
 PAGE = 500            # 分页大小
 MAX_ITEMS = 20000     # 单库索引上限，防异常大库吃内存
 
+#: 异常文本里的密钥痕迹（B2，0.9.4）：`requests` 的连接异常常把**完整 URL** 带进消息里，
+#: 而老实现把 `error` 原文写了日志。查询串这一路已经改走请求头，这里的脱敏是给
+#: 「401 回退」与历史日志留的安全网。
+_SECRET_QUERY_RE = re.compile(r"(api_key=)[^&\s'\"<>]+")
+
+
+def _scrub(error: Any) -> str:
+    """把要进日志的异常文本里的 `api_key=…` 抹成 `api_key=***`。"""
+    return _SECRET_QUERY_RE.sub(r"\1***", str(error))
+
 # 认库依据：库名或库路径里出现 jav / 9kg / avi（常见命名习惯）。
 # 一个都命中不了时 `pick_libraries()` 会退回全部「电影」类型库，所以自定义库名也能用。
 _JAV_HINT = re.compile(r"(?:^|[^a-z0-9])(?:jav|9kg|avi)(?:[^a-z0-9]|$)", re.I)
@@ -925,11 +935,16 @@ class EmbyLibrary:
                 + (f"&serverId={self._server_id}" if self._server_id else ""))
 
     def _api(self, path: str, **params: Any) -> Any:
-        """带 api_key 的 GET，返回 JSON（失败返回 None）。"""
+        """带鉴权的 GET，返回 JSON（失败返回 None）。
+
+        B2（0.9.4）：密钥走 `X-Emby-Token` 请求头，不再拼进查询串 —— 查询串会跟着 requests 的
+        连接异常原文进日志（Emby 就在局域网，连接异常是常态噪声）。
+        """
         if not self.ready():
             return None
-        params["api_key"] = self._apikey
-        res = RequestUtils(timeout=TIMEOUT).get_res(f"{self._host}{path}", params=params)
+        res = RequestUtils(timeout=TIMEOUT).get_res(
+            f"{self._host}{path}", params=params,
+            headers={"X-Emby-Token": str(self._apikey or "")})
         if not res or res.status_code != 200:
             return None
         try:
@@ -1353,21 +1368,9 @@ class EmbyClient:
             return True, ""
         return False, f"HTTP {res.status_code}: {self._snippet(res)}"
 
-    def image_url(self, item_id: str, img_type: str = "Primary") -> str:
-        """局域网**原图**直取地址（带 api_key）。
-
-        `__init__.py` 的 `/img?emby=<id>` 会 302/转发到这里，缓存与裁切由 imgproxy 负责；
-        这个地址是给「Emby 就在同一局域网」的场景直连用的，**不要**下发给浏览器
-        （`api_key` 不能进前端，见 AGENTS.md §5 的鉴权分工）。
-        """
-        item = str(item_id or "").strip()
-        kind = str(img_type or "Primary").strip() or "Primary"
-        if not item or not self._host:
-            return ""
-        url = f"{self._host}/emby/Items/{item}/Images/{kind}"
-        if self._apikey:
-            url += f"?api_key={self._apikey}"
-        return url
+    # 删掉了 `image_url(item_id, img_type)`（0.9.4 B2）：它拼出来的地址带 `?api_key=…`，
+    # 而全仓没有任何调用方。Emby 原图请走 `__init__.py::emby_image_url()` → `/img?emby=<id>`，
+    # 密钥只在服务端（`imgproxy.emby_image()` 用 `X-Emby-Token` 请求头取图）。
 
     def people_of(self, item_id: str) -> List[Dict[str, Any]]:
         """条目 DTO 里的 `People[]`（拿不到返回空列表）。
@@ -1428,14 +1431,17 @@ class EmbyClient:
             logger.warning("AVHelper Emby 写操作跳过：未配置 host/apikey")
             return None
         params = dict(kwargs.pop("params", {}) or {})
-        params["api_key"] = self._apikey
         url = f"{self._host}{path}"
+        # B2（0.9.4）：密钥只进请求头。调用方显式给了 headers 就在那份基础上补，
+        # 不覆盖它自己的 Content-Type（三种 body 语义靠调用点钉，见上面的说明）。
+        headers = dict(kwargs.pop("headers", {}) or {})
+        headers.setdefault("X-Emby-Token", str(self._apikey or ""))
         try:
             util = RequestUtils(timeout=self._timeout)
             fn = getattr(util, f"{method}_res")
-            return fn(url, params=params, **kwargs)
+            return fn(url, params=params, headers=headers, **kwargs)
         except Exception as error:
-            logger.error(f"AVHelper Emby {method.upper()} {path} 请求异常：{error}")
+            logger.error(f"AVHelper Emby {method.upper()} {path} 请求异常：{_scrub(error)}")
             return None
 
     def _get_json(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:

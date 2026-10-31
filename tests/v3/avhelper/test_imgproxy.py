@@ -50,13 +50,15 @@ def cache_root(imgproxy, monkeypatch, tmp_path):
 
 
 class _FakeResp:
-    """`urllib` 响应对象的最小替身（支持 `with` 与 `read()`）。"""
+    """`urllib` 响应对象的最小替身（支持 `with` / `read(n)` / `status`）。"""
 
-    def __init__(self, body: bytes):
+    def __init__(self, body: bytes, status: int = 200):
         self.body = body
+        self.status = status
 
-    def read(self) -> bytes:
-        return self.body
+    def read(self, size: int = -1) -> bytes:
+        # 生产代码用 `read(MAX+1)` 限读（0.9.4 B1），替身必须支持带参数的 read
+        return self.body if size is None or size < 0 else self.body[:size]
 
     def __enter__(self):
         return self
@@ -72,10 +74,11 @@ class _FakeHTTP:
         self.calls = []
         self._results = list(results)
 
-    def __call__(self, req, proxy="", timeout=45, direct=False):
+    def __call__(self, req, proxy="", timeout=45, direct=False, follow_redirects=True):
         self.calls.append({"url": getattr(req, "full_url", str(req)),
                            "headers": dict(getattr(req, "headers", {}) or {}),
-                           "proxy": proxy, "timeout": timeout, "direct": direct})
+                           "proxy": proxy, "timeout": timeout, "direct": direct,
+                           "follow_redirects": follow_redirects})
         if not self._results:
             raise AssertionError("假 HTTP 层没有更多预设响应了（第 %d 次调用）" % len(self.calls))
         item = self._results.pop(0)
@@ -109,8 +112,9 @@ ALLOWED_EXACT = [
     "https://images.projectjav.com/data/screenshots/snos-380.jpg?v=1791538589",
     "https://cf.javfree.me/HLIC/GVH-883-1080p.jpeg",
     "https://img.j-cdn.com/avatar/60390.jpg",
-    "https://pic.duga.jp/unsecure/firststar/1968/noauth/jacket.jpg",
     "https://raw.githubusercontent.com/gfriends/gfriends/master/Content/1-Diaz/Rio.jpg",
+    # jsdelivr 镜像：只放行 gfriends 仓库（0.9.4 B1 的路径前缀限制）
+    "https://cdn.jsdelivr.net/gh/gfriends/gfriends@master/Content/1-Diaz/Rio.jpg",
 ]
 
 ALLOWED_SUFFIX = [
@@ -130,6 +134,13 @@ REJECTED = [
     "https://nottp.spfcas.com/x.jpg",               # 精确域不认子域
     "https://tp.spfcas.com.evil.com/x.jpg",
     "https://raw.githubusercontent.com.evil.com/x.jpg",
+    # GitHub / jsdelivr 只放行 gfriends 仓库（0.9.4 B1）：别把公共 CDN 当自家图床
+    "https://raw.githubusercontent.com/evil/repo/master/x.png",
+    "https://raw.githubusercontent.com/gfriends/gfriends/master/Filetree.json",
+    "https://cdn.jsdelivr.net/gh/evil/repo@master/x.png",
+    "https://cdn.jsdelivr.net/npm/vue@3/dist/vue.js",
+    # MetaTube 遗留域已从白名单删除（0.9.4 B1：库里 0 引用）
+    "https://pic.duga.jp/unsecure/firststar/1968/noauth/jacket.jpg",
     # scheme
     "http://tp.spfcas.com/x.jpg",
     "http://pics.dmm.co.jp/digital/video/x/x.jpg",
@@ -213,7 +224,8 @@ def test_referer_policy(imgproxy):
     assert imgproxy.referer_for("images.projectjav.com") == "https://projectjav.com/"
     assert imgproxy.referer_for("cf.javfree.me") == ""
     assert imgproxy.referer_for("img.j-cdn.com") == "https://javtxt.net/"   # 严格：只有它放行
-    assert imgproxy.referer_for("pic.duga.jp") == ""
+    # MetaTube 遗留域（0.9.4 B1 删掉）：既不在白名单，也没有专门的 Referer
+    assert imgproxy.host_allowed("pic.duga.jp") is False
     assert imgproxy.referer_for("raw.githubusercontent.com") == ""
     assert imgproxy.referer_for("c0.jdbstatic.com") == ""                   # 后缀域
     assert imgproxy.referer_for("pics.dmm.co.jp") == ""
@@ -361,17 +373,52 @@ KEY = "fake-emby-api-key-for-tests"
 JPEG = b"\xff\xd8\xff\xe0" + b"\x0d" * 128
 
 
-def test_emby_image_builds_url_and_uses_direct_connection(imgproxy, cache_root, monkeypatch):
+def test_emby_image_uses_token_header_and_no_key_in_url(imgproxy, cache_root, monkeypatch):
+    """0.9.4 B2：密钥走 `X-Emby-Token` 请求头，**URL 里不许出现 api_key**。"""
     http = _FakeHTTP(JPEG)
     monkeypatch.setattr(imgproxy, "_open", http)
 
     assert imgproxy.emby_image(EMBY, KEY, "12598") == JPEG
-    assert http.urls == [
-        "%s/emby/Items/12598/Images/Primary?api_key=%s" % (EMBY, KEY)]
-    # 局域网直连：不走代理
+    assert http.urls == ["%s/emby/Items/12598/Images/Primary" % EMBY]
+    assert "api_key" not in http.urls[0]
+    # urllib 会把头名规范成 `X-emby-token`（首字母大写），所以按小写比对
+    headers = {name.lower(): value for name, value in http.calls[0]["headers"].items()}
+    assert headers["x-emby-token"] == KEY
+    # 局域网直连 + 不跟跳转（跟到别的 host 就等于把 token 发出去）
     assert http.calls[0]["direct"] is True
     assert http.calls[0]["proxy"] == ""
+    assert http.calls[0]["follow_redirects"] is False
     assert http.calls[0]["headers"]["Accept"] == "image/*"
+
+
+def test_emby_image_falls_back_to_query_on_401(imgproxy, cache_root, monkeypatch):
+    """老版本 Emby 只认查询串：401 时回退一次（键会进 URL，但日志已脱敏）。"""
+
+    class _HTTP401:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, req, proxy="", timeout=45, direct=False, follow_redirects=True):
+            self.calls.append(getattr(req, "full_url", str(req)))
+            if len(self.calls) == 1:
+                raise imgproxy.urllib.error.HTTPError(
+                    self.calls[0], 401, "Unauthorized", {}, None)
+            return _FakeResp(JPEG)
+
+    http = _HTTP401()
+    monkeypatch.setattr(imgproxy, "_open", http)
+    assert imgproxy.emby_image(EMBY, KEY, "401-fallback") == JPEG
+    assert http.calls[0] == "%s/emby/Items/401-fallback/Images/Primary" % EMBY
+    assert http.calls[1] == "%s/emby/Items/401-fallback/Images/Primary?api_key=%s" % (EMBY, KEY)
+
+
+def test_emby_image_rejects_unknown_image_type(imgproxy, cache_root, monkeypatch):
+    """类型白名单（B1）：非法 type 连请求都不发、不建缓存键。"""
+    http = _FakeHTTP()
+    monkeypatch.setattr(imgproxy, "_open", http)
+    for bad in ("../../etc/passwd", "Primary/../../x", "Whatever", "x" * 80):
+        assert imgproxy.emby_image(EMBY, KEY, "12598", bad) is None
+    assert http.calls == []
 
 
 def test_emby_image_host_normalization(imgproxy, cache_root, monkeypatch):
@@ -385,7 +432,7 @@ def test_emby_image_host_normalization(imgproxy, cache_root, monkeypatch):
         monkeypatch.setattr(imgproxy, "_open", http)
         imgproxy.emby_image(host, KEY, item)
         seen.append(http.urls[0])
-    assert seen == ["%s/emby/Items/1259%d/Images/Primary?api_key=%s" % (EMBY, i, KEY)
+    assert seen == ["%s/emby/Items/1259%d/Images/Primary" % (EMBY, i)
                     for i in range(3)]
     assert imgproxy.emby_base("http://192.0.2.50:8096/emby/") == EMBY
     assert imgproxy.emby_base("192.0.2.50:8096") == EMBY
@@ -398,8 +445,8 @@ def test_emby_image_img_type_and_person(imgproxy, cache_root, monkeypatch):
     monkeypatch.setattr(imgproxy, "_open", http)
     imgproxy.emby_image(EMBY, KEY, "12598", "Backdrop/0")
     imgproxy.emby_image(EMBY, KEY, "fake-person-id-0001")   # Person Id
-    assert http.urls[0].endswith("/Images/Backdrop/0?api_key=" + KEY)
-    assert http.urls[1] == "%s/emby/Items/fake-person-id-0001/Images/Primary?api_key=%s" % (EMBY, KEY)
+    assert http.urls[0].endswith("/Images/Backdrop/0")
+    assert http.urls[1] == "%s/emby/Items/fake-person-id-0001/Images/Primary" % EMBY
 
 
 def test_emby_cache_key_is_separate_from_url_cache(imgproxy, cache_root, monkeypatch):
@@ -632,3 +679,68 @@ def test_concurrent_writers_never_leave_a_truncated_file(imgproxy, cache_root):
     got = Path(path).read_bytes()
     assert got in payloads
     assert [p.name for p in Path(path).parent.iterdir() if p.name.endswith(".tmp")] == []
+
+# ---------------------------------------------------------------------------
+# 九、0.9.4 B1：匿名 `/img` 的入参边界（id / type / 路径前缀 / 限读 / 跳转）
+# ---------------------------------------------------------------------------
+
+
+def test_image_id_whitelist(imgproxy):
+    """`?emby=` 只收合法 id 形状：别的字符（`/`、`.`、空白、超长）一律拒绝。"""
+    for good in ("12598", "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6", "fake-person-id-0001"):
+        assert imgproxy.image_id_ok(good) is True
+    for bad in ("", "   ", "12/34", "12..34", "../../etc/passwd", "x" * 65, "1 2", "id;drop"):
+        assert imgproxy.image_id_ok(bad) is False
+
+
+def test_image_type_whitelist(imgproxy):
+    """`type` 只认 Emby 的四种写法（它会拼进回源 URL 与缓存键）。"""
+    for good in ("Primary", "Thumb", "Backdrop", "Backdrop/0", "Backdrop/12"):
+        assert imgproxy.normalize_image_type(good) == good
+    for bad in ("", None, "../../x", "Primary/../../x", "Whatever", "Backdrop/x", "Backdrops"):
+        # 空值按默认 Primary；非法值回空串（调用方 404）
+        expected = "Primary" if bad in ("", None) else ""
+        assert imgproxy.normalize_image_type(bad) == expected
+
+
+def test_github_and_jsdelivr_are_path_scoped(imgproxy):
+    """公共 CDN 只放行 gfriends 仓库的头像路径（别拿插件当 GitHub 图床）。"""
+    # gfriends 仓库下：放行
+    assert imgproxy.is_allowed("https://raw.githubusercontent.com/gfriends/gfriends/master/Content/1-Diaz/Rio.jpg")
+    assert imgproxy.is_allowed("https://cdn.jsdelivr.net/gh/gfriends/gfriends@master/Content/1-Diaz/Rio.jpg")
+    # 别的仓库 / 同仓库的非头像路径：拒绝
+    assert imgproxy.is_allowed("https://raw.githubusercontent.com/evil/evil/master/x.jpg") is False
+    assert imgproxy.is_allowed("https://raw.githubusercontent.com/gfriends/gfriends/master/Filetree.json") is False
+    assert imgproxy.is_allowed("https://cdn.jsdelivr.net/gh/evil/evil@main/x.jpg") is False
+    # 其余白名单域不受路径限制（图床整站都是图）
+    assert imgproxy.is_allowed("https://tp.spfcas.com/anything/goes.jpg")
+
+
+def test_oversized_body_is_dropped(imgproxy, cache_root, monkeypatch):
+    """超过 `MAX_IMAGE_BYTES` 的响应直接放弃（不缓存、不返回）。"""
+    huge = b"\xff\xd8\xff\xdb" + b"\x00" * 64
+    monkeypatch.setattr(imgproxy, "MAX_IMAGE_BYTES", 32)
+    monkeypatch.setattr(imgproxy, "_open", _FakeHTTP(huge))
+    assert imgproxy.fetch("https://tp.spfcas.com/big.jpg") is None
+    assert imgproxy.cached("https://tp.spfcas.com/big.jpg") is False
+
+
+def test_redirect_handler_rechecks_allowlist(imgproxy):
+    """跟跳转的每一跳都要重新过白名单（老实现只查第一跳）。"""
+    handler = imgproxy._SafeRedirectHandler()
+    allowed_req = imgproxy.urllib.request.Request("https://tp.spfcas.com/a.jpg")
+
+    class _FP:
+        def close(self):
+            pass
+
+    # 跳到白名单内：交给父类处理（父类会拼出新的 Request）
+    ok = handler.redirect_request(allowed_req, _FP(), 302, "Found", {},
+                                  "https://images.projectjav.com/b.jpg")
+    assert getattr(ok, "full_url", "") == "https://images.projectjav.com/b.jpg"
+    # 跳到白名单外：直接抛错，绝不把 evil 的字节抓回来
+    with pytest.raises(imgproxy.urllib.error.HTTPError):
+        handler.redirect_request(allowed_req, _FP(), 302, "Found", {}, "https://evil.example/x.jpg")
+    # 相对跳转也要拼成绝对地址再判（否则可以绕过）
+    with pytest.raises(imgproxy.urllib.error.HTTPError):
+        handler.redirect_request(allowed_req, _FP(), 302, "Found", {}, "//evil.example/x.jpg")

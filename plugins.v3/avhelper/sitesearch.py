@@ -611,11 +611,17 @@ class SiteSearcher:
 
     def _http(self, headers: Optional[Dict[str, Any]] = None,
               site: Optional[Dict[str, Any]] = None, cookies: Any = None) -> Any:
-        """构造宿主 HTTP 工具（延迟导入，便于无宿主环境下单测纯函数）。"""
+        """构造宿主 HTTP 工具（延迟导入，便于无宿主环境下单测纯函数）。
+
+        **默认校验证书**（0.9.4 B2）：老实现恒 `verify=False`，而这条通道带着站点的 Cookie ——
+        等于把登录态交给任何能中间人的一方。个别站点真需要放宽时，在它的站点配置里写
+        `verify_tls: false`（默认不写 = 校验）。
+        """
         from app.sdk.network import RequestUtils
 
+        verify = bool((site or {}).get("verify_tls", True))
         return RequestUtils(headers=headers, cookies=cookies, proxies=self._proxies(site or {}),
-                            timeout=TIMEOUT, verify=False)
+                            timeout=TIMEOUT, verify=verify)
 
     @staticmethod
     def _call(client: Any, method: str, url: str, **kwargs: Any) -> Tuple[Any, str]:

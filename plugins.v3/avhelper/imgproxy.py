@@ -44,8 +44,6 @@ ALLOWED_HOSTS = {
     "cf.javfree.me",
     # Javtxt 的演员头像（v4.1 §5.2 简介源；契约 §3.6.1 注明）。**严格校验 Referer**
     "img.j-cdn.com",
-    # MetaTube Server 返回的 DUGA 图（契约 §0 的 MetaTube 坐标；实测每查必有）
-    "pic.duga.jp",
     # Gfriends 演员头像（v4.1 §5.2 第二顺位头像源；raw.githubusercontent.com 直出）
     "raw.githubusercontent.com",
     # Gfriends 索引镜像（jsdelivr 代理 GitHub 仓库；演员线 actor_sources.GFRIENDS_MIRROR）
@@ -77,8 +75,6 @@ REFERERS: Dict[str, str] = {
     "cf.javfree.me": "",
     # **严格**：只有 `https://javtxt.net/` 放行（200 image/jpeg），空 Referer / javdb / MP 一律 403
     "img.j-cdn.com": "https://javtxt.net/",
-    # 实测 5 种 Referer 全 200（DMM 系图床都不校验 Referer）
-    "pic.duga.jp": "",
     # 实测空 Referer 200（GitHub raw 是公共 CDN，不校验）
     "raw.githubusercontent.com": "",
     "pics.dmm.co.jp": "",
@@ -110,6 +106,33 @@ EMBY_CACHE_PREFIX = "emby-"
 #: host 允许的字符集（字母数字、点、连字符）——挡住 IPv6 字面量、空白、下划线等怪 host。
 _HOSTNAME_RE = re.compile(r"^[a-z0-9]([a-z0-9.\-]*[a-z0-9])?$")
 _IPV4_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
+
+# ---------------------------------------------------------------------------
+# `/img` 的入参边界（0.9.4 B1）
+#
+# 这条端点是**匿名**的（`<img>` 带不了 token），所以校验是唯一防线：
+#   - `emby` / `emby_person` 只收合法 id 形状，非法直接 404（连请求都不发）；
+#   - `type` 只认 Emby 的四种图片写法 —— 它会拼进回源 URL **和缓存键**，
+#     任意串既能拼路径，也能无限造缓存键把磁盘塞满；
+#   - 单张图最多 `MAX_IMAGE_BYTES`，超出就放弃（别让一个超大文件打满内存）。
+# ---------------------------------------------------------------------------
+
+#: 单张图片最大字节数（20 MB）：大图（长图 WebP 实测 2~6 MB）够用，超出的按失败处理。
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+
+#: Emby ItemId / PersonId 的合法形状（32 位十六进制、纯数字、带 `-` 的 GUID 都在这套字符集里）。
+IMAGE_ID_RE = re.compile(r"^[0-9A-Za-z_-]{1,64}$")
+
+#: Emby 图片类型白名单：`Primary` / `Thumb` / `Backdrop` / `Backdrop/<1-3 位序号>`。
+IMAGE_TYPE_RE = re.compile(r"^(Primary|Thumb|Backdrop(?:/\d{1,3})?)$")
+
+#: gfriends 仓库的真实前缀（`actor_sources.py` 的 `GFRIENDS_RAW_BASE` / `GFRIENDS_MIRROR`）。
+#: **不放行整站**：raw.githubusercontent / jsdelivr 是全公共 CDN，全站放行等于谁都能借本插件代理
+#: 和缓存任意 GitHub 文件（B1 最后一项）。只放行 `Content/` 下的头像，索引 `Filetree.json` 也一样
+#: 要过（它由 `actor_sources._http_fetch` 自己拉，不走图片代理）。
+GFRIENDS_RAW_PREFIX = "/gfriends/gfriends/master/Content/"
+_GFRIENDS_CDN_RE = re.compile(r"^/gh/gfriends/gfriends@[^/]+/Content/")
+
 
 
 def cache_dir() -> str:
@@ -166,14 +189,52 @@ def host_allowed(host: str) -> bool:
 
 
 def is_allowed(url: str) -> bool:
-    """URL 能否经 `/img` 代理（仅 https + 白名单域 + 无 userinfo/端口/IP 混淆）。"""
+    """URL 能否经 `/img` 代理（仅 https + 白名单域 + 无 userinfo/端口/IP 混淆 + 路径前缀对）。"""
     info = _split(url)
     if info is None:
         return False
     scheme, host, netloc_ok = info
     if scheme != "https" or not netloc_ok:
         return False
-    return host_allowed(host)
+    return host_allowed(host) and path_allowed(url)
+
+
+def path_allowed(url: str) -> bool:
+    """GitHub / jsdelivr 只放行 gfriends 仓库的路径（0.9.4 B1）。
+
+    其余白名单域不限路径（图床本来就是整站图）。判据只看 path，不碰查询串 ——
+    gfriends 的直链带 `?t=时间戳`，那是合法参数。
+    """
+    parsed = urllib.parse.urlparse(str(url or ""))
+    host = (parsed.hostname or "").lower()
+    path = parsed.path or ""
+    if host == "raw.githubusercontent.com":
+        return path.startswith(GFRIENDS_RAW_PREFIX)
+    if host == "cdn.jsdelivr.net":
+        return bool(_GFRIENDS_CDN_RE.match(path))
+    return True
+
+
+def image_id_ok(value: Any) -> bool:
+    """`/img?emby=` / `?emby_person=` 的 id 是否合法（只收字母数字、`_`、`-`，≤64 位）。"""
+    return bool(IMAGE_ID_RE.match(str(value or "").strip()))
+
+
+def normalize_image_type(value: Any) -> str:
+    """Emby 图片类型白名单；非法回空串（调用方据此 404，不拼 URL、不建缓存键）。"""
+    text = str(value or "Primary").strip() or "Primary"
+    return text if IMAGE_TYPE_RE.match(text) else ""
+
+
+def _read_limited(resp: Any) -> Optional[bytes]:
+    """读响应正文，超过 `MAX_IMAGE_BYTES` 就放弃（返回 None），异常也返回 None。"""
+    try:
+        blob = resp.read(MAX_IMAGE_BYTES + 1)
+    except Exception:
+        return None
+    if not blob:
+        return b""
+    return None if len(blob) > MAX_IMAGE_BYTES else blob
 
 
 def upgrade_scheme(url: str) -> str:
@@ -300,18 +361,42 @@ def _store(path: str, data: bytes) -> None:
 # HTTP
 # ---------------------------------------------------------------------------
 
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """跟跳转，但**每一跳都重新过白名单**（0.9.4 B1）。
+
+    老实现只校验第一跳：`https://tp.spfcas.com/x` 302 到 `https://evil.example/y` 时会老老实实
+    把 evil 的字节抓回来缓存 —— 白名单等于形同虚设。
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        target = urllib.parse.urljoin(getattr(req, "full_url", "") or "", str(newurl))
+        if not is_allowed(target):
+            raise urllib.error.HTTPError(
+                target, code, "redirect to a host outside the image allowlist", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, target)
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """一律不跟跳转（Emby 局域网分支：跟到别的 host 就等于把 token 发出去）。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(str(newurl), code, "redirect not followed", headers, fp)
+
+
 def _open(req: urllib.request.Request, proxy: str = "", timeout: int = 45,
-          direct: bool = False):
+          direct: bool = False, follow_redirects: bool = True):
     """统一的打开入口（单测 monkeypatch 这里，不真连网）。
 
     :param proxy: 代理地址，留空按历史行为走系统默认（可能没有代理）
     :param direct: 显式不走代理（Emby 在局域网，绝不能被 http_proxy 环境变量带到外网去）
+    :param follow_redirects: `False` = 不跟跳转（Emby 分支）；`True` 时每跳重新校验白名单
     """
     handlers = []
     if direct:
         handlers.append(urllib.request.ProxyHandler({}))
     elif proxy:
         handlers.append(urllib.request.ProxyHandler({"https": proxy, "http": proxy}))
+    handlers.append(_SafeRedirectHandler() if follow_redirects else _NoRedirectHandler())
     opener = urllib.request.build_opener(*handlers)
     return opener.open(req, timeout=timeout)
 
@@ -356,8 +441,10 @@ def fetch(url: str, proxy: str = PROXY) -> Optional[bytes]:
     try:
         req = urllib.request.Request(url, headers=_headers(url))
         with _open(req, proxy=proxy, timeout=45) as resp:
-            raw = resp.read()
+            raw = _read_limited(resp)
     except Exception:
+        return None
+    if raw is None:                        # 超过 MAX_IMAGE_BYTES：放弃，别缓存半截超大文件
         return None
     data = unwrap(raw)
     if len(data) < 2 or not is_plain_image(data):
@@ -380,6 +467,18 @@ def emby_base(host: str) -> str:
     return text
 
 
+def _emby_fetch(url: str, headers: Dict[str, str]) -> Tuple[Optional[bytes], int]:
+    """发一次 Emby 图片请求，返回 `(字节|None, HTTP 状态码)`；不跟跳转、不抛异常。"""
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with _open(req, timeout=EMBY_TIMEOUT, direct=True, follow_redirects=False) as resp:
+            return _read_limited(resp), int(getattr(resp, "status", 200) or 200)
+    except urllib.error.HTTPError as error:
+        return None, int(getattr(error, "code", 0) or 0)
+    except Exception:
+        return None, 0
+
+
 def emby_image(host: str, apikey: str, item_id: str, img_type: str = "Primary"
                ) -> Optional[bytes]:
     """取 Emby 原图（局域网直连，不走代理）：`GET {host}/emby/Items/{id}/Images/{type}`。
@@ -387,16 +486,20 @@ def emby_image(host: str, apikey: str, item_id: str, img_type: str = "Primary"
     `?emby=<item_id>` 与 `?emby_person=<person_id>` 是同一个端点（Person 也是 Item），
     差别只在调用方传进来的 id；返回值落磁盘缓存（与 URL 图分开，见 `emby_cache_path`）。
 
+    **密钥不进 URL**（0.9.4 B2）：改用 `X-Emby-Token` 请求头 —— 查询串会跟着 requests 的
+    连接异常原文进日志。只有 401（老版本 Emby 只认查询串）才回退一次，那时键出现在 URL 里
+    是没办法，但异常日志已经过 `emby._scrub()` 脱敏。
+
     :param host: Emby 根地址（宿主配置的 `EMBY_HOST`，形如 `http://<媒体服务器>:8096`；带 `/emby` 也认）
     :param apikey: Emby API Key（由 `__init__.py` 从配置里读，本模块不读配置）
     :param item_id: 影片 / Person 的 Emby Id
-    :param img_type: `Primary` / `Backdrop/0` / `Thumb` …
+    :param img_type: `Primary` / `Backdrop/0` / `Thumb`（白名单外的直接放弃）
     :return: 图片字节；任何失败（含非图片响应）一律返回 None，不抛异常
     """
     base = emby_base(host)
     item = urllib.parse.quote(str(item_id or "").strip(), safe="")
-    kind = str(img_type or "Primary").strip() or "Primary"
-    if not base or not item or not str(apikey or "").strip():
+    kind = normalize_image_type(img_type)
+    if not base or not item or not str(apikey or "").strip() or not kind:
         return None
     path = emby_cache_path(item_id, kind)
     if os.path.exists(path):
@@ -407,16 +510,17 @@ def emby_image(host: str, apikey: str, item_id: str, img_type: str = "Primary"
                 return blob
         except Exception:
             pass
-    url = "%s/emby/Items/%s/Images/%s?api_key=%s" % (
-        base, item, urllib.parse.quote(kind, safe="/"),
-        urllib.parse.quote(str(apikey).strip(), safe=""))
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "image/*"})
-        with _open(req, timeout=EMBY_TIMEOUT, direct=True) as resp:
-            data = resp.read()
-    except Exception:
+    token = str(apikey).strip()
+    url = "%s/emby/Items/%s/Images/%s" % (base, item, urllib.parse.quote(kind, safe="/"))
+    data, code = _emby_fetch(url, {"User-Agent": UA, "Accept": "image/*",
+                                   "X-Emby-Token": token})
+    if not data and code == 401:
+        # 兜底：只认查询串的老版本 Emby。键会进 URL，所以这条路径只在 401 时走。
+        fallback = "%s?api_key=%s" % (url, urllib.parse.quote(token, safe=""))
+        data, code = _emby_fetch(fallback, {"User-Agent": UA, "Accept": "image/*"})
+    if not data:
         return None
-    if not data or not str(media_type(data)).startswith("image/"):
+    if not str(media_type(data)).startswith("image/"):
         return None                       # 404 页面 / 空响应 / HTML：别把非图片缓存下来
     _store(path, data)
     return data
