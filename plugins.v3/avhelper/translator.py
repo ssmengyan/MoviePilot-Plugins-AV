@@ -1054,7 +1054,7 @@ def _translate_one(source: dict, *, conf: Dict[str, str], models: Sequence[str],
 
     errors: List[str] = []
     for model in [m for m in models if _s(m)]:
-        for attempt in range(1, max(1, int(retry_limit)) + 1):
+        for _ in range(1, max(1, int(retry_limit)) + 1):
             found, status, recs = _call_once([source], model, conf=conf, max_tokens=max_tokens,
                                              timeout=timeout, opener=opener,
                                              retry_limit=RETRY_MAX_SINGLE, single=True)

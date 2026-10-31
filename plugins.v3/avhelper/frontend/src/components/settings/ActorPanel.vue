@@ -42,7 +42,7 @@ const props = withDefaults(
      */
     loadError?: string
   }>(),
-  { api: null, toast: null, loadError: '' },
+  { api: null, loadError: '' },
 )
 
 /** ⚠️ 必须是字符串数组（AGENTS.md §5：函数式写法编译出 emits: <函数>，事件静默失效）。 */

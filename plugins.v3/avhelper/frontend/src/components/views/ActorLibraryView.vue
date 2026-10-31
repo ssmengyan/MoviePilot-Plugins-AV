@@ -57,7 +57,7 @@ const props = withDefaults(
     /** 壳统一传的一组 props（本视图不用 store，声明只为不与壳的绑定冲突）。 */
     store?: unknown
   }>(),
-  { pluginId: '', api: null, toast: null, store: null },
+  { pluginId: '', api: null },
 )
 
 /** ⚠️ 必须是字符串数组（AGENTS.md §5：函数式写法编译出 emits: <函数>，事件静默失效）。 */

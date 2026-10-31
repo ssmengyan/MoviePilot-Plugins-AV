@@ -73,7 +73,7 @@ const props = withDefaults(
     /** 壳统一传的一组 props（本视图不用 store，声明只为不与壳的绑定冲突）。 */
     store?: unknown
   }>(),
-  { pluginId: '', api: null, toast: null, store: null },
+  { pluginId: '', api: null },
 )
 
 /** ⚠️ 必须是字符串数组（AGENTS.md §5 的坑：函数式写法编译出 `emits: <函数>`，事件静默失效）。 */
@@ -513,7 +513,8 @@ function countAvatarActions(payload: any): AvatarCounts {
   }
   // 防御：回包形状变了（`planned` 不在）时，真跑的结果还能靠 `applied` 说清"传了几张"
   if (!up && !planned.length && applied.length) up = applied.length
-  const errors = (Array.isArray(payload?.errors) ? payload.errors : []).map(item => text(item)).filter(Boolean)
+  const errors = (Array.isArray(payload?.errors) ? payload.errors : [])
+    .map((item: unknown) => text(item)).filter(Boolean)
   return {
     up,
     skip,

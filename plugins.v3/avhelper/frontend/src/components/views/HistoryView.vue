@@ -59,7 +59,7 @@ const props = withDefaults(
     /** 宿主 toast（`moviepilot:toast` 注入），拿不到时静默降级。 */
     toast?: unknown
   }>(),
-  { api: null, pluginId: '', toast: null },
+  { api: null, pluginId: '' },
 )
 
 /** 端点：设计文档 §4 的 `GET /downloads` 与 `DELETE /downloads?key=…`。 */

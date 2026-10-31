@@ -21,7 +21,6 @@
 
 import asyncio
 import importlib.util
-import json
 import sys
 import types
 from pathlib import Path
@@ -591,8 +590,8 @@ class TestScrapeRunGates:
         assert "write_fields" not in fake.calls["batch"][2][1]["opts"]
 
     def test_results_are_normalized_to_contract_shape(self, plugin, api_mod, monkeypatch):
-        fake = with_scraper(api_mod, monkeypatch,
-                            FakeScraper(batch=[{"key": "", "extra": 1}, "垃圾"]))
+        with_scraper(api_mod, monkeypatch,
+                     FakeScraper(batch=[{"key": "", "extra": 1}, "垃圾"]))
         use_emby(plugin)
         result = call(plugin.api_scrape_run(FakeRequest({"keys": ["SNOS380"]})))
         assert result["results"] == [{"key": "", "extra": 1, "status": "", "changed": [],

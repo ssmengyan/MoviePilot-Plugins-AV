@@ -1958,7 +1958,6 @@ class Store:
             return
         relation = str(key or "").strip()
         picked = {k: v for k, v in (fields or {}).items() if k in _ITEM_FIELDS}
-        now = _now()
         with self._lock:
             conn = self._connect()
             try:

@@ -18,7 +18,6 @@ import asyncio
 import hashlib
 import json
 import mimetypes
-import re
 import threading
 import time
 from collections import deque
@@ -45,7 +44,7 @@ from .ratelimit import RateLimiter
 from . import number_classify
 from . import scrape_graph
 from .store import PLUGIN_SOURCES, Store
-from .tasks import DEFAULT_RULE, TaskEngine, merge_rule
+from .tasks import TaskEngine, merge_rule
 
 PLUGIN_ID = "AVHelper"
 # 前端静态目录与 MIME 表：多文件前端由 `/ui/` 下发，ES module 的相对导入依赖目录语义

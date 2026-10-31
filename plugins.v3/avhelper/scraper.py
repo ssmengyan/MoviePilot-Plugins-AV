@@ -59,7 +59,6 @@ import random
 import re
 import subprocess
 import tempfile
-import threading
 import time
 import unicodedata
 import uuid
@@ -1846,7 +1845,9 @@ def javdb_assets_download(cli: Any, number: str, assets: Sequence[Dict[str, Any]
         paths = [ln.strip() for ln in dl_out.decode("utf-8", "replace").splitlines()
                  if ln.strip()]
         result: Dict[str, bytes] = {}
-        for asset, path in zip(rows, paths):
+        # 行数与下载条数**允许不等**（CLI 只打印下成功的），所以显式 strict=False：
+        # 不是「长度必须先对齐」的不变量，缺的图会在这里静默跳过。
+        for asset, path in zip(rows, paths, strict=False):
             try:
                 with open(path, "rb") as handle:
                     blob = handle.read()

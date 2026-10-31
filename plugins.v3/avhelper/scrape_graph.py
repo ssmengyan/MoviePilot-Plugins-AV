@@ -27,7 +27,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field as _field
+from dataclasses import dataclass
 from typing import Any, Dict, FrozenSet, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from .number_classify import CONTENT_TYPES

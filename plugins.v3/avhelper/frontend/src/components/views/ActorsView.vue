@@ -103,7 +103,7 @@ const props = withDefaults(
      */
     focusActor?: string
   }>(),
-  { pluginId: '', api: null, toast: null, focusActor: '' },
+  { pluginId: '', api: null, focusActor: '' },
 )
 
 const emit = defineEmits<{
@@ -1247,7 +1247,7 @@ watch(
       :model-value="aliasDraft !== null"
       max-width="460"
       attach="body"
-      @update:model-value="value => { if (!value) aliasDraft = null }"
+      @update:model-value="(value: unknown) => { if (!value) aliasDraft = null }"
     >
       <v-card>
         <v-card-title class="d-flex align-center">备注：{{ actor }}</v-card-title>
@@ -1260,7 +1260,7 @@ watch(
             density="comfortable"
             autofocus
             hide-details
-            @update:model-value="value => (aliasDraft = String(value ?? ''))"
+            @update:model-value="(value: unknown) => (aliasDraft = String(value ?? ''))"
           />
           <div class="avh-hint" style="margin-top: 8px">
             只影响界面显示，原名不变；清空后保存即等于清除备注。

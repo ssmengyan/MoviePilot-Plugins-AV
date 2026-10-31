@@ -64,7 +64,7 @@ class TestMetaDueComparison:
 
 class TestMigrationV3:
     def test_normalizes_legacy_timestamps(self, store_mod, tmp_path):
-        store = _fresh(store_mod, tmp_path, "legacy.db")
+        _fresh(store_mod, tmp_path, "legacy.db")      # 建库并 init，下面的裸 sqlite3 连同一个文件
         db = tmp_path / "legacy.db"
         with sqlite3.connect(db) as conn:
             conn.execute(
@@ -85,7 +85,7 @@ class TestMigrationV3:
         assert again.schema_version() == store_mod._SCHEMA_VERSION
 
     def test_is_idempotent(self, store_mod, tmp_path):
-        store = _fresh(store_mod, tmp_path, "twice.db")
+        _fresh(store_mod, tmp_path, "twice.db")       # 同上：只借它建库 + init
         db = tmp_path / "twice.db"
         with sqlite3.connect(db) as conn:
             conn.execute("INSERT OR REPLACE INTO meta(key, display_number, next_retry_at) "

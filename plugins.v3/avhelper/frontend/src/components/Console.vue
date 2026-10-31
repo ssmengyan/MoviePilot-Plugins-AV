@@ -1395,11 +1395,15 @@ onBeforeUnmount(() => {
               @patch="patchActor"
             />
 
+            <!-- 通知栏：拿不到 `GET /notify` 的清单时传 undefined，由 NotifyPanel 自己的
+                 props 默认值兜底（`NOTIFY_CHANNEL_FALLBACK` / `NOTIFY_KIND_FALLBACK` 就写
+                 在那里）。壳这边不要再引用一份 —— 那两个常量没在本文件 import，写在模板里
+                 等于恒为 undefined（未知标识符不报错，只是静默失效）。 -->
             <NotifyPanel
               v-else-if="settingsSection === 'notify'"
               :settings="notifyView"
-              :channels="notifyMeta?.channels || NOTIFY_CHANNEL_FALLBACK"
-              :kinds="notifyMeta?.kinds || NOTIFY_KIND_FALLBACK"
+              :channels="notifyMeta?.channels"
+              :kinds="notifyMeta?.kinds"
               :cron-text="notifyMeta?.cronText || ''"
               :load-error="notifyLoadError"
               :notices="draftNotices"

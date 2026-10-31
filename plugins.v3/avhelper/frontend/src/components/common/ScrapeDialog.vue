@@ -39,7 +39,7 @@ const props = withDefaults(
     /** 宿主 toast（`moviepilot:toast` 注入），拿不到时静默降级。 */
     toast?: unknown
   }>(),
-  { api: null, pluginId: '', toast: null },
+  { api: null, pluginId: '' },
 )
 
 /** ⚠️ 必须是字符串数组（AGENTS.md §5 的坑：函数式写法编译出 `emits: <函数>`，事件静默失效）。 */

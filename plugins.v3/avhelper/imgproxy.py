@@ -136,7 +136,7 @@ def _split(url: str) -> Optional[Tuple[str, str, bool]]:
     try:
         u = urllib.parse.urlparse(text)
         host = (u.hostname or "").lower()
-        u.port                             # 端口非法（`https://h:abc/`）时这里抛 ValueError
+        _ = u.port                          # 端口非法（`https://h:abc/`）时这里抛 ValueError
     except ValueError:
         return None
     if not host:
@@ -443,7 +443,7 @@ def _pillow_image():
     if not _PIL_TRIED:
         _PIL_TRIED = True
         try:
-            from PIL import Image            # noqa: WPS433（故意的延迟导入）
+            from PIL import Image            # 故意延迟导入：宿主/容器可能没装 Pillow
             _PIL_IMAGE = Image
         except Exception:
             _PIL_IMAGE = None

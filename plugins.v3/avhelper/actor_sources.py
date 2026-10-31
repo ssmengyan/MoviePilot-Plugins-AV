@@ -15,7 +15,7 @@
    即站点 `div.actor-avatar span.avatar` 的 background-image），丢弃 `actor_unknow` 占位；
    未登录判 `login_required` 并返回 `None`（**不抛**）。
 
-实测依据（2026-10-21，走代理 `http://192.0.2.11:7890`）
+实测依据（2026-10-21，走 NAS 软路由那条代理；坐标见 AGENTS.md §2）
 ------------------------------------------------------------
 - **6.5 MB 正文几乎每次都被中途掐断**：`resp.read()` 一次性读，实测 3/3 全抛
   `http.client.IncompleteRead`（已读 6.20~6.46 MB / 6,503,467）。因此 `_http_fetch()`

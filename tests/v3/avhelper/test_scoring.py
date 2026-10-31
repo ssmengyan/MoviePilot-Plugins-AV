@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
 
 PLUGIN_DIR = Path(__file__).resolve().parents[3] / "plugins.v3" / "avhelper"
 

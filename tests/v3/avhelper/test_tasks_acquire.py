@@ -15,7 +15,6 @@
    但每天 ≤6 次、间隔 ≥240 分钟这两条不许被界面上的数字绕过。
 """
 
-import pytest
 
 
 class _Chain:

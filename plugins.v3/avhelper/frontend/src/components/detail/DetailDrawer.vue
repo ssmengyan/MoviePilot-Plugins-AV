@@ -80,7 +80,7 @@ const props = withDefaults(
     /** 宿主 toast（`moviepilot:toast` 注入），拿不到时静默降级。 */
     toast?: unknown
   }>(),
-  { open: false, number: '', id: '', pluginId: '', api: null, toast: null },
+  { open: false, number: '', id: '', pluginId: '', api: null },
 )
 
 const emit = defineEmits<{

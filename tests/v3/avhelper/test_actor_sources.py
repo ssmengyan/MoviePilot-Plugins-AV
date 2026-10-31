@@ -621,6 +621,7 @@ class TestJavdbAvatar:
     def test_proxy_argument_is_accepted(self, actor_sources):
         """proxy 参数与其它源同形（javdb 的代理在 client 里，这里只保证签名一致）。"""
         client = _FakeClient({"entity": {"avatar_url": self.AVATAR}})
+        # 地址用 RFC 5737 TEST-NET-1 占位：`tests/` 会随公开仓库发布，不写真实内网坐标
         row = actor_sources.fetch_javdb_avatar(client, "葵つかさ",
                                               proxy="http://192.0.2.11:7890")
         assert row["url"] == self.AVATAR

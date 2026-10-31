@@ -145,7 +145,7 @@ REJECTED = [
     # `@` 混淆（userinfo）
     "https://tp.spfcas.com@evil.com/x.jpg",
     "https://evil.com@tp.spfcas.com/x.jpg",
-    "https://user:pw@tp.spfcas.com/x.jpg",
+    "https://user:pw@tp.spfcas.com/x.jpg",   # sensitive-ok 反例：userinfo 混淆正是要挡的写法
     # 非标端口
     "https://tp.spfcas.com:8080/x.jpg",
     "https://tp.spfcas.com:abc/x.jpg",

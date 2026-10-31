@@ -17,7 +17,6 @@
 import sqlite3
 from datetime import datetime, timedelta
 
-import pytest
 
 
 #: 建表 DDL 的列名与列序（`docs/AVHelper-演员刮削子系统方案.md` §2 原样，一个字都不许改）
@@ -237,7 +236,7 @@ class TestActorListAndStats:
 
     def test_filters_match_stats(self, store_mod, tmp_path):
         store = make_store(store_mod, tmp_path)
-        plain = store.actor_upsert({"person": MZ_PERSON})
+        store.actor_upsert({"person": MZ_PERSON})    # plain：只有资料、没有头像
         locked = store.actor_upsert({"person": TN_PERSON})
         store.actor_set_images(locked, [{"url": "https://a/b.jpg", "source": "javdb"}])
         store.actor_lock(locked, "images")

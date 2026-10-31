@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import re
 import sys
 import types
 from pathlib import Path
@@ -1809,9 +1808,9 @@ class TestRollbackRestoresAbsentKeys:
         store = FakeStore()
         emby = FakeEmby(dto=EMPTY_DTO)
         target = targets({}, plot_zh="", plot_jp="")
-        report = scraper.write_item(store, emby, target, item_key="emby:1", key="SNOS380",
-                                    emby_id="1", opts={"now": "2026-10-14T00:00:00",
-                                                       "write_images": False})
+        scraper.write_item(store, emby, target, item_key="emby:1", key="SNOS380",
+                           emby_id="1", opts={"now": "2026-10-14T00:00:00",
+                                              "write_images": False})
         sent = emby.updated[0]["dto"]
         assert "Overview" not in sent                        # 两者都空 → 不动（回滚才会清）
         assert set(sent) <= set(scraper.MATRIX_FIELDS)

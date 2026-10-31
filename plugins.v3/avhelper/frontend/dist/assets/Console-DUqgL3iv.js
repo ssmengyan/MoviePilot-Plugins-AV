@@ -1665,7 +1665,7 @@ const _sfc_main$u = /* @__PURE__ */ _defineComponent$u({
   props: {
     settings: {},
     api: { default: null },
-    toast: { default: null }
+    toast: {}
   },
   emits: ["patch"],
   setup(__props, { emit: __emit }) {
@@ -1924,7 +1924,7 @@ const _sfc_main$u = /* @__PURE__ */ _defineComponent$u({
   }
 });
 
-const ScrapePanel = /* @__PURE__ */ _export_sfc(_sfc_main$u, [["__scopeId", "data-v-139af106"]]);
+const ScrapePanel = /* @__PURE__ */ _export_sfc(_sfc_main$u, [["__scopeId", "data-v-b27f91a6"]]);
 
 const RULE_FALLBACK = {
   res: "1080p",
@@ -1990,7 +1990,7 @@ const _sfc_main$t = /* @__PURE__ */ _defineComponent$t({
   props: {
     settings: {},
     api: { default: null },
-    toast: { default: null },
+    toast: {},
     loadError: { default: "" }
   },
   emits: ["patch"],
@@ -2448,7 +2448,7 @@ const _sfc_main$t = /* @__PURE__ */ _defineComponent$t({
   }
 });
 
-const ActorPanel = /* @__PURE__ */ _export_sfc(_sfc_main$t, [["__scopeId", "data-v-cf885914"]]);
+const ActorPanel = /* @__PURE__ */ _export_sfc(_sfc_main$t, [["__scopeId", "data-v-86f33943"]]);
 
 const {defineComponent:_defineComponent$s} = await importShared('vue');
 
@@ -2627,7 +2627,7 @@ const _sfc_main$r = /* @__PURE__ */ _defineComponent$r({
     settings: {},
     pluginId: { default: "" },
     api: { default: null },
-    toast: { default: null }
+    toast: {}
   },
   emits: ["patch"],
   setup(__props, { emit: __emit }) {
@@ -3544,7 +3544,7 @@ const _sfc_main$r = /* @__PURE__ */ _defineComponent$r({
   }
 });
 
-const ScrapeRulePanel = /* @__PURE__ */ _export_sfc(_sfc_main$r, [["__scopeId", "data-v-b04f6486"]]);
+const ScrapeRulePanel = /* @__PURE__ */ _export_sfc(_sfc_main$r, [["__scopeId", "data-v-ddb16328"]]);
 
 const {ref: ref$p} = await importShared('vue');
 
@@ -5294,7 +5294,7 @@ const _sfc_main$j = /* @__PURE__ */ _defineComponent$j({
     store: {},
     pluginId: { default: "" },
     api: { default: null },
-    toast: { default: null }
+    toast: {}
   },
   emits: ["switch", "refreshSide"],
   setup(__props, { emit: __emit }) {
@@ -5482,7 +5482,7 @@ const _sfc_main$j = /* @__PURE__ */ _defineComponent$j({
   }
 });
 
-const SiteSearchView = /* @__PURE__ */ _export_sfc(_sfc_main$j, [["__scopeId", "data-v-1636ca0e"]]);
+const SiteSearchView = /* @__PURE__ */ _export_sfc(_sfc_main$j, [["__scopeId", "data-v-96ac0a09"]]);
 
 const {computed: computed$f,nextTick: nextTick$4,onBeforeUnmount: onBeforeUnmount$8,onMounted: onMounted$9,ref: ref$i,toValue,watch: watch$9} = await importShared('vue');
 
@@ -5703,7 +5703,7 @@ const _sfc_main$i = /* @__PURE__ */ _defineComponent$i({
   props: {
     api: { default: null },
     pluginId: { default: "" },
-    toast: { default: null }
+    toast: {}
   },
   setup(__props) {
     const props = __props;
@@ -6109,7 +6109,7 @@ const _sfc_main$i = /* @__PURE__ */ _defineComponent$i({
   }
 });
 
-const HistoryView = /* @__PURE__ */ _export_sfc(_sfc_main$i, [["__scopeId", "data-v-36ac003f"]]);
+const HistoryView = /* @__PURE__ */ _export_sfc(_sfc_main$i, [["__scopeId", "data-v-2ab94e2c"]]);
 
 const {defineComponent:_defineComponent$h} = await importShared('vue');
 
@@ -6188,7 +6188,7 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
     store: {},
     pluginId: { default: "" },
     api: { default: null },
-    toast: { default: null }
+    toast: {}
   },
   setup(__props) {
     const props = __props;
@@ -6632,7 +6632,7 @@ const _sfc_main$h = /* @__PURE__ */ _defineComponent$h({
   }
 });
 
-const DownloadsView = /* @__PURE__ */ _export_sfc(_sfc_main$h, [["__scopeId", "data-v-4a7a71d3"]]);
+const DownloadsView = /* @__PURE__ */ _export_sfc(_sfc_main$h, [["__scopeId", "data-v-fab21cd4"]]);
 
 const {defineComponent:_defineComponent$g} = await importShared('vue');
 
@@ -6933,7 +6933,7 @@ const _sfc_main$f = /* @__PURE__ */ _defineComponent$f({
   props: {
     pluginId: { default: "" },
     api: { default: null },
-    toast: { default: null }
+    toast: {}
   },
   emits: ["openMovie"],
   setup(__props, { emit: __emit }) {
@@ -7130,7 +7130,7 @@ const _sfc_main$f = /* @__PURE__ */ _defineComponent$f({
   }
 });
 
-const LibraryView = /* @__PURE__ */ _export_sfc(_sfc_main$f, [["__scopeId", "data-v-438aad50"]]);
+const LibraryView = /* @__PURE__ */ _export_sfc(_sfc_main$f, [["__scopeId", "data-v-7f7de53f"]]);
 
 const {defineComponent:_defineComponent$e} = await importShared('vue');
 
@@ -7147,7 +7147,7 @@ const _sfc_main$e = /* @__PURE__ */ _defineComponent$e({
     store: {},
     pluginId: { default: "" },
     api: { default: null },
-    toast: { default: null }
+    toast: {}
   },
   emits: ["refreshSide"],
   setup(__props, { emit: __emit }) {
@@ -7330,7 +7330,7 @@ const _sfc_main$e = /* @__PURE__ */ _defineComponent$e({
   }
 });
 
-const TasksView = /* @__PURE__ */ _export_sfc(_sfc_main$e, [["__scopeId", "data-v-1e7056c7"]]);
+const TasksView = /* @__PURE__ */ _export_sfc(_sfc_main$e, [["__scopeId", "data-v-5da56e8f"]]);
 
 const {defineComponent:_defineComponent$d} = await importShared('vue');
 
@@ -7359,7 +7359,7 @@ const _sfc_main$d = /* @__PURE__ */ _defineComponent$d({
     store: {},
     pluginId: { default: "" },
     api: { default: null },
-    toast: { default: null }
+    toast: {}
   },
   emits: ["switch", "refreshSide"],
   setup(__props, { emit: __emit }) {
@@ -7585,7 +7585,7 @@ const _sfc_main$d = /* @__PURE__ */ _defineComponent$d({
   }
 });
 
-const SubsView = /* @__PURE__ */ _export_sfc(_sfc_main$d, [["__scopeId", "data-v-1e2afa2f"]]);
+const SubsView = /* @__PURE__ */ _export_sfc(_sfc_main$d, [["__scopeId", "data-v-00f02db9"]]);
 
 const {defineComponent:_defineComponent$c} = await importShared('vue');
 
@@ -7868,7 +7868,7 @@ const _sfc_main$a = /* @__PURE__ */ _defineComponent$a({
     store: {},
     pluginId: { default: "" },
     api: { default: null },
-    toast: { default: null },
+    toast: {},
     focusActor: { default: "" }
   },
   emits: ["refreshSide", "openMovie"],
@@ -8788,7 +8788,7 @@ const _sfc_main$a = /* @__PURE__ */ _defineComponent$a({
   }
 });
 
-const ActorsView = /* @__PURE__ */ _export_sfc(_sfc_main$a, [["__scopeId", "data-v-45614b2c"]]);
+const ActorsView = /* @__PURE__ */ _export_sfc(_sfc_main$a, [["__scopeId", "data-v-2169d6fa"]]);
 
 const {defineComponent:_defineComponent$9} = await importShared('vue');
 
@@ -8898,8 +8898,8 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
   props: {
     pluginId: { default: "" },
     api: { default: null },
-    toast: { default: null },
-    store: { default: null }
+    toast: {},
+    store: {}
   },
   emits: ["refreshSide"],
   setup(__props, { emit: __emit }) {
@@ -9668,7 +9668,7 @@ const _sfc_main$9 = /* @__PURE__ */ _defineComponent$9({
   }
 });
 
-const ActorLibraryView = /* @__PURE__ */ _export_sfc(_sfc_main$9, [["__scopeId", "data-v-88f6d3ad"]]);
+const ActorLibraryView = /* @__PURE__ */ _export_sfc(_sfc_main$9, [["__scopeId", "data-v-62f83f41"]]);
 
 const {reactive,ref: ref$9} = await importShared('vue');
 const rankCache = reactive(/* @__PURE__ */ new Map());
@@ -9720,7 +9720,7 @@ const _sfc_main$8 = /* @__PURE__ */ _defineComponent$8({
     store: {},
     pluginId: { default: "" },
     api: { default: null },
-    toast: { default: null }
+    toast: {}
   },
   emits: ["openMovie"],
   setup(__props, { emit: __emit }) {
@@ -9914,7 +9914,7 @@ const _sfc_main$8 = /* @__PURE__ */ _defineComponent$8({
   }
 });
 
-const DiscoverView = /* @__PURE__ */ _export_sfc(_sfc_main$8, [["__scopeId", "data-v-18d36688"]]);
+const DiscoverView = /* @__PURE__ */ _export_sfc(_sfc_main$8, [["__scopeId", "data-v-927d9efd"]]);
 
 const {defineComponent:_defineComponent$7} = await importShared('vue');
 
@@ -9988,7 +9988,7 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
   props: {
     api: { default: null },
     pluginId: { default: "" },
-    toast: { default: null }
+    toast: {}
   },
   emits: ["done"],
   setup(__props, { expose: __expose, emit: __emit }) {
@@ -10505,7 +10505,7 @@ const _sfc_main$7 = /* @__PURE__ */ _defineComponent$7({
   }
 });
 
-const ScrapeDialog = /* @__PURE__ */ _export_sfc(_sfc_main$7, [["__scopeId", "data-v-9c9d1182"]]);
+const ScrapeDialog = /* @__PURE__ */ _export_sfc(_sfc_main$7, [["__scopeId", "data-v-7c9781c7"]]);
 
 const {defineComponent:_defineComponent$6} = await importShared('vue');
 
@@ -10615,8 +10615,8 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
   props: {
     pluginId: { default: "" },
     api: { default: null },
-    toast: { default: null },
-    store: { default: null }
+    toast: {},
+    store: {}
   },
   emits: ["refreshSide"],
   setup(__props, { emit: __emit }) {
@@ -11565,7 +11565,7 @@ const _sfc_main$6 = /* @__PURE__ */ _defineComponent$6({
   }
 });
 
-const ScrapeView = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-8bc44df4"]]);
+const ScrapeView = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-444df017"]]);
 
 const {defineComponent:_defineComponent$5} = await importShared('vue');
 
@@ -11816,7 +11816,7 @@ const _sfc_main$4 = /* @__PURE__ */ _defineComponent$4({
     store: {},
     pluginId: { default: "" },
     api: { default: null },
-    toast: { default: null }
+    toast: {}
   },
   emits: ["close", "openActor", "refreshSide"],
   setup(__props, { expose: __expose, emit: __emit }) {
@@ -12598,7 +12598,7 @@ const _sfc_main$4 = /* @__PURE__ */ _defineComponent$4({
   }
 });
 
-const DetailDrawer = /* @__PURE__ */ _export_sfc(_sfc_main$4, [["__scopeId", "data-v-e58bd4dc"]]);
+const DetailDrawer = /* @__PURE__ */ _export_sfc(_sfc_main$4, [["__scopeId", "data-v-cb5ec21c"]]);
 
 const {defineComponent:_defineComponent$3} = await importShared('vue');
 
@@ -14772,8 +14772,8 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
                     }, null, 8, ["settings", "api", "toast", "load-error"])) : settingsSection.value === "notify" ? (_openBlock(), _createBlock(NotifyPanel, {
                       key: 8,
                       settings: notifyView.value,
-                      channels: notifyMeta.value?.channels || _ctx.NOTIFY_CHANNEL_FALLBACK,
-                      kinds: notifyMeta.value?.kinds || _ctx.NOTIFY_KIND_FALLBACK,
+                      channels: notifyMeta.value?.channels,
+                      kinds: notifyMeta.value?.kinds,
                       "cron-text": notifyMeta.value?.cronText || "",
                       "load-error": notifyLoadError.value,
                       notices: _unref(draftNotices),
@@ -14862,6 +14862,6 @@ const _sfc_main = /* @__PURE__ */ _defineComponent({
   }
 });
 
-const Console = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-6f9c03d0"]]);
+const Console = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-1d63e486"]]);
 
 export { CONSOLE_EMIT_NAMES as C, Console as a };

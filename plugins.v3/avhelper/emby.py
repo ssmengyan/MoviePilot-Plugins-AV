@@ -576,6 +576,19 @@ def best_keys(index: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
     return best
 
 
+def _label_lookup(table: Dict[str, str], candidates: Tuple[str, str, str]) -> str:
+    """三种写法依次试：Name 原始番号 → 从键反推的展示番号 → 归一化键。
+
+    做成模块函数而不是 `library_rows()` 里的闭包：闭包对循环变量是**晚绑定**的（B023），
+    哪天有人把调用挪到循环外，就会静默拿到最后一条的番号。
+    """
+    for candidate in candidates:
+        hit = str(table.get(candidate) or "")
+        if hit:
+            return hit
+    return ""
+
+
 def library_rows(index: Dict[str, Dict[str, Any]],
                  thumbs: Optional[Dict[str, str]] = None,
                  actors: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
@@ -602,21 +615,13 @@ def library_rows(index: Dict[str, Dict[str, Any]],
         shown = shown_number(key, entry.get("name"))
         fallback = display_number(key)
 
-        def pick(table: Dict[str, str]) -> str:
-            """三种写法依次试：Name 原始番号 → 从键反推的展示番号 → 归一化键。"""
-            for candidate in (shown, fallback, key):
-                hit = str(table.get(candidate) or "")
-                if hit:
-                    return hit
-            return ""
-
         rows.append({
             "number": shown,
             "title": str(entry.get("name") or ""),
             # 库列表里没有 javdb 的发行日 / 时长 / 磁力（那要先抓一遍详情），一律留空，
             # 由卡片按"库卡片"的样子渲染（`NumCard` 的 `mode="library"`）。
             "cover": "",
-            "thumb": pick(thumbs),
+            "thumb": _label_lookup(thumbs, (shown, fallback, key)),
             "date": "",
             "duration": 0,
             "cnsub": False,
@@ -624,7 +629,7 @@ def library_rows(index: Dict[str, Dict[str, Any]],
             "magnets": 0,
             "maker": "",
             "score": "",
-            "actor": pick(actors),
+            "actor": _label_lookup(actors, (shown, fallback, key)),
             "actor_avatar": "",
             "id": "",
             "lib": {

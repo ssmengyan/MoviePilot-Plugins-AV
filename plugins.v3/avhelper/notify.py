@@ -319,7 +319,8 @@ def parse_cron(expr: str) -> Dict[str, List[int]]:
         raise ValueError("cron 要 5 段：分 时 日 月 周")
     out: Dict[str, List[int]] = {}
     for key, field, (lo, hi), label in zip(
-            ("minute", "hour", "day", "month", "weekday"), fields, CRON_BOUNDS, CRON_NAMES):
+            ("minute", "hour", "day", "month", "weekday"), fields, CRON_BOUNDS, CRON_NAMES,
+            strict=True):
         try:
             out[key] = _parse_cron_field(field, lo, hi)
         except ValueError as error:

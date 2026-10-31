@@ -30,9 +30,11 @@ export interface ConsoleEmit {
  *   就变成"整个界面消失"；
  * - 递归回环还会抛 `RangeError: Maximum call stack size exceeded`。
  *
- * 所以：运行时清单用下面的常量（`as const` 只为保留字面量类型），类型仍由 `ConsoleEmit` 提供。
+ * 所以：运行时清单用下面的常量（**必须是可变的 `string[]`**，`defineEmits` 的签名只收
+ * `string[]` / `EmitsOptions`，写成 `[... ] as const` 的只读元组会让 `vue-tsc --noEmit`
+ * 报 TS2769，三个入口一起红），类型仍由 `ConsoleEmit` 提供。
  */
-export const CONSOLE_EMIT_NAMES = ['save', 'layout', 'switch', 'close', 'action'] as const
+export const CONSOLE_EMIT_NAMES: string[] = ['save', 'layout', 'switch', 'close', 'action']
 
 /**
  * 历史形态的 `defineEmits` 类型式写法（**已废弃**，保留仅为说明根因）。

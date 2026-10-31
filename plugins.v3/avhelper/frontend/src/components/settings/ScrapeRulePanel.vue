@@ -34,7 +34,7 @@ const props = withDefaults(
     /** 宿主 toast（`moviepilot:toast` 注入），拿不到时静默降级。 */
     toast?: unknown
   }>(),
-  { pluginId: '', api: null, toast: null },
+  { pluginId: '', api: null },
 )
 
 /** ⚠️ 必须是字符串数组（AGENTS.md §5 的坑）。 */

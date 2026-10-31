@@ -1,6 +1,5 @@
 """插件自管 SQLite 的读写单测：全部落在 pytest 的临时目录，不碰真实缓存盘。"""
 
-import time
 
 
 def make_store(store_mod, tmp_path):
