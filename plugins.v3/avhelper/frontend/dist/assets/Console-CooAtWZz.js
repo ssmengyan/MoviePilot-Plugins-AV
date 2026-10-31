@@ -66,10 +66,48 @@ function bindPluginApi(api, pluginId) {
   return bound;
 }
 
+const PENDING_TASK_STATE = "await";
+const RULE_FALLBACK$1 = {
+  res: "1080p",
+  mustCnsub: false,
+  preferUncensored: true,
+  allow4k: true,
+  minSeeders: 3,
+  sites: [],
+  prefSites: ["馒头", "Rousi"],
+  btFallback: true,
+  // 保存路径与下载器留空 = 用 MoviePilot 的下载器默认值（后端 tasks.DEFAULT_RULE 同口径）
+  savePath: "",
+  category: "avi",
+  downloader: "",
+  trigger: "notify",
+  maxPerDay: 6,
+  minIntervalMin: 240
+};
+function toRule(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const merged = { ...RULE_FALLBACK$1 };
+  Object.keys(RULE_FALLBACK$1).forEach((key) => {
+    const value = src[key];
+    if (value === void 0 || value === null) return;
+    merged[key] = Array.isArray(value) ? value.slice() : value;
+  });
+  return merged;
+}
+function shortTime(value) {
+  const text = String(value === null || value === void 0 ? "" : value);
+  if (!text) return "—";
+  if (/^\d{4}-\d{2}-\d{2}T/.test(text)) return text.replace("T", " ").slice(0, 16);
+  return text;
+}
+function nowStr() {
+  return (/* @__PURE__ */ new Date()).toLocaleTimeString("zh-CN", { hour12: false });
+}
+
 const POLICY_MIN_INTERVAL_MIN = 240;
 const POLICY_MAX_PER_DAY = 6;
 
-const RULE_FALLBACK$1 = {
+const RULE_FALLBACK = {
   res: "1080p",
   mustCnsub: false,
   preferUncensored: true,
@@ -116,27 +154,27 @@ function num(value, fallback, floor = false, min = null) {
 }
 function toRuleState(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
-  const res = str(src.res, RULE_FALLBACK$1.res);
+  const res = str(src.res, RULE_FALLBACK.res);
   return {
-    res: res === "2160p" || res === "only4k" || res === "1080p" ? res : RULE_FALLBACK$1.res,
-    mustCnsub: bool(src.mustCnsub, RULE_FALLBACK$1.mustCnsub),
-    preferUncensored: bool(src.preferUncensored, RULE_FALLBACK$1.preferUncensored),
-    allow4k: bool(src.allow4k, RULE_FALLBACK$1.allow4k),
-    minSeeders: num(src.minSeeders, RULE_FALLBACK$1.minSeeders, true, 0),
+    res: res === "2160p" || res === "only4k" || res === "1080p" ? res : RULE_FALLBACK.res,
+    mustCnsub: bool(src.mustCnsub, RULE_FALLBACK.mustCnsub),
+    preferUncensored: bool(src.preferUncensored, RULE_FALLBACK.preferUncensored),
+    allow4k: bool(src.allow4k, RULE_FALLBACK.allow4k),
+    minSeeders: num(src.minSeeders, RULE_FALLBACK.minSeeders, true, 0),
     sites: strList(src.sites),
     prefSites: strList(src.prefSites),
-    btFallback: bool(src.btFallback, RULE_FALLBACK$1.btFallback),
+    btFallback: bool(src.btFallback, RULE_FALLBACK.btFallback),
     trigger: str(src.trigger) === "auto" ? "auto" : "notify",
     // 限流参数不由界面放宽：每日上限封顶政策值 6（后端 `merge_rule()` 还会再夹一道），
     // 间隔拿不到就把政策固定值原样带回去。
-    maxPerDay: Math.min(num(src.maxPerDay, RULE_FALLBACK$1.maxPerDay, true, 1), POLICY_MAX_PER_DAY),
+    maxPerDay: Math.min(num(src.maxPerDay, RULE_FALLBACK.maxPerDay, true, 1), POLICY_MAX_PER_DAY),
     minIntervalMin: Math.max(
-      num(src.minIntervalMin, RULE_FALLBACK$1.minIntervalMin, true, 1),
+      num(src.minIntervalMin, RULE_FALLBACK.minIntervalMin, true, 1),
       POLICY_MIN_INTERVAL_MIN
     ),
-    savePath: str(src.savePath, RULE_FALLBACK$1.savePath),
-    category: str(src.category, RULE_FALLBACK$1.category),
-    downloader: str(src.downloader, RULE_FALLBACK$1.downloader)
+    savePath: str(src.savePath, RULE_FALLBACK.savePath),
+    category: str(src.category, RULE_FALLBACK.category),
+    downloader: str(src.downloader, RULE_FALLBACK.downloader)
   };
 }
 function toCheckInfo(raw) {
@@ -202,7 +240,7 @@ function sameValue(a, b) {
 }
 function sameRule(a, b) {
   if (!a || !b) return a === b;
-  return Object.keys(RULE_FALLBACK$1).every((key) => sameValue(a[key], b[key]));
+  return Object.keys(RULE_FALLBACK).every((key) => sameValue(a[key], b[key]));
 }
 function sameHost(a, b) {
   if (!a || !b) return a === b;
@@ -238,7 +276,8 @@ function useRuntimeInfo(api) {
     return {
       enabled: typeof d?.enabled === "boolean" ? d.enabled : null,
       subs: len(d?.subs),
-      awaitTasks: tasks ? tasks.filter((item) => item?.state === "await").length : null,
+      // 只数 `await`：`submitting`（提交中的在途态）不算待确认，见 `PENDING_TASK_STATE`
+      awaitTasks: tasks ? tasks.filter((item) => item?.state === PENDING_TASK_STATE).length : null,
       downloading: queue ? queue.filter((item) => item?.state !== "done").length : null,
       favorites: len(d?.favs),
       notices: len(d?.notices),
@@ -609,8 +648,8 @@ function useSettingsDraft(options) {
     } catch (err) {
       error.value = errorText(err);
       if (!rule.value) {
-        rule.value = { ...RULE_FALLBACK$1 };
-        ruleBase.value = { ...RULE_FALLBACK$1 };
+        rule.value = { ...RULE_FALLBACK };
+        ruleBase.value = { ...RULE_FALLBACK };
       }
     } finally {
       loading.value = false;
@@ -1887,43 +1926,6 @@ const _sfc_main$u = /* @__PURE__ */ _defineComponent$u({
 });
 
 const ScrapePanel = /* @__PURE__ */ _export_sfc(_sfc_main$u, [["__scopeId", "data-v-b27f91a6"]]);
-
-const RULE_FALLBACK = {
-  res: "1080p",
-  mustCnsub: false,
-  preferUncensored: true,
-  allow4k: true,
-  minSeeders: 3,
-  sites: [],
-  prefSites: ["馒头", "Rousi"],
-  btFallback: true,
-  // 保存路径与下载器留空 = 用 MoviePilot 的下载器默认值（后端 tasks.DEFAULT_RULE 同口径）
-  savePath: "",
-  category: "avi",
-  downloader: "",
-  trigger: "notify",
-  maxPerDay: 6,
-  minIntervalMin: 240
-};
-function toRule(raw) {
-  const src = raw && typeof raw === "object" ? raw : {};
-  const merged = { ...RULE_FALLBACK };
-  Object.keys(RULE_FALLBACK).forEach((key) => {
-    const value = src[key];
-    if (value === void 0 || value === null) return;
-    merged[key] = Array.isArray(value) ? value.slice() : value;
-  });
-  return merged;
-}
-function shortTime(value) {
-  const text = String(value === null || value === void 0 ? "" : value);
-  if (!text) return "—";
-  if (/^\d{4}-\d{2}-\d{2}T/.test(text)) return text.replace("T", " ").slice(0, 16);
-  return text;
-}
-function nowStr() {
-  return (/* @__PURE__ */ new Date()).toLocaleTimeString("zh-CN", { hour12: false });
-}
 
 const {defineComponent:_defineComponent$t} = await importShared('vue');
 
@@ -7119,7 +7121,7 @@ const _sfc_main$e = /* @__PURE__ */ _defineComponent$e({
     const tables = ref$e([]);
     const pending = computed$b(() => {
       const all = Array.isArray(props.store.tasks.value) ? props.store.tasks.value : [];
-      return all.filter((item) => item.state === "await");
+      return all.filter((item) => item.state === PENDING_TASK_STATE);
     });
     function rowKey(task, index) {
       return String(task.id ?? `${task.number || ""}#${index}`);
@@ -7292,7 +7294,7 @@ const _sfc_main$e = /* @__PURE__ */ _defineComponent$e({
   }
 });
 
-const TasksView = /* @__PURE__ */ _export_sfc(_sfc_main$e, [["__scopeId", "data-v-5da56e8f"]]);
+const TasksView = /* @__PURE__ */ _export_sfc(_sfc_main$e, [["__scopeId", "data-v-7e804903"]]);
 
 const {defineComponent:_defineComponent$d} = await importShared('vue');
 
@@ -13086,7 +13088,9 @@ function usePluginStore(api) {
   const updatedAt = ref$1("");
   const booted = ref$1(false);
   const busy = ref$1({});
-  const awaitTasks = computed$1(() => tasks.value.filter((item) => item.state === "await").length);
+  const awaitTasks = computed$1(
+    () => tasks.value.filter((item) => item.state === PENDING_TASK_STATE).length
+  );
   const downloading = computed$1(
     () => queue.value.filter((item) => item.state !== "done" && item.state !== "failed" && item.state !== "canceled").length
   );

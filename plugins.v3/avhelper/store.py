@@ -689,13 +689,19 @@ _MIGRATIONS: "List[Tuple[int, str, Callable[[sqlite3.Connection], None]]]" = [
     (3, "meta 时间戳统一成空格分隔", _migrate_v3),
 ]
 
-#: 任务状态清单（0.8.0 / P1-7）：**只加不改**，改一个旧值就等于让历史行"状态未知"。
+#: 任务状态清单（0.8.0 / P1-7 / 0.9.2 A1）：**只加不改**，改一个旧值就等于让历史行"状态未知"。
 #:
-#: - `await`      待确认（搜到候选、等用户点下载）
+#: - `await`      待确认（搜到候选、等用户点下载）—— **唯一**允许认领下载的状态
+#: - `submitting` 已认领、正在提交下载器（0.9.2 A1 加的原子占位态；同一任务只有一次提交能赢）。
+#:                它是一瞬间的中间态：成功 → `pushed`、其余出口 → 放回 `await`。
+#:                进程死在中间时会卡住，`init_plugin` 里 `task_recover_submitting()` 把它们放回去。
 #: - `pushed`     已提交下载器（种子在里面跑）
 #: - `canceled`   用户取消（只在 `await` 时允许 → `task_set_state(only_from=("await",))`）
 #: - `failed`     下载失败 / 所有源都没找到（`pending` 里带标记）
-TASK_STATES: Tuple[str, ...] = ("await", "pushed", "canceled", "failed")
+TASK_STATES: Tuple[str, ...] = ("await", "submitting", "pushed", "canceled", "failed")
+
+#: 「正在提交下载」的中间态（A1 的认领值）。见 `TASK_STATES`。
+TASK_SUBMITTING = "submitting"
 
 
 # 通知元信息里「发布源」永远是最后一段：「发布源：<站点> / <发布组> 发布」
@@ -1494,6 +1500,30 @@ class Store:
             count = self._exec_count("UPDATE task SET state=?, updated_at=? WHERE id=?",
                                      (str(state or ""), _now(), str(tid or "")))
         return bool(count)
+
+    def task_recover_submitting(self, before: str) -> List[Dict[str, Any]]:
+        """把卡在 `submitting` 且 `updated_at` 早于 `before` 的任务放回 `await`，返回恢复的行。
+
+        用途（0.9.2 A1 的收尾）：进程可能死在「认领成功、还没写终态」之间 —— 种子可能已经推进
+        下载器了，也可能没有。这类任务既不显示在待确认里，也永远不会再被认领，只能靠启动时
+        兜一把。`before` 传时间戳串（与库里同一个 `%Y-%m-%d %H:%M:%S` 口径），调用方负责留出
+        「正常提交肯定做完」的余量。
+
+        返回 `[{id, number}]`，调用方据此发通知（让用户去下载器核对到底有没有下单）。
+        """
+        stamp = str(before or "").strip()
+        if not stamp:
+            return []
+        rows = self._exec(
+            "SELECT id, number FROM task WHERE state=? AND updated_at < ?",
+            (TASK_SUBMITTING, stamp), fetch=True,
+        ) or []
+        recovered: List[Dict[str, Any]] = []
+        for row in rows:
+            tid = str(row[0] or "")
+            if tid and self.task_set_state(tid, "await", only_from=(TASK_SUBMITTING,)):
+                recovered.append({"id": tid, "number": str(row[1] or "")})
+        return recovered
 
     # ---------- 通知 ----------
 

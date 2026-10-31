@@ -37,6 +37,15 @@ export interface ActionResult<T = unknown> {
   limited?: boolean
 }
 
+/**
+ * 「待确认」任务的状态：只认 `await`。
+ *
+ * 后端 0.9.2 起多了一个 `submitting`（服务端认领任务后的**在途态**，保证一单只下一次）。
+ * 它不算待确认：提交失败会自己回到 `await`、成功就转 `pushed` 随卡片消失，那几秒里
+ * 不该让用户以为还有一张能点的卡。凡是按状态筛任务的地方都用这个常量，别再散写 `'await'`。
+ */
+export const PENDING_TASK_STATE = 'await'
+
 /** 搜索范围站点（`GET /sites` → `SiteSearcher.describe()`）。 */
 export interface SiteOption {
   id?: string | number | null

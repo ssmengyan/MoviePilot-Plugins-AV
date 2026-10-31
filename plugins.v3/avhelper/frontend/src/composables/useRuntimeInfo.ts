@@ -1,5 +1,6 @@
 import { computed, ref, type Ref } from 'vue'
 import { errorText, type PluginApi } from './usePluginApi'
+import { PENDING_TASK_STATE } from './storeTypes'
 import {
   formatBytes,
   formatCheckTime,
@@ -61,7 +62,10 @@ export function useRuntimeInfo(api: PluginApi) {
     return {
       enabled: typeof d?.enabled === 'boolean' ? d.enabled : null,
       subs: len(d?.subs),
-      awaitTasks: tasks ? tasks.filter((item: any) => item?.state === 'await').length : null,
+      // 只数 `await`：`submitting`（提交中的在途态）不算待确认，见 `PENDING_TASK_STATE`
+      awaitTasks: tasks
+        ? tasks.filter((item: any) => item?.state === PENDING_TASK_STATE).length
+        : null,
       downloading: queue ? queue.filter((item: any) => item?.state !== 'done').length : null,
       favorites: len(d?.favs),
       notices: len(d?.notices),

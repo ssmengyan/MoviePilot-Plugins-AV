@@ -116,6 +116,20 @@ _TORRENT_STATE_CONTAINERS = ("raw", "data", "info", "torrent_data", "source_data
 # 定时重刮每档一次取几条待办（Tier 1 到点重试 / Tier 2 冷数据滚动，契约 §3.2 的 `meta_due`）。
 SCRAPE_TIER_LIMIT = 5
 
+# 下载队列只留这么多行（0.9.2 A2）。超限时**只裁灰行**（`canceled` / `failed`），
+# 活动项一条不动 —— 旧写法是三处 `[:50]` 硬截断，第 51 条进来就切掉最旧的活动项，
+# 之后「完成入账」「下载完成即刮」都接不上（那条记录再也不会被收尾）。
+QUEUE_MAX = 50
+
+# 允许「认领下载」的源状态（0.9.2 A1）：只有还没提交过的待确认任务能认领到 `submitting`。
+# `pushed`（已下过）、`canceled`（冻结）、`submitting`（别人正在提交）一律拒绝。
+DOWNLOAD_CLAIM_STATES: Tuple[str, ...] = ("await",)
+#: 认领后的占位态（与 `store.TASK_SUBMITTING` 同一个值，这里再导出一次给 tasks 内部用）。
+DOWNLOAD_CLAIMING = "submitting"
+# 问下载器超过这么多秒就按「这一轮没问成」处理（A3 的明确超时）：宁可这轮不判，
+# 也不能让一个卡住的下载器把 `/tasks` 的整个请求拖到天荒地老。
+QUEUE_QUERY_TIMEOUT = 8.0
+
 
 def _torrent_states(torrent: Any) -> Set[str]:
     """把种子对象上**所有**可能的状态串收齐（小写、去空白）。
@@ -371,6 +385,46 @@ def _is_frozen(entry: Any) -> bool:
     return _queue_state(entry) in QUEUE_FROZEN_STATES
 
 
+def _is_gray(entry: Any) -> bool:
+    """灰行：已取消 / 已判失败 —— 留着只为让用户看见结果，队列超限时可以让位。"""
+    return _queue_state(entry) in ("canceled", "failed")
+
+
+def _trim_queue(items: List[Dict[str, Any]], limit: int = QUEUE_MAX) -> List[Dict[str, Any]]:
+    """把队列裁到 `limit` 条：**活动项全保留，只裁最旧的灰行**（0.9.2 A2）。
+
+    完成项早被 `_flush_done()` 摘进台账，所以队列里剩下的基本都是活动项；旧写法三处 `[:50]`
+    硬截断，第 51 条一进来就切掉最旧的活动项 —— 那条之后既不入账、也接不上「下载完成即刮」。
+    灰行（`canceled` / `failed`）才是该让位的那批。
+
+    活动项自己就超过 `limit` 时**一条也不裁**：宁可队列长一点，不能丢正在下的任务。
+    """
+    rows = list(items or [])
+    excess = len(rows) - int(limit)
+    if excess <= 0:
+        return rows
+    kept: List[Dict[str, Any]] = []
+    dropped = 0
+    for entry in reversed(rows):        # 从队尾（最旧）开始裁
+        if dropped < excess and _is_gray(entry):
+            dropped += 1
+            continue
+        kept.append(entry)
+    kept.reverse()
+    return kept
+
+
+def _claim_refused_message(state: str) -> str:
+    """认领下载失败时给用户的话：按当前状态说清「为什么不能再下一次」（0.9.2 A1）。"""
+    if state == "pushed":
+        return "该任务已经提交过下载；要换版本请到「下载」页点「换资源」回到任务 page"
+    if state == DOWNLOAD_CLAIMING:
+        return "该任务正在提交下载，请稍候"
+    if state == "canceled":
+        return "该任务已取消；要重下请先点「换资源」把它放回任务页"
+    return "该任务当前状态不能下载，请刷新任务列表后重试"
+
+
 class TaskEngine:
     """把订阅、搜索、打分、下载四处逻辑收在一处，插件类只做薄壳调用。"""
 
@@ -575,12 +629,44 @@ class TaskEngine:
                  force: bool = False) -> Dict[str, Any]:
         """按任务 id 提交下载（用户点“下载”或自动订阅命中后调用）。
 
+        **一单只下一次**（0.9.2 A1）：进来先用 `task_set_state(only_from=…)` 做原子认领 ——
+        并发点两次、或者对已经 `pushed` / `canceled` 的任务再发一次请求，都只有第一次能通过
+        （换个站点就是另一个 hash，下载器自己没法去重）。
+
+        认领之后从**任何**出口返回都要把状态落定：成功 `pushed`，其余（没有候选 / 解析失败 /
+        下载器拒绝 / 异常）一律放回 `await` 让用户能重试 —— 这条由 `try/finally` 保证，
+        不靠每个 return 自己记得写。
+
         :param image_base: 通知附图的绝对地址前缀（由调用方从请求里取），为空时退化为不带图
         :param force: 允许下载被规则淘汰的候选（界面上的「仍要下载」，手动挑选时用）
         """
         task = self.store.task_get(tid)
         if not task:
             return {"ok": False, "message": "任务不存在或已被清理", "notice": None}
+        # ★ 原子认领：判断落在同一条 SQL 里（`UPDATE … WHERE state IN (…)`），并发只有一次能赢。
+        if not self.store.task_set_state(tid, DOWNLOAD_CLAIMING,
+                                         only_from=DOWNLOAD_CLAIM_STATES):
+            return {"ok": False, "notice": None, "number": str(task.get("number") or ""),
+                    "message": _claim_refused_message(str(task.get("state") or ""))}
+        settled = False
+        try:
+            try:
+                result = self._submit_download(task, site_name, image_base, force)
+            except Exception as error:      # 提交链上的意外也不能把任务永久卡在 submitting
+                logger.error(f"AVHelper 提交下载异常：{error}")
+                result = {"ok": False, "message": f"提交下载失败：{str(error)[:160]}",
+                          "notice": None}
+            settled = bool(result.get("ok"))
+            return result
+        finally:
+            if not settled:
+                # 失败出口恢复成待确认（`only_from` 再校验一次：期间被别人改过就别动它）
+                self.store.task_set_state(tid, "await", only_from=(DOWNLOAD_CLAIMING,))
+
+    def _submit_download(self, task: Dict[str, Any], site_name: str, image_base: str,
+                         force: bool) -> Dict[str, Any]:
+        """认领成功之后的真正提交（状态收口在 `download()`，这里只管把种子推进下载器）。"""
+        tid = str(task.get("id") or "")
         cands = task.get("cands") or []
         cand = None
         if site_name:
@@ -634,8 +720,13 @@ class TaskEngine:
             return {"ok": False, "message": f"下载器未返回种子 Hash：{message or '未知原因'}",
                     "notice": None}
 
-        cand["picked"] = True
-        self.store.task_set_state(tid, "pushed")
+        # 以前这里还有一行 `cand["picked"] = True`：只改了内存、没落库；任务紧接着就转
+        # `pushed`，不会再被拿来挑种，所以那行没有任何作用（0.9.2 删除）。
+        # 写终态也走条件写：认领还在手上（期间不可能有人改），失败就当没改，让下面的 finally
+        # 把状态放回 await，而不是留下一个「种子进了下载器、任务却是 submitting」的假象。
+        if not self.store.task_set_state(tid, "pushed", only_from=(DOWNLOAD_CLAIMING,)):
+            return {"ok": False, "message": "任务状态在提交期间被改动，请刷新后核对下载器",
+                    "notice": None}
         self.store.known_add(task["number"], task.get("actor") or "")
         entry = {
             "id": "q" + uuid.uuid4().hex[:8],
@@ -652,8 +743,9 @@ class TaskEngine:
             "progress": 0,
             "added": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
-        # 队列与「进度刷新」共写：插入必须走原子读改写，别拿旧快照整份覆盖
-        self.store.kv_update(QUEUE_KEY, lambda cur: ([entry] + (cur or []))[:50])
+        # 队列与「进度刷新」共写：插入必须走原子读改写，别拿旧快照整份覆盖；
+        # 上限只裁灰行（`_trim_queue`），活动项一条都不丢（0.9.2 A2）。
+        self.store.kv_update(QUEUE_KEY, lambda cur: _trim_queue([entry] + (cur or [])))
         # 台账登记（设计文档 §3）：提交成功先记「下载中」，完成时间等队列那一路补。
         # 写台账只是旁路记录，失败绝不影响这次提交的结果（`_ledger_upsert` 自己兜异常）。
         self._ledger_upsert(
@@ -678,6 +770,7 @@ class TaskEngine:
                 "hash": torrent_hash, "downloader": downloader_name, "number": task["number"],
                 "site": str(cand.get("site") or ""), "spec": str(cand.get("spec") or ""),
                 "src": str(cand.get("src") or "")}
+
 
     def acquire(self, number: str, actor: str = "", rule: Optional[Dict[str, Any]] = None,
                 thumb: str = "", image_base: str = "",
@@ -781,8 +874,8 @@ class TaskEngine:
             "progress": 0,
             "added": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
-        # 同 download()：插入走原子读改写，别拿旧快照整份覆盖
-        self.store.kv_update(QUEUE_KEY, lambda cur: ([entry] + (cur or []))[:50])
+        # 同 download()：插入走原子读改写，别拿旧快照整份覆盖；超限只裁灰行（0.9.2 A2）
+        self.store.kv_update(QUEUE_KEY, lambda cur: _trim_queue([entry] + (cur or [])))
         # 同 download()：磁力这条路径也没有演员/大小，能拿到的先记进台账（设计文档 §3）
         self._ledger_upsert(
             str(number or ""),
@@ -1321,7 +1414,8 @@ class TaskEngine:
                 entry["state"] = "done"
             elif state:
                 entry["state"] = "down"
-        return queue[:50]
+        # 上限只裁灰行：活动项一条都不许因为队列长度被丢掉（0.9.2 A2）
+        return _trim_queue(queue)
 
     def queue(self, fresh: bool = False) -> List[Dict[str, Any]]:
         """返回下载队列（顺带补番号封面），并**按需**从下载器刷新真实进度。
@@ -1673,10 +1767,8 @@ class TaskEngine:
         """
         if not hashes:
             return {}, False
-        try:
-            torrents = self._list_torrents(list(hashes)) or []
-        except Exception as error:
-            logger.error(f"AVHelper 刷新下载进度失败：{error}")
+        torrents = self._list_torrents_bounded(list(hashes))
+        if torrents is None:
             return {}, False
         by_hash: Dict[str, Any] = {}
         for item in torrents:
@@ -1684,6 +1776,37 @@ class TaskEngine:
             if h:
                 by_hash[h] = item
         return by_hash, True
+
+    def _list_torrents_bounded(self, hashes: List[str]) -> Optional[List[Any]]:
+        """在**独立线程**里问下载器，最多等 `QUEUE_QUERY_TIMEOUT` 秒（A3 的明确超时）。
+
+        宿主的 `chain.list_torrents()` 没有超时参数，下载器一卡（qB 半死、主机网络打嗝）这个
+        调用就会一直挂着；而它跑在 `/tasks` 的请求线程里，挂住就是用户整页转圈。
+        超时按「这一轮没问成」返回 `None` —— 调用方据此保持 `missing` 不可信，一条记录都不会
+        被误删（宁可这轮不判，也不能凭一次失败把下载中的记录全摘掉）。
+
+        代价：真卡死的调用会留在守护线程里自己老死（宿主的 HTTP 客户端有自己的超时）。
+        每轮最多漏一个这样的线程，而下载器卡死本来就是异常态，值得。
+        """
+        box: Dict[str, Any] = {}
+
+        def work() -> None:
+            try:
+                box["rows"] = list(self._list_torrents(list(hashes)) or [])
+            except Exception as error:      # noqa: BLE001 - 线程里的异常只能自己记下来
+                box["error"] = error
+
+        worker = threading.Thread(target=work, name="avhelper-queue-query", daemon=True)
+        worker.start()
+        worker.join(QUEUE_QUERY_TIMEOUT)
+        if worker.is_alive():
+            logger.error(f"AVHelper 刷新下载进度超时（>{QUEUE_QUERY_TIMEOUT:.0f}s，"
+                         f"{len(hashes)} 个 hash）：本轮按「没问成」处理")
+            return None
+        if "error" in box:
+            logger.error(f"AVHelper 刷新下载进度失败：{box['error']}")
+            return None
+        return box.get("rows") or []
 
     def downloader_state(self) -> Dict[str, Any]:
         """下载器是不是在线（给 `/downloads` 顶层的 `downloader_offline` 用）。

@@ -73,14 +73,27 @@ class _Notifier:
 
 
 class _InlineThread:
-    """守护线程替身：`start()` 直接就地把目标跑完，测试里没有真线程。"""
+    """守护线程替身：`start()` 直接就地把目标跑完，测试里没有真线程。
+
+    必须把 `join()` / `is_alive()` 一起实现：生产代码（`_list_torrents_bounded()` 的
+    「问下载器最多等 N 秒」）就是靠这两个方法与真线程交互的，替身少了它们，异常会在
+    线程体里被吞掉，症状是「后台刷新那一轮什么都没写进去」。
+    """
 
     def __init__(self, target=None, name="", daemon=False):
         self._target = target
+        self._done = False
 
     def start(self):
         if self._target:
             self._target()
+        self._done = True
+
+    def join(self, timeout=None):
+        return None
+
+    def is_alive(self):
+        return not self._done
 
 
 def make_engine(tasks_mod, store_mod, tmp_path, library=(), chain=None):

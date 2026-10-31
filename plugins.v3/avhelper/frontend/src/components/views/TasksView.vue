@@ -57,7 +57,7 @@ import { pushBottomToast } from '../../composables/bottomToast'
 import { hostToast, type PluginApi } from '../../composables/usePluginApi'
 import { normKey } from '../../composables/downloadHistory'
 import type { PluginStore } from '../../composables/usePluginStore'
-import type { SearchTask } from '../../composables/storeTypes'
+import { PENDING_TASK_STATE, type SearchTask } from '../../composables/storeTypes'
 
 const props = withDefaults(
   defineProps<{
@@ -95,11 +95,13 @@ const tables = ref<Array<InstanceType<typeof CandTable> | null>>([])
 
 /**
  * 待确认的候选：老 `S.tasks.filter(t => t.state === 'await')`。
- * **只认 `'await'`**（`pushed` / 其它状态一律不画），顺序照 store 原样。
+ * **只认 `PENDING_TASK_STATE`**（`pushed` / `canceled` / `failed` 一律不画）；`submitting`
+ * （后端认领后的在途态）同样不画 —— 那几秒里再点也是被拒，失败会自己回到 `await`。
+ * 顺序照 store 原样。
  */
 const pending = computed<SearchTask[]>(() => {
   const all = Array.isArray(props.store.tasks.value) ? props.store.tasks.value : []
-  return all.filter(item => item.state === 'await')
+  return all.filter(item => item.state === PENDING_TASK_STATE)
 })
 
 /** 行 key：老实现按数组顺序画、没有 key 概念；这里优先用任务 id，保证刷新时行不被重建。 */

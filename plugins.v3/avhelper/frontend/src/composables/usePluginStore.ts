@@ -20,6 +20,7 @@
 import { computed, ref, shallowRef, type Ref } from 'vue'
 import { errorText } from './usePluginApi'
 import {
+  PENDING_TASK_STATE,
   SITES_FALLBACK,
   toRule,
   type ActionResult,
@@ -177,8 +178,10 @@ export function usePluginStore(api: PluginApi) {
   const busy = ref<Record<string, boolean>>({})
 
   // ---------- 派生值（角标与空态） ----------
-  /** 待确认任务数（老 `renderPills` 的 `pillTasks`）。 */
-  const awaitTasks = computed(() => tasks.value.filter(item => item.state === 'await').length)
+  /** 待确认任务数（老 `renderPills` 的 `pillTasks`）：只数 `await`，见 `PENDING_TASK_STATE`。 */
+  const awaitTasks = computed(
+    () => tasks.value.filter(item => item.state === PENDING_TASK_STATE).length,
+  )
   /**
    * 未完成的下载数（左栏「下载」角标）。
    *

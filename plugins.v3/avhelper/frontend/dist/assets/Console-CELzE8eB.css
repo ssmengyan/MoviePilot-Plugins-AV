@@ -1254,23 +1254,23 @@
 }
 
 /* 对齐 `app.css` 的 `.toolbar` / `.hint` / `.spacer` */
-.avh-tasks__toolbar[data-v-5da56e8f] {
+.avh-tasks__toolbar[data-v-7e804903] {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 14px;
 }
-.avh-tasks__hint[data-v-5da56e8f] {
+.avh-tasks__hint[data-v-7e804903] {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
-.avh-tasks__spacer[data-v-5da56e8f] {
+.avh-tasks__spacer[data-v-7e804903] {
   flex: 1;
 }
 
 /* 对齐 `.secttl`：12px、弱化色、字距 .4px（`margin-top` 与工具条的 margin-bottom 相叠） */
-.avh-tasks__secttl[data-v-5da56e8f] {
+.avh-tasks__secttl[data-v-7e804903] {
   margin: 20px 0 8px;
   font-size: 12px;
   letter-spacing: 0.4px;

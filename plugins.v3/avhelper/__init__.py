@@ -468,7 +468,7 @@ class AVHelper(_PluginBase):
     # 0.8.0 = 两条并行的 0.7.4 线汇合 + 后台按 amane 的运维纪律重构
     # （失败原因闭枚举 + 单一记账点 + 单一出站函数、声明式取数图、逐站快照、限流单一执行点、
     #  /img ETag、迁移与索引纪律）
-    plugin_version = "0.9.1"
+    plugin_version = "0.9.2"
     plugin_label = "发现"
     plugin_author = "ssmengyan"
     plugin_config_prefix = "avhelper_"
@@ -549,6 +549,9 @@ class AVHelper(_PluginBase):
         self._wire_limiter()
         self._notifier = Notifier(self, self._store)
         self._engine = TaskEngine(self, self._store, self._limiter, self._notifier)
+        # A1 收尾：进程可能死在「认领成功、还没写终态」之间 —— 那些任务会永远卡在 `submitting`，
+        # 既不显示在待确认里，也永远不会再被认领。超过 10 分钟的一律放回待确认并提醒核对下载器。
+        self._recover_stale_submitting()
 
         self._emby_lib = None
         self._emby_sig = None
@@ -588,6 +591,35 @@ class AVHelper(_PluginBase):
             logger.warning(f"AVHelper 演员表回填失败（下轮启动会再试）：{error}")
         self.start_javdb_bootstrap()
         self.start_warm_up()
+
+    #: 认领下载后多久还算「正在提交」（秒）：超过它说明进程死在中间（0.9.2 A1）。
+    SUBMITTING_STALE_SECONDS = 600
+
+    def _recover_stale_submitting(self) -> int:
+        """把卡在 `submitting` 超过 10 分钟的任务放回待确认，并提醒用户去下载器核对。
+
+        为什么需要这一步：`TaskEngine.download()` 认领任务后，种子**可能已经**推进了下载器，
+        也可能没有 —— 进程在这之间退出时插件记不下来。放回待确认是唯一不撒谎的处理：
+        用户能看见这条任务、能重试，同时通知里说清「先去下载器核对，别重复下单」。
+        """
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S",
+                              time.localtime(time.time() - self.SUBMITTING_STALE_SECONDS))
+        try:
+            rows = self.store.task_recover_submitting(before=stamp)
+        except Exception as error:                              # noqa: BLE001 - 启动路径不许抛
+            logger.warning(f"AVHelper 恢复提交中断的任务失败（下轮启动会再试）：{error}")
+            return 0
+        for row in rows:
+            number = str(row.get("number") or row.get("id") or "")
+            logger.warning(f"AVHelper 提交中断：{number} 卡在 submitting，已放回待确认")
+            try:
+                self._notifier.info(
+                    "下载提交中断",
+                    f"{number}：上次提交下载没写下结果。请到下载器里核对有没有这个种子 —— "
+                    f"没下成的话，到「任务」页再点一次下载即可。")
+            except Exception as error:                          # noqa: BLE001 - 通知失败不影响恢复
+                logger.warning(f"AVHelper 提交中断的通知发送失败：{error}")
+        return len(rows)
 
     def drop_fail_cache(self) -> int:
         """删掉所有 `fail:` 负缓存（启动/reload/存配置时调用），返回清掉的条数。"""
@@ -2565,14 +2597,16 @@ class AVHelper(_PluginBase):
             await asyncio.to_thread(
                 self.store.fav_add, name, str(payload.get("zh") or ""), str(payload.get("avatar") or "")
             )
-            return {"success": True, "favs": self.store.fav_list(), "message": f"已收藏 {name}"}
+            favs = await asyncio.to_thread(self.store.fav_list)
+            return {"success": True, "favs": favs, "message": f"已收藏 {name}"}
         if request.method == "DELETE":
             name = str(request.query_params.get("name") or "").strip()
             if not name:
                 return {"success": False, "message": "缺少演员名"}
             await asyncio.to_thread(self.store.fav_del, name)
-            return {"success": True, "favs": self.store.fav_list(), "message": f"已取消收藏 {name}"}
-        return {"success": True, "favs": self.store.fav_list()}
+            favs = await asyncio.to_thread(self.store.fav_list)
+            return {"success": True, "favs": favs, "message": f"已取消收藏 {name}"}
+        return {"success": True, "favs": await asyncio.to_thread(self.store.fav_list)}
 
     async def api_aliases(self, request: Request) -> Dict[str, Any]:
         """演员自定义备注：GET 全表、POST 写一位。
@@ -2585,12 +2619,14 @@ class AVHelper(_PluginBase):
             payload = await self._json_body(request)
             name = str(payload.get("name") or "").strip()
             if not name:
-                return {"success": False, "message": "缺少演员名", "aliases": self.store.alias_map()}
+                aliases = await asyncio.to_thread(self.store.alias_map)
+                return {"success": False, "message": "缺少演员名", "aliases": aliases}
             alias = str(payload.get("alias") or "").strip()
             await asyncio.to_thread(self.store.alias_set, name, alias)
             action = f"已保存备注 {alias}" if alias else f"已清除备注 {name}"
-            return {"success": True, "aliases": self.store.alias_map(), "message": action}
-        return {"success": True, "aliases": self.store.alias_map()}
+            aliases = await asyncio.to_thread(self.store.alias_map)
+            return {"success": True, "aliases": aliases, "message": action}
+        return {"success": True, "aliases": await asyncio.to_thread(self.store.alias_map)}
 
     async def api_subs(self, request: Request) -> Dict[str, Any]:
         """订阅：GET 列表、POST 新增（含规则）、DELETE 删除。"""
@@ -2604,15 +2640,17 @@ class AVHelper(_PluginBase):
             await asyncio.to_thread(self.store.sub_add, sub_type, name, rule)
             if sub_type == "actor":
                 await asyncio.to_thread(self.store.fav_add, name, "", "")
-            return {"success": True, "subs": self.store.sub_list(),
+            subs = await asyncio.to_thread(self.store.sub_list)
+            return {"success": True, "subs": subs,
                     "message": f"已订阅 {name}"}
         if request.method == "DELETE":
             sid = str(request.query_params.get("id") or "")
             if not sid.isdigit():
                 return {"success": False, "message": "订阅 id 无效"}
             await asyncio.to_thread(self.store.sub_del, int(sid))
-            return {"success": True, "subs": self.store.sub_list(), "message": "已取消订阅"}
-        return {"success": True, "subs": self.store.sub_list()}
+            subs = await asyncio.to_thread(self.store.sub_list)
+            return {"success": True, "subs": subs, "message": "已取消订阅"}
+        return {"success": True, "subs": await asyncio.to_thread(self.store.sub_list)}
 
     def fill_posters(self, *groups: Any) -> bool:
         """给任务 / 下载队列行补 `poster`，并**顺带把读侧统一投影的影片字段挂上去**。
@@ -2752,7 +2790,7 @@ class AVHelper(_PluginBase):
         # `**result` 放最前：它自己带一个 `message`（不含"已下载过"提示），
         # 写成 `..., **result` 会被它覆盖掉。
         return {**result, "success": True, "message": message,
-                "queue": self.engine.queue(fresh=True)}
+                "queue": await self._queue_snapshot(fresh=True)}
 
     async def api_task_download(self, request: Request) -> Dict[str, Any]:
         """提交下载：优先站点命中项或用户指定站点。
@@ -2775,7 +2813,8 @@ class AVHelper(_PluginBase):
             message += self._duplicate_note(result.get("number"))
         return {"success": bool(result.get("ok")), "message": message,
                 "notice": result.get("notice"), "hash": result.get("hash"),
-                "downloader": result.get("downloader"), "queue": self.engine.queue(fresh=True)}
+                "downloader": result.get("downloader"),
+                "queue": await self._queue_snapshot(fresh=True)}
 
     async def api_task_cancel(self, request: Request) -> Dict[str, Any]:
         """「不要了」三出口联动 / 老「取消任务」，由一个显式开关分开。
@@ -2799,20 +2838,42 @@ class AVHelper(_PluginBase):
                                                  cancel_sub=True)
             except Exception as error:
                 logger.error(f"AVHelper「不要了」执行失败（{number}）：{error}")
+                snap = await self._snapshot()
                 return {"success": False, "message": f"取消失败：{error}", "steps": {},
-                        "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+                        "tasks": snap["tasks"], "queue": snap["queue"]}
+            snap = await self._snapshot()
             return {"success": bool(result.get("ok")), "message": self._cancel_message(number, result),
                     "steps": result.get("steps") or {}, "error": str(result.get("error") or ""),
-                    "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+                    "tasks": snap["tasks"], "queue": snap["queue"]}
         tid = str(payload.get("id") or "").strip()
         if not tid:
+            snap = await self._snapshot()
             return {"success": False,
                     "message": ("缺少任务 id（三出口联动请带 number/key + cancel_sub=true）"
                                 if number else "缺少任务 id 或番号"),
-                    "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+                    "tasks": snap["tasks"], "queue": snap["queue"]}
         result = await asyncio.to_thread(self.engine.cancel_task, tid)
+        snap = await self._snapshot()
         return {"success": bool(result.get("ok")), "message": result.get("message") or "",
-                "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+                "tasks": snap["tasks"], "queue": snap["queue"]}
+
+    async def _snapshot(self, fresh: bool = False) -> Dict[str, Any]:
+        """任务列表 + 下载队列的**工作线程快照**（0.9.2 A3：绝不在主事件循环里同步问下载器）。
+
+        `queue(fresh=True)` 会同步访问下载器（本机 0.6 秒，下载器卡住时更久），`task_list()`
+        要打 SQLite（NAS 慢盘上最多等 30 秒锁）。这两件事只要有一件跑在 `async def` 里，
+        一个慢请求就会把 MoviePilot 的**所有**接口一起卡住。
+
+        返回 `{"tasks": [...], "queue": [...]}`，两个键名与各端点原先直接塞进响应的键一致。
+        """
+        def collect() -> Dict[str, Any]:
+            return {"tasks": self.engine.task_list(), "queue": self.engine.queue(fresh=fresh)}
+
+        return await asyncio.to_thread(collect)
+
+    async def _queue_snapshot(self, fresh: bool = False) -> List[Dict[str, Any]]:
+        """只要队列的版本（提交下载/磁力之后回给前端的那一行），同样走工作线程。"""
+        return await asyncio.to_thread(self.engine.queue, fresh)
 
     @staticmethod
     def _cancel_message(number: str, result: Dict[str, Any]) -> str:
@@ -2843,13 +2904,15 @@ class AVHelper(_PluginBase):
         payload = await self._json_body(request)
         tid = str(payload.get("id") or "").strip()
         if not tid:
+            snap = await self._snapshot()
             return {"success": False, "message": "缺少 id",
-                    "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+                    "tasks": snap["tasks"], "queue": snap["queue"]}
         result = await asyncio.to_thread(self.engine.cancel_entry, tid)
+        snap = await self._snapshot()
         return {"success": bool(result.get("ok")),
                 "message": str(result.get("message") or ""),
                 "details": str(result.get("detail") or ""),
-                "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+                "tasks": snap["tasks"], "queue": snap["queue"]}
 
     async def api_queue_return(self, request: Request) -> Dict[str, Any]:
         """「换资源」：摘掉这条下载 + 把对应任务置回 `await`（候选与规则原样保留）。
@@ -2860,12 +2923,14 @@ class AVHelper(_PluginBase):
         payload = await self._json_body(request)
         tid = str(payload.get("id") or "").strip()
         if not tid:
+            snap = await self._snapshot()
             return {"success": False, "message": "缺少 id",
-                    "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+                    "tasks": snap["tasks"], "queue": snap["queue"]}
         result = await asyncio.to_thread(self.engine.return_entry, tid)
+        snap = await self._snapshot()
         return {"success": bool(result.get("ok")),
                 "message": str(result.get("message") or ""),
-                "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+                "tasks": snap["tasks"], "queue": snap["queue"]}
 
     async def api_queue_discard(self, request: Request) -> Dict[str, Any]:
         """「不要了」：彻底取消 —— 摘行 + 台账墓碑 + 任务 `canceled` +（默认）取消该番号的订阅。
@@ -2876,16 +2941,18 @@ class AVHelper(_PluginBase):
         payload = await self._json_body(request)
         tid = str(payload.get("id") or "").strip()
         if not tid:
+            snap = await self._snapshot()
             return {"success": False, "message": "缺少 id",
-                    "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+                    "tasks": snap["tasks"], "queue": snap["queue"]}
         unsubscribe = pick_bool(payload.get("unsubscribe")
                                 if payload.get("unsubscribe") is not None
                                 else request.query_params.get("unsubscribe"), True)
         result = await asyncio.to_thread(self.engine.discard_entry, tid, unsubscribe)
+        snap = await self._snapshot()
         return {"success": bool(result.get("ok")),
                 "message": str(result.get("message") or ""),
                 "steps": result.get("steps") or {}, "error": str(result.get("error") or ""),
-                "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+                "tasks": snap["tasks"], "queue": snap["queue"]}
 
     async def api_queue_drop(self, request: Request) -> Dict[str, Any]:
         """把一条**已取消**的灰行从下载列表去掉（不动下载器/台账/订阅）。
@@ -2897,12 +2964,14 @@ class AVHelper(_PluginBase):
             payload = await self._json_body(request)
             tid = str(payload.get("id") or "").strip()
         if not tid:
+            snap = await self._snapshot()
             return {"success": False, "message": "缺少 id",
-                    "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+                    "tasks": snap["tasks"], "queue": snap["queue"]}
         result = await asyncio.to_thread(self.engine.drop_entry, tid)
+        snap = await self._snapshot()
         return {"success": bool(result.get("ok")),
                 "message": str(result.get("message") or ""),
-                "tasks": self.engine.task_list(), "queue": self.engine.queue()}
+                "tasks": snap["tasks"], "queue": snap["queue"]}
 
     async def api_magnet_download(self, request: Request) -> Dict[str, Any]:
         """把详情页某条磁力直接推给下载器（界面上的「下载」按钮）。
@@ -2925,25 +2994,27 @@ class AVHelper(_PluginBase):
             message += self._duplicate_note(payload.get("number"))
         return {"success": bool(result.get("ok")), "message": message,
                 "hash": result.get("hash"), "downloader": result.get("downloader"),
-                "queue": self.engine.queue(fresh=True)}
+                "queue": await self._queue_snapshot(fresh=True)}
 
     async def api_check(self, request: Request) -> Dict[str, Any]:
         """手动检查订阅（受限流；也可由定时任务触发）。"""
         payload = await self._json_body(request)
         name = str(payload.get("name") or "").strip() or None
         result = await asyncio.to_thread(self.engine.check, name)
+        # 检查可能刚提交了下载：这一次同步问下载器（用户点完正等着看结果），
+        # 但仍要在工作线程里问（A3）。
+        snap = await self._snapshot(fresh=True)
+        subs = await asyncio.to_thread(self.store.sub_list)
         return {"success": True, "limited": bool(result.get("limited")),
                 "notices": result.get("notices") or [], "message": result.get("message") or "",
-                "subs": self.store.sub_list(), "tasks": self.engine.task_list(),
-                # 检查可能刚提交了下载：这一次同步问下载器（用户点完正等着看结果）
-                "queue": self.engine.queue(fresh=True)}
+                "subs": subs, "tasks": snap["tasks"], "queue": snap["queue"]}
 
     async def api_notices(self, request: Request) -> Dict[str, Any]:
         """通知列表 / 清空。"""
         if request.method == "DELETE":
             await asyncio.to_thread(self.store.notice_clear)
             return {"success": True, "notices": [], "message": "已清空通知"}
-        return {"success": True, "notices": self.store.notice_list()}
+        return {"success": True, "notices": await asyncio.to_thread(self.store.notice_list)}
 
     def api_notify(self) -> Dict[str, Any]:
         """`GET /notify`：设置台「通知」栏要的三张表（0.9.1）。
@@ -3703,7 +3774,9 @@ class AVHelper(_PluginBase):
                     "全库刮削需要确认：请求体里带 confirm=true 才会执行"}
         if all_flag and not keys:
             try:
-                keys = [str(row.get("key") or "") for row in (self.store.meta_list() or [])
+                # 全库清单也走工作线程（A3）：`meta_list()` 在 NAS 慢盘上同样会等锁
+                rows = await asyncio.to_thread(self.store.meta_list)
+                keys = [str(row.get("key") or "") for row in (rows or [])
                         if isinstance(row, dict) and str(row.get("key") or "")]
             except Exception as error:
                 logger.error(f"AVHelper 取全库待刮清单失败：{error}")
