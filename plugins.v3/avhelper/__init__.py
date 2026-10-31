@@ -2868,9 +2868,9 @@ class AVHelper(_PluginBase):
             self.engine.download, tid, str(payload.get("site") or ""),
             str(request.base_url).rstrip("/"), bool(payload.get("force")),
         )
-        # 重复下载提示（契约 §3）：番号只能从引擎返回值里找 —— 请求体里只有任务 id，而
-        # `TaskEngine.download()` 目前只回 ok/message/notice/hash/downloader（没有番号），
-        # 所以这条路径**现在不会出提示**；tasks.py 的返回值补一个 "number" 即自动生效。
+        # 重复下载提示（契约 §3）：请求体里只有任务 id，番号只能从引擎返回值里找 ——
+        # `TaskEngine.download()` 成功时**带 "number"**（tasks.py 的返回里就有），所以这条
+        # 路径与 `api_task_search` 一样会给出「该番号下载过」的提示。
         message = str(result.get("message") or "")
         if result.get("ok"):
             message += self._duplicate_note(result.get("number"))
