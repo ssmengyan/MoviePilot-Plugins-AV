@@ -70,6 +70,21 @@ RATE_LIMIT_MAX = 60.0
 #: `rateLimits` 最多认多少条（防呆：别让人把整个 host 表塞进来）
 RATE_LIMIT_MAX_ENTRIES = 50
 ONCE_JOB_ID = "subcheck_now"
+#: 「下载完成即刮」待办队列的 kv 键（0.9.5 C1）：队列原本只在内存里，reload 就丢。
+DL_SCRAPE_PENDING_KEY = "dl_scrape_pending"
+#: 待办队列最多留多少条（防坏数据把 kv 撑大；正常用量个位数）。
+DL_SCRAPE_MAX = 200
+
+
+def _unique_keys(keys: Any) -> List[str]:
+    """按出现顺序去重、丢掉空值，最多留 `DL_SCRAPE_MAX` 条（0.9.5 C1 的待办队列）。"""
+    out: List[str] = []
+    for key in keys or []:
+        text = str(key or "").strip()
+        if text and text not in out:
+            out.append(text)
+    return out[-DL_SCRAPE_MAX:]
+
 # 启动预热（§8.2）：MP/插件启动时先把「发现榜单」首屏要用的数据与封面落进缓存，
 # 用户第一次打开插件时直接命中缓存，不必现抓 javdb、也不必现拉几十张封面。
 WARM_RANK_PERIODS = ("week", "day", "month")   # 预热哪几档（默认分类，见 WARM_KIND）
@@ -493,7 +508,7 @@ class AVHelper(_PluginBase):
     # 0.8.0 = 两条并行的 0.7.4 线汇合 + 后台按 amane 的运维纪律重构
     # （失败原因闭枚举 + 单一记账点 + 单一出站函数、声明式取数图、逐站快照、限流单一执行点、
     #  /img ETag、迁移与索引纪律）
-    plugin_version = "0.9.4"
+    plugin_version = "0.9.5"
     plugin_label = "发现"
     plugin_author = "ssmengyan"
     plugin_config_prefix = "avhelper_"
@@ -577,6 +592,8 @@ class AVHelper(_PluginBase):
         # A1 收尾：进程可能死在「认领成功、还没写终态」之间 —— 那些任务会永远卡在 `submitting`，
         # 既不显示在待确认里，也永远不会再被认领。超过 10 分钟的一律放回待确认并提醒核对下载器。
         self._recover_stale_submitting()
+        # C1：「下载完成即刮」的待办跨重载续上（无待办时什么都不做）
+        self._dl_scrape_resume()
 
         self._emby_lib = None
         self._emby_sig = None
@@ -3309,9 +3326,42 @@ class AVHelper(_PluginBase):
         self._dl_scrape_ready()
         with self._dl_scrape_lock:
             self._dl_scrape_queue.extend(keys)
+        # C1（0.9.5）：队列原来只在内存里，reload/重启就丢。这里同步落一份到 kv，
+        # 启动时由 `_dl_scrape_resume()` 续上（去重、上限 200，避免坏数据把它撑大）。
+        try:
+            self.store.kv_update(DL_SCRAPE_PENDING_KEY,
+                                 lambda cur: _unique_keys(list(cur or []) + keys))
+        except Exception as error:              # noqa: BLE001 - 落盘失败不该影响本次入队
+            logger.warning(f"AVHelper 下载完成即刮：待办落库失败（本次仍会执行）：{error}")
         self._dl_scrape_wake.set()
         self._dl_scrape_start()
         return len(keys)
+
+    def _dl_scrape_resume(self) -> int:
+        """启动时把上次没刮完的番号放回队列（0.9.5 C1）。
+
+        为什么要这一步：`_dl_scrape_queue` 是内存 deque，reload / 重启就没了；而那些条目
+        还没进 `meta` 表（下载刚完成、Emby 还没索引），定时刮削要等它进库才会轮到 ——
+        中间这段空窗期就是「下载完了一直没刮」。所以队列本身要能跨重载。
+        """
+        try:
+            pending = [str(item) for item in (self.store.kv_get(DL_SCRAPE_PENDING_KEY, []) or [])
+                       if str(item or "").strip()]
+        except Exception as error:              # noqa: BLE001 - 启动路径不许抛
+            logger.warning(f"AVHelper 下载完成即刮：读取待办失败（跳过恢复）：{error}")
+            return 0
+        if not pending:
+            return 0
+        self._dl_scrape_ready()
+        with self._dl_scrape_lock:
+            known = set(self._dl_scrape_queue)
+            for key in pending:
+                if key not in known:
+                    self._dl_scrape_queue.append(key)
+        self._dl_scrape_wake.set()
+        self._dl_scrape_start()
+        logger.info(f"AVHelper 下载完成即刮：恢复 {len(pending)} 条上次没刮完的待办")
+        return len(pending)
 
     def _dl_scrape_ready(self) -> None:
         """惰性建「下载完成即刮」的运行态（队列 / 锁 / 唤醒 / 停止）。"""
@@ -3337,11 +3387,24 @@ class AVHelper(_PluginBase):
         thread.start()
 
     def _dl_scrape_take(self) -> str:
-        """从队头取一个待刮键；队列空回空串。"""
+        """从队头取一个待刮键；队列空回空串。
+
+        注意：**取出不等于完成** —— 持久化待办要等这一条真的刮过（`_dl_scrape_log()`）才删。
+        进程死在刮削中间时它还留在 kv 里，下次启动由 `_dl_scrape_resume()` 续上（刮削幂等）。
+        """
         with self._dl_scrape_lock:
-            if self._dl_scrape_queue:
-                return self._dl_scrape_queue.popleft()
-        return ""
+            if not self._dl_scrape_queue:
+                return ""
+            return self._dl_scrape_queue.popleft()
+
+    def _dl_scrape_forget(self, key: str) -> None:
+        """把一条待办从持久化队列里删掉（刮过之后调用；失败只 warning）。"""
+        try:
+            self.store.kv_update(DL_SCRAPE_PENDING_KEY,
+                                 lambda cur: [item for item in (cur or [])
+                                              if str(item or "") != key])
+        except Exception as error:              # noqa: BLE001 - 清理失败下次重刮一遍而已
+            logger.warning(f"AVHelper 下载完成即刮：清理待办 {key} 失败：{error}")
 
     def _dl_scrape_worker(self) -> None:
         """后台刮削 worker：逐条 `scraper.scrape_batch([key], **self.scrape_deps())`。
@@ -3377,12 +3440,17 @@ class AVHelper(_PluginBase):
         return True, ""
 
     def _dl_scrape_log(self, key: str, ok: bool, error: str) -> None:
-        """记一行 `scrape_log`（`source_name="download_scrape"`）：成功失败都记，写失败只 warning。"""
+        """记一行 `scrape_log`（`source_name="download_scrape"`）：成功失败都记，写失败只 warning。
+
+        记完就把这条从持久化待办里删掉（0.9.5 C1）：失败的重试交给定时刮削的退避，
+        队列只负责「刚下完的这一轮」，不在这里热循环。
+        """
         try:
             self.store.scrape_log_add("download_scrape", "ok" if ok else "error", key, 0,
                                       str(error or "")[:200])
         except Exception as exc:                # noqa: BLE001 - 记账失败不许打断 worker
             logger.warning(f"AVHelper 下载完成即刮：写 scrape_log 失败（{key}）：{exc}")
+        self._dl_scrape_forget(str(key))
 
     def _dl_scrape_sleep(self) -> None:
         """两条之间歇一下：走 `scraper._SLEEP`（单测里被换成空实现）。

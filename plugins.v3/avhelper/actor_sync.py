@@ -582,6 +582,8 @@ def _scrape_row(store: Any, emby_client: Any, row: Dict[str, Any], *, force: boo
         _log(store, "error", person, "upload_failed", item["error"])
         _mark(store, actor_id, False, str(detail or "upload_failed"))
         return item
+    # C2（0.9.5）：头像换了，`/img?emby_person=` 的本地缓存也得跟着失效
+    scraper._forget_emby_image(person_id, "Primary")
     _log(store, "ok", person)
     _mark(store, actor_id, True)
     javdb_id = str((row or {}).get("javdb_actor_id") or "")
@@ -1118,6 +1120,9 @@ def _apply_master(store: Any, row: Dict[str, Any], blob: bytes, width: int, heig
             if not ok:
                 out["reason"] = f"Emby 上传失败 {detail}"
                 _log(store, "error", person, "manual_upload_failed", detail)
+            else:
+                # C2：手工上传也要让 `/img?emby_person=` 的缓存失效
+                scraper._forget_emby_image(person_id, "Primary")
     return out
 
 

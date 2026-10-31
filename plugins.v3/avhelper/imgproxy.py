@@ -334,6 +334,25 @@ def cached_emby(item_id: str, img_type: str = "Primary") -> bool:
     return bool(item_id) and os.path.exists(emby_cache_path(item_id, img_type))
 
 
+def forget_emby(item_id: str, img_type: str = "Primary") -> bool:
+    """删掉一张 Emby 原图的磁盘缓存（0.9.5 C2）；幂等，删不到也算成功。
+
+    Emby 原图的缓存**没有 TTL**，而 `/img?emby=` 命中就直接回旧字节 —— 换了封面 / 头像之后
+    界面还显示旧图，直到每晚清缓存才变（0.9.5 之前就这样）。所以「写图成功」的地方必须同时
+    调它一次。类型走同一套白名单：非法值直接不处理（也不会误删别的文件）。
+    """
+    kind = normalize_image_type(img_type)
+    if not kind or not str(item_id or "").strip():
+        return False
+    try:
+        os.remove(emby_cache_path(item_id, kind))
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
 def _store(path: str, data: bytes) -> None:
     """写缓存；失败不影响本次返回（缓存只是加速，不是正确性的一部分）。
 

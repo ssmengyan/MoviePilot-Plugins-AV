@@ -2969,7 +2969,10 @@ def _upload_images(emby_client: Any, store: Any, emby_id: str, target: Dict[str,
         report["crop"] = meta
         ok, detail = _call(emby_client, "upload_image", emby_id, "Primary", jpeg)
         report["cover"] = "ok" if ok else f"error: {detail}"
-        if not ok:
+        if ok:
+            # C2（0.9.5）：换了封面就把 `/img?emby=` 的本地缓存删掉，否则界面还是旧图
+            _forget_emby_image(emby_id, "Primary")
+        else:
             report["errors"].append(f"封面上传失败：{detail}")
     else:
         # 两级都拿不到：**不报错**，只留说明（javdb 图集空 + 没有 cover_url / 取不到）
@@ -2995,10 +2998,14 @@ def _upload_images(emby_client: Any, store: Any, emby_id: str, target: Dict[str,
             "url": asset.get("url"), "type": f"Backdrop/{index}",
             "status": "ok" if ok else f"error: {detail}",
         })
+        if ok:
+            _forget_emby_image(emby_id, f"Backdrop/{index}")
         if index == 0:
             ok2, detail2 = _call(emby_client, "upload_image", emby_id, "Thumb", raw_sample)
             if not ok2:
                 report["errors"].append(f"Thumb 上传失败：{detail2}")
+            else:
+                _forget_emby_image(emby_id, "Thumb")
     return report
 
 
@@ -3039,6 +3046,19 @@ def _accepts(func: Any, name: str) -> bool:
     if name in params:
         return True
     return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+
+def _forget_emby_image(emby_id: Any, img_type: str = "Primary") -> None:
+    """写图成功之后删掉 `/img?emby=` 的本地缓存（0.9.5 C2）。
+
+    不删的话：换完封面 / 剧照 / 头像，界面还是旧图，直到每晚清缓存 —— `/img?emby=` 命中
+    磁盘就直接回旧字节，而那条缓存**没有 TTL**。缓存只是加速，删失败不影响写入结果。
+    """
+    try:
+        if imgproxy is not None:
+            imgproxy.forget_emby(str(emby_id or ""), img_type)
+    except Exception as error:                              # noqa: BLE001 - 缓存失效不许影响主流程
+        logger.warning(f"AVHelper 清理 Emby 图片缓存失败（{emby_id}/{img_type}）：{error}")
 
 
 def _call(holder: Any, name: str, *args: Any) -> Tuple[bool, str]:
