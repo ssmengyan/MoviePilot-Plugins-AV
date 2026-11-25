@@ -62,6 +62,7 @@ import {
 } from '../../composables/detailCache'
 import { rankCache } from '../../composables/discoverCache'
 import type { PluginStore } from '../../composables/usePluginStore'
+import type { MovieSiteSearch } from '../../composables/movieSiteSearch'
 import type { FavActor } from '../../composables/storeTypes'
 
 const props = withDefaults(
@@ -85,6 +86,7 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
+  (event: 'siteSearch', movie: MovieSiteSearch): void
   /** 请求关闭抽屉（关闭按钮 / 蒙层 / Esc）。 */
   (event: 'close'): void
   /** 点了演员行：老 `closeAll(); openActor(name)` —— 由壳切到「我的演员」栏并打开 ta。 */
@@ -442,7 +444,17 @@ async function downloadMagnet(magnet: any): Promise<void> {
   emit('refreshSide')
 }
 
-// ---------- 详情里的三个动作（老 `bindDetail`） ----------
+// ---------- 详情动作（老 `bindDetail`） ----------
+
+function searchSites(): void {
+  const number = String(num.value || '').trim()
+  if (!number) return
+  emit('siteSearch', {
+    number,
+    actor: String(movie.value.actor || ''),
+    thumb: String(movie.value.thumb || ''),
+  })
+}
 
 /**
  * 「⬇ 下载该影片」：一次请求把「搜种 → 判定 → 兜底 → 下载/待确认」走完。
@@ -945,6 +957,9 @@ defineExpose({ syncCursor, focusFresh, reloadDetail, retryDetail })
     <div class="avh-detail__head">
       <b class="avh-detail__title">{{ title }}</b>
       <div class="avh-detail__spacer" />
+      <v-btn v-if="activeNumber" variant="outlined" size="small" prepend-icon="mdi-magnify" @click="searchSites">
+        站点搜索
+      </v-btn>
       <v-btn v-if="activeNumber" variant="outlined" size="small" @click="reloadDetail">↻ 重新抓取</v-btn>
       <v-btn variant="outlined" size="small" @click="emit('close')">关闭</v-btn>
     </div>

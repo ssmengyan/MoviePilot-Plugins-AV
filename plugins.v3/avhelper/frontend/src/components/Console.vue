@@ -54,6 +54,7 @@ import BottomToast from './common/BottomToast.vue'
 import { usePluginStore } from '../composables/usePluginStore'
 import { countUnread } from '../composables/noticesSeen'
 import { takePendingSettingsSection } from '../composables/settingsJump'
+import type { MovieSiteSearch } from '../composables/movieSiteSearch'
 
 /**
  * 壳只有两种**入口模式**，决定设置窗口的初始开合：
@@ -179,6 +180,29 @@ const searchDialog = ref<InstanceType<typeof SearchDialog> | null>(null)
 const query = ref('')
 const actorFocus = ref('')
 const actorNonce = ref(0)
+const siteSearchRequest = ref<MovieSiteSearch | null>(null)
+/** Mount lazily, then retain search results while the user visits other sections. */
+const siteSearchVisited = ref(false)
+const siteSearchDetailNumber = ref('')
+const consoleEl = ref<HTMLElement | null>(null)
+watch(section, value => {
+  if (value === 'sitesearch') siteSearchVisited.value = true
+}, { flush: 'sync' })
+
+function openSiteSearchFromDetail(movie: MovieSiteSearch): void {
+  const number = String(movie.number || '').trim()
+  if (!number) return
+  siteSearchDetailNumber.value = drawerNumber.value
+  drawerOpen.value = false
+  searchOpen.value = false
+  notifyOpen.value = false
+  siteSearchRequest.value = { ...movie, number }
+  section.value = 'sitesearch'
+}
+
+function consumeSiteSearch(request: MovieSiteSearch): void {
+  if (siteSearchRequest.value === request) siteSearchRequest.value = null
+}
 
 /**
  * 通知抽屉（老 `ui/index.html` 的 `#bellBtn` / `#ndrawer` + `ui/views/notify.js`）：
@@ -191,6 +215,13 @@ const actorNonce = ref(0)
  * - 打开抽屉即 `markNoticesSeen()`（抽屉内部做），角标随位点响应式归零。
  */
 const notifyOpen = ref(false)
+const showDetailTab = computed(() => {
+  const canReopen = section.value === 'sitesearch'
+    && !!siteSearchDetailNumber.value
+    && siteSearchDetailNumber.value === drawerNumber.value
+  return !!framePluginId.value && (drawerOpen.value || canReopen)
+    && !settingsOpen.value && !searchOpen.value && !notifyOpen.value
+})
 
 /**
  * 未读条数（`time` 晚于已读位点的条数）。
@@ -1017,7 +1048,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="avh-console">
+  <div ref="consoleEl" class="avh-console">
     <v-toolbar density="comfortable" color="surface" class="avh-topbar">
       <!--
         顶栏 = **三段式**：左块（图标 + 标题 + 版本 + 「已停用」chip）/ 中间搜索框 / 右块（🔔 + 关闭）。
@@ -1220,9 +1251,21 @@ onBeforeUnmount(() => {
       <section class="avh-content">
         <!-- 已原生化的栏目走 Vue 组件（见 NATIVE_VIEWS）。旧内嵌应用（`ui/` iframe）2026-11-01
              删除：这张表里没有的栏目不再有兜底页面，直接给一句可照做的提示。 -->
+        <SiteSearchView
+          v-if="siteSearchVisited && framePluginId"
+          v-show="section === 'sitesearch'"
+          :store="store"
+          :plugin-id="framePluginId"
+          :api="currentApi()"
+          :toast="injectedToast"
+          :search-request="siteSearchRequest"
+          @search-consumed="consumeSiteSearch"
+          @switch="openSettings"
+          @refresh-side="refreshRuntime(true)"
+        />
         <component
           :is="nativeView"
-          v-if="nativeView && framePluginId"
+          v-if="nativeView && framePluginId && section !== 'sitesearch'"
           :key="section === 'actors' ? `actors:${actorNonce}` : section"
           :store="store"
           :plugin-id="framePluginId"
@@ -1234,7 +1277,7 @@ onBeforeUnmount(() => {
           @open-movie="onOpenMovie"
           @open-actor="openActorFromOverlay"
         />
-        <v-alert v-else type="warning" variant="tonal">
+        <v-alert v-if="!nativeView || !framePluginId" type="warning" variant="tonal">
           {{ framePluginId
             ? '这一栏还没有原生视图（旧的内嵌应用已下线），请升级插件或把栏目切回去。'
             : '宿主没有传入 pluginId，界面无法定位自己所属的插件实例。' }}
@@ -1463,8 +1506,25 @@ onBeforeUnmount(() => {
       :toast="injectedToast"
       @close="drawerOpen = false"
       @open-actor="openActorFromOverlay"
+      @site-search="openSiteSearchFromDetail"
       @refresh-side="refreshRuntime(true)"
     />
+
+    <!-- The tab stays attached to the drawer throughout its slide transition. -->
+    <Teleport v-if="consoleEl" :to="consoleEl.querySelector('.avh-detail') || 'body'">
+      <button
+        v-if="showDetailTab"
+        type="button"
+        class="avh-detail-tab"
+        :title="`${drawerOpen ? '收起' : '展开'}影片详情 · ${drawerNumber}`"
+        :aria-label="`${drawerOpen ? '收起' : '展开'}影片详情 · ${drawerNumber}`"
+        :aria-expanded="drawerOpen"
+        @click="drawerOpen = !drawerOpen"
+      >
+        <v-icon :icon="drawerOpen ? 'mdi-chevron-right' : 'mdi-chevron-left'" size="18" />
+        <span>影片详情</span>
+      </button>
+    </Teleport>
 
     <SearchDialog
       v-if="framePluginId"
@@ -1502,6 +1562,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .avh-console {
+  position: relative;
   display: flex;
   flex-direction: column;
   /*
@@ -1782,6 +1843,45 @@ onBeforeUnmount(() => {
 .avh-settings__hint {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.5);
+}
+
+.avh-detail-tab {
+  position: absolute;
+  right: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 6px;
+  color: rgb(var(--v-theme-primary));
+  background: rgb(var(--v-theme-surface));
+  border: 1px solid rgba(var(--v-theme-primary), 0.35);
+  border-right: 0;
+  border-radius: 10px 0 0 10px;
+  box-shadow: -2px 2px 8px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+}
+
+.avh-console :deep(.avh-detail) {
+  max-width: calc(100vw - 40px);
+}
+
+.avh-console :deep(.avh-detail:not(.v-navigation-drawer--active)) {
+  transform: translateX(100%) !important;
+}
+
+.avh-detail-tab span {
+  writing-mode: vertical-rl;
+  letter-spacing: 3px;
+  font-size: 13px;
+}
+
+.avh-detail-tab:hover,
+.avh-detail-tab:focus-visible {
+  background: rgb(var(--v-theme-surface-variant));
 }
 
 @media (max-width: 1100px) {
