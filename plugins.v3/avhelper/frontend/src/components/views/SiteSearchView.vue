@@ -30,11 +30,13 @@ import { requestSettingsSection } from '../../composables/settingsJump'
 import { nowStr } from '../../composables/storeTypes'
 import type { PluginStore } from '../../composables/usePluginStore'
 import type { SearchTask, SiteOption } from '../../composables/storeTypes'
+import type { MovieSiteSearch } from '../../composables/movieSiteSearch'
 
 const props = withDefaults(
   defineProps<{
     /** 数据台单一数据源（`Console.vue` 建好后传进来）。 */
     store: PluginStore
+    searchRequest?: MovieSiteSearch | null
     /** 本插件实例 id：给 `Thumb` 拼图片代理地址用（后端给的相对地址也靠它）。 */
     pluginId?: string
     /**
@@ -49,6 +51,7 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
+  (event: 'searchConsumed', request: MovieSiteSearch): void
   /** 用户点「改范围」：请壳把弹窗切到设置台的「搜索站点」栏（宿主合同里的 switch）。 */
   (event: 'switch'): void
   /** 搜索完成 / 范围栏被点：请壳刷新右栏「运行概况」。 */
@@ -69,6 +72,12 @@ const task: Ref<SearchTask | null> = ref(null)
 const errorText = ref('')
 /** 「重试」按钮的转圈态。 */
 const retrying = ref(false)
+const movieContext = ref<MovieSiteSearch | null>(null)
+const resultKey = ref('')
+
+function searchKey(number: string): string {
+  return JSON.stringify([number.trim().toUpperCase(), picked.value.slice().sort(), props.store.rule.value])
+}
 
 /** 站点名清单（老 `sitePickList()` 只回传 `S.sites` 的名字，不写回状态）。 */
 const siteNames = computed<string[]>(() =>
@@ -106,7 +115,7 @@ const cands = computed(() => (Array.isArray(task.value?.cands) ? task.value?.can
 const hasResult = computed(() => !!task.value && cands.value.length > 0)
 
 /** 按钮文案（老实现在飞行中把「搜索站点」改成「搜索中…」）。 */
-const searchLabel = computed(() => (searching.value ? '搜索中…' : '搜索站点'))
+const searchLabel = computed(() => (searching.value ? '搜索中…' : task.value ? '重新搜索' : '搜索站点'))
 
 /** 计数不等于 0 时先解挂行内 loading，再换表（老实现是整块 innerHTML 重建）。 */
 watch(task, async () => {
@@ -132,9 +141,14 @@ async function doSearch(): Promise<void> {
   if (searching.value) return
   searching.value = true
   errorText.value = ''
+  task.value = null
+  searchedAt.value = ''
+  resultKey.value = ''
   try {
     const sites = picked.value.slice()
-    const res = await props.store.searchKeyword(kw, sites)
+    const key = searchKey(kw)
+    const context = movieContext.value?.number === kw ? movieContext.value : undefined
+    const res = await props.store.searchKeyword(kw, sites, context)
     if (!res.ok) {
       errorText.value = res.message || '请稍后重试'
       t.warning(res.message || '搜索失败，请稍后重试')
@@ -142,6 +156,7 @@ async function doSearch(): Promise<void> {
     }
     const result = (res.data || null) as SearchTask | null
     task.value = result
+    resultKey.value = key
     searchedAt.value = nowStr()
     if (result && result.id !== undefined && result.id !== null) {
       const next = props.store.tasks.value.filter(item => String(item.id) !== String(result.id))
@@ -160,6 +175,9 @@ async function doSearch(): Promise<void> {
     if (result?.number && props.api) queueThumb(props.api, result.number)
     void props.store.refreshTasks(false)
     emit('refreshSide')
+  } catch (error) {
+    errorText.value = error instanceof Error ? error.message : '请稍后重试'
+    t.warning(`站点搜索失败：${errorText.value}`)
   } finally {
     searching.value = false
     clearPending()
@@ -214,6 +232,19 @@ function changeScope(): void {
 function onScopeClick(): void {
   t.info('搜索范围在「设置台 → 搜索站点」栏里改')
 }
+
+// Consume a navigation once. If a search is running, wait for it before handling
+// the latest movie; this also respects the store's shared search guard.
+watch([() => props.searchRequest, searching], ([request, busy]) => {
+  if (!request || busy) return
+  emit('searchConsumed', request)
+  const number = String(request.number || '').trim()
+  if (!number) return
+  keyword.value = number
+  movieContext.value = { ...request, number }
+  if (task.value && !errorText.value && resultKey.value === searchKey(number)) return
+  void doSearch()
+}, { immediate: true, flush: 'post' })
 </script>
 
 <template>
@@ -250,6 +281,8 @@ function onScopeClick(): void {
       <v-btn variant="text" size="small" prepend-icon="mdi-tune" @click="changeScope">改范围</v-btn>
     </div>
 
+    <v-progress-linear v-if="searching" indeterminate color="primary" class="mb-4" />
+
     <ErrorState
       v-if="errorText"
       :message="`站点搜索失败：${errorText}`"
@@ -265,7 +298,8 @@ function onScopeClick(): void {
       @download="onDownload"
     />
 
-    <EmptyState v-else text="输入番号或关键词后点「搜索站点」" />
+    <EmptyState v-else-if="!searching && task" :text="task.reason || '没有找到候选资源，可重新搜索或调整搜索范围'" />
+    <EmptyState v-else-if="!searching" text="输入番号或关键词后点「搜索站点」" />
   </div>
 </template>
 
